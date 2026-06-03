@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Ручное создание логина абитуриента{% endblock %}
+{% block content %}
+    <h1>Ручное создание логина абитуриента</h1>
+    <form method="post" style="max-width:500px;">
+        <label>Год поступления:</label>
+        <select name="year" required>
+            {% for y in years %}
+            <option value="{{ y }}">{{ y }}</option>
+            {% endfor %}
+        </select><br><br>
+        <label>Специальность:</label>
+        <select name="spec" required>
+            {% for s in specs %}
+            <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+        </select><br><br>
+        <label>Уровень образования:</label>
+        <select name="base" required>
+            {% for b in bases %}
+            <option value="{{ b }}">{{ b }}</option>
+            {% endfor %}
+        </select><br><br>
+        <label>ФИО абитуриента (через пробел):</label>
+        <input type="text" name="fio" required placeholder="Фамилия Имя Отчество"><br><br>
+        <button type="submit" class="btn">Создать логин</button>
+    </form>
+    {% if message %}
+        <div style="margin-top:20px; color:#2563eb; font-weight:500;">{{ message }}</div>
+        {% if conflict_info %}
+            <div style="margin-top:10px; color:#ef4444;">
+                Конфликт с записью: ФИО: {{ conflict_info[0] }}, Договор: {{ conflict_info[1] }}
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

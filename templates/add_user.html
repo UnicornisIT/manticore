@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Добавить пользователя{% endblock %}
+{% block content %}
+<h2 style="text-align:center; margin-top:32px;">Добавить пользователя</h2>
+<form method="post" style="max-width:400px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
+    <label style="font-weight:500; margin-bottom:8px;">Логин:</label>
+    <input type="text" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label style="font-weight:500; margin-bottom:8px;">Пароль:</label>
+    <input type="text" name="password" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label style="font-weight:500; margin-bottom:8px;">ФИО:</label>
+    <input type="text" name="fio" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label style="font-weight:500; margin-bottom:8px;">Должность:</label>
+    <input type="text" name="position" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label style="font-weight:500; margin-bottom:8px;">Роль:</label>
+    <select name="role" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+        <option value="admin">Администратор</option>
+        <option value="assistant">Ассистент</option>
+    </select>
+    <div style="display:flex; justify-content:center; gap:10px;">
+        <button type="submit" class="btn" style="width:60%; text-align:center; display:block;">Добавить</button>
+        <a href="{{ url_for('admin_panel') }}" class="btn btn-danger" style="width:60%; text-align:center; display:block;">Отмена</a>
+    </div>
+</form>
+{% endblock %}

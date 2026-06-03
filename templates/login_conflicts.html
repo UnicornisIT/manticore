@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Конфликты логинов абитуриентов{% endblock %}
+{% block content %}
+    <h1>Конфликты логинов абитуриентов (неуникальные логины)</h1>
+    <div style="overflow-x:auto;">
+    <table>
+        <tr>
+            <th>ФИО</th>
+            <th>Договор</th>
+            <th>Логин</th>
+            <th>Фамилия</th>
+            <th>Имя Отчество</th>
+            <th>Время конфликта</th>
+        </tr>
+        {% for c in conflicts %}
+        <tr>
+            <td>{{ c[0] }}</td>
+            <td>{{ c[1] }}</td>
+            <td>{{ c[2] }}</td>
+            <td>{{ c[3] }}</td>
+            <td>{{ c[4] }}</td>
+            <td>{{ c[5] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% if not conflicts %}
+        <div style="text-align:center; color:#888; margin-top:18px;">Нет конфликтов логинов абитуриентов.</div>
+    {% endif %}
+    </div>
+{% endblock %}

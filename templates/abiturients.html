@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Список абитуриентов и логинов</title>
+</head>
+<body>
+    {% extends "base.html" %}
+    {% block title %}Список абитуриентов и логинов{% endblock %}
+    {% block content %}
+    <h1>Список абитуриентов и логинов</h1>
+    <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
+    <form method="get" action="{{ url_for('abiturients') }}" style="margin-bottom: 18px; display: flex; gap: 12px; flex-wrap: wrap;">
+        <select name="spec">
+            <option value="">Все специальности</option>
+            {% for s in specs %}
+            <option value="{{ s }}" {% if request.args.get('spec') == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select name="base">
+            <option value="">Все уровни</option>
+            {% for b in bases %}
+            <option value="{{ b }}" {% if request.args.get('base') == b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+        </select>
+        <select name="year">
+            <option value="">Все года</option>
+            {% for y in years %}
+            <option value="{{ y }}" {% if request.args.get('year') == y %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+        </select>
+        <select name="is_i">
+            <option value="">Очный/индивидуальный график</option>
+            <option value="1" {% if request.args.get('is_i') == '1' %}selected{% endif %}>Индивидуальный график (i)</option>
+            <option value="0" {% if request.args.get('is_i') == '0' %}selected{% endif %}>Очная форма</option>
+        </select>
+        <button type="submit" class="btn">Фильтровать</button>
+        <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
+        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
+    </form>
+    <div style="overflow-x:auto;">
+        <table>
+            <tr>
+                {% set dir = 'asc' if order_dir == 'desc' else 'desc' %}
+                <th><a href="{{ url_for('abiturients', order_by='fio', order_dir=dir) }}">ФИО</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='dogovor', order_dir=dir) }}">Договор</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='login', order_dir=dir) }}">Логин</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='fam', order_dir=dir) }}">Фамилия</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='imotch', order_dir=dir) }}">Имя Отчество</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='created_at', order_dir=dir) }}">Дата добавления</a></th>
+                <th>Действие</th>
+            </tr>
+            {% for a in abiturients %}
+            <tr>
+                <td style="max-width:220px; word-break:break-word; white-space:pre-line; overflow-wrap:break-word;">{{ a['fio'] }}</td>
+                <td>{{ a['dogovor'] }}</td>
+                <td>{{ a['login'] }}</td>
+                <td>{{ a['fam'] }}</td>
+                <td>{{ a['imotch'] }}</td>
+                <td>{{ a['created_at'] }}</td>
+                <td>
+                    {% if session.get('role') == 'admin' %}
+                        <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
+                            <input type="hidden" name="login" value="{{ a['login'] }}">
+                            <button type="submit" class="btn btn-danger">Удалить</button>
+                        </form>
+                        <a href="{{ url_for('edit_abiturient', login=a['login']) }}" class="btn">Редактировать</a>
+                    {% else %}
+                        <button type="button" class="btn btn-danger" onclick="alert('У вас недостаточно прав для удаления!'); return false;">Удалить</button>
+                        <button type="button" class="btn" onclick="alert('У вас недостаточно прав для редактирования данных!'); return false;">Редактировать</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endblock %}
+</body>
+</html>

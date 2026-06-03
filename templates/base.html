@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Логины абитуриентов{% endblock %}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #f8fafc;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        .container {
+            max-width: 1500px; /* Было 1200px, стало 1500px */
+            margin: 0 auto;
+            background: #fff;
+            padding: 32px 24px 24px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px #e5e7eb;
+            min-height: 90vh;
+            overflow-x: auto;
+        }
+        h1 {
+            color: #2563eb;
+            margin-bottom: 24px;
+            font-size: 2.2em;
+        }
+        h2 {
+            color: #374151;
+            margin-bottom: 18px;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 24px;
+            display: flex;
+            gap: 18px;
+            justify-content: center;
+            flex-wrap: wrap;
+            white-space: nowrap;
+        }
+        ul li {
+            display: inline;
+        }
+        ul li a {
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 6px;
+            transition: background 0.2s;
+            display: inline-block;
+        }
+        ul li a:hover, ul li a.active {
+            background: #e0e7ff;
+        }
+        table {
+            width: 100%;
+            min-width: 900px;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #e5e7eb;
+            padding: 10px 8px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        th {
+            background: #f3f4f6;
+            font-weight: 600;
+        }
+        button, .btn, input[type="submit"] {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 18px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin: 2px 0;
+            display: inline-block;
+            min-width: 100px;
+            box-sizing: border-box;
+        }
+        .btn-danger {
+            background: #ef4444;
+        }
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .logo-img {
+            max-width: 180px;
+            margin-bottom: 10px;
+        }
+        .file-input-wrapper {
+            margin-bottom: 18px;
+        }
+        input[type="file"] {
+            font-size: 16px;
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+        form {
+            margin-bottom: 0;
+        }
+        a, a:visited, a:active {
+            text-decoration: none !important;
+        }
+        .btn-admin-panel {
+            background: #3b82f6;
+            color: #2d3a4b;
+            transition: background 0.2s, color 0.2s;
+        }
+        .btn-admin-panel:hover, .btn-admin-panel:focus {
+            background: #111;
+            color: #fff;
+        }
+        @media (max-width: 900px) {
+            .container {
+                padding: 8px;
+            }
+            table, th, td {
+                font-size: 13px;
+                min-width: 600px;
+            }
+            ul {
+                gap: 8px;
+            }
+        }
+        @media (max-width: 600px) {
+            .container { padding: 4px; }
+            table, th, td { font-size: 12px; min-width: 320px; }
+            h1 { font-size: 1.1em; }
+            ul { flex-direction: column; align-items: center; }
+            form { padding: 12px; }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        {% if session.get('user') %}
+        <ul>
+            <li><a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active"{% endif %}>Главная</a></li>
+            <li><a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a></li>
+            <li><a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a></li>
+            <li><a href="{{ url_for('students_list') }}" {% if request.endpoint == 'students' %}class="active"{% endif %}>Список студентов</a></li>
+            <li><a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Дублирующиеся записи</a></li>
+            <li><a href="{{ url_for('login_conflicts') }}" {% if request.endpoint == 'login_conflicts' %}class="active"{% endif %}>Конфликты логинов</a></li>
+            <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
+            <li><a href="{{ url_for('logout') }}">Выйти</a></li>
+        </ul>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
+    <footer id="main-footer" style="position:fixed; left:0; bottom:0; width:100%; background:#e5e7eb; color:#2d3a4b; text-align:center; padding:16px 0; font-size:14px; letter-spacing:0.5px; z-index:100; transition: transform 0.3s;">
+        <div style="max-width:1500px; margin:0 auto;">
+            <div>
+                Разработано UnicornisIT • 
+                <a href="https://github.com/UnicornisIT" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="GitHub репозиторий">GitHub</a> • 
+                <a href="https://t.me/unicornis_pulse" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="Telegram канал">Telegram</a> • 
+                <a href="mailto:earov18@gmail.com" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="Email">Email</a><br>
+                <span style="font-size:13px; margin-top:6px; display:inline-block;">Вы вошли под пользователем: <span style="font-weight:600;">{{ session.get('user') }}</span></span>
+            </div>
+            {% if session.get('user') == 'admin' %}
+                <div style="margin-top:14px;">
+                    <a href="{{ url_for('admin_panel') }}" class="btn" style="margin:0 auto; display:inline-block;">Панель администратора</a>
+                </div>
+            {% endif %}
+        </div>
+    </footer>
+    <script>
+    const footer = document.getElementById('main-footer');
+    window.addEventListener('scroll', function() {
+        if (window.scrollY === 0) {
+            // Только в самом верху показываем подвал
+            footer.style.transform = 'translateY(0)';
+        } else {
+            // Во всех остальных случаях скрываем подвал
+            footer.style.transform = 'translateY(100%)';
+        }
+    });
+    </script>
+</body>
+</html>

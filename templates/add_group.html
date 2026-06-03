@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Добавить группу{% endblock %}
+{% block content %}
+<h2>Добавить новую группу</h2>
+<form method="post" style="max-width: 400px; margin: 0 auto; background: #f3f6fa; padding: 24px 28px 18px 28px; border-radius: 12px; box-shadow: 0 2px 8px #e5e7eb;">
+    <div style="margin-bottom: 18px;">
+        <label for="group_name" style="font-weight: 500;">Название группы:</label>
+        <input type="text" id="group_name" name="group_name" class="form-control" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
+    </div>
+    <button type="submit" class="btn btn-success">Добавить</button>
+</form>
+{% if groups %}
+    <h3 style="margin-top: 32px;">Существующие группы:</h3>
+    <ul>
+        {% for group in groups %}
+        <li>{{ group }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+{% endblock %}

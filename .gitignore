@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+ENV/
+env/
+
+# VS Code
+.vscode/
+
+# Uploads and generated files
+uploads/baze.db
+uploads/*.xlsx
+uploads/*.xls
+uploads/*.csv
+uploads/*.py[cod]
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+*.swp
+*.swo
+*~
+.idea/
+

@@ -1,0 +1,13 @@
+<!-- templates/register.html -->
+{% extends "base.html" %}
+{% block title %}Регистрация ассистента{% endblock %}
+{% block content %}
+<h1 style="text-align:center;">Регистрация ассистента</h1>
+<form method="post" style="background:#fff; padding:32px 40px; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); display:flex; flex-direction:column; align-items:center; max-width:400px; margin:32px auto;">
+    <label style="font-weight:500; margin-bottom:8px;">Логин:</label>
+    <input type="text" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label style="font-weight:500; margin-bottom:8px;">Пароль:</label>
+    <input type="password" name="password" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
+</form>
+{% endblock %}

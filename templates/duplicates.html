@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Дублирующиеся записи</title>
+</head>
+<body>
+    {% extends "base.html" %}
+    {% block title %}Дублирующиеся записи{% endblock %}
+    {% block content %}
+    <h1>Дублирующиеся записи</h1>
+    <div style="display: flex; gap: 24px; margin-top: 32px;">
+        <a href="{{ url_for('students_duplicates') }}" class="btn" style="padding: 16px 32px; font-size: 1.1em;">Дубли студентов</a>
+        <a href="{{ url_for('duplicates_abiturients') }}" class="btn" style="padding: 16px 32px; font-size: 1.1em;">Дубли абитуриентов</a>
+    </div>
+    {% endblock %}
+</body>
+</html>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Редактирование абитуриента{% endblock %}
+{% block content %}
+<h1>Редактирование абитуриента</h1>
+<form method="post" style="max-width:400px;">
+    <div><b>ФИО:</b> {{ abiturient[0] }}</div>
+    <div><b>Договор:</b> {{ abiturient[1] }}</div>
+    <div><b>Логин:</b> {{ abiturient[2] }}</div>
+    <div><b>Фамилия:</b> {{ abiturient[3] }}</div>
+    <div><b>Имя Отчество:</b> {{ abiturient[4] }}</div>
+    <label for="email">Email:</label>
+    <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label for="login">Логин:</label>
+    <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <label for="comment">Комментарий:</label>
+    <textarea name="comment" id="comment" rows="6" style="width:100%;min-height:120px;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">{{ abiturient[6] or '' }}</textarea>
+    <button type="submit" class="btn">Сохранить</button>
+    <a href="{{ url_for('abiturients') }}" class="btn btn-danger" style="margin-left:10px;">Отмена</a>
+</form>
+{% endblock %}

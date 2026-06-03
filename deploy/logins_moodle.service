@@ -1,0 +1,14 @@
+[Unit]
+Description=Flask app logins_moodle
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/logins_moodle_v3.5
+Environment="PATH=/srv/logins_moodle_v3.5/.venv/bin"
+ExecStart=/srv/logins_moodle_v3.5/.venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

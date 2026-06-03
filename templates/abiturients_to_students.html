@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Миграция абитуриентов в студенты{% endblock %}
+{% block content %}
+<h2>Миграция абитуриентов в студенты</h2>
+<form method="post" style="max-width: 600px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 12px; box-shadow: 0 2px 8px #e5e7eb;">
+    <div style="margin-bottom: 18px;">
+        <label for="cohort1" style="font-weight: 500;">Группа для новых студентов:</label>
+        <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px;">
+            <option value="">Выберите группу</option>
+            {% for group in groups %}
+            <option value="{{ group }}">{{ group }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div style="margin-bottom: 18px;">
+        <label style="font-weight: 500;">Выберите абитуриентов:</label>
+        <div style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px;">
+            {% for ab in abiturients %}
+            <div>
+                <label>
+                    <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}">
+                    {{ ab.fio }} ({{ ab.login }}) — {{ ab.lastname }} {{ ab.firstname }}
+                </label>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <button type="submit" class="btn btn-success">Мигрировать выбранных</button>
+</form>
+{% endblock %}

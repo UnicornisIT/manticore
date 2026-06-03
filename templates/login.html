@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: center; align-items: center; min-height: 60vh;">
+    <form method="post" style="background: #fff; border-radius: 12px; box-shadow: 0 2px 12px #e5e7eb; padding: 36px 32px 28px 32px; min-width: 320px; max-width: 350px; width: 100%;">
+        <h2 style="text-align:center; color:#2563eb; margin-bottom: 24px;">Вход</h2>
+        <label for="username">Логин:</label>
+        <input type="text" id="username" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+        <label for="password">Пароль:</label>
+        <input type="password" id="password" name="password" required style="width:100%;margin-bottom:24px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+        <div style="display:flex; gap:10px;">
+            <button type="submit" class="btn" style="width:50%;">Войти</button>
+            <a href="{{ url_for('register') }}" class="btn btn-secondary" style="width:50%; text-align:center;">Регистрация</a>
+        </div>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div style="color:#ef4444; margin-top:18px; text-align:center;">{{ messages[0] }}</div>
+          {% endif %}
+        {% endwith %}
+    </form>
+</div>
+{% endblock %}

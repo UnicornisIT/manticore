@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Одобрение заявок ассистентов{% endblock %}
+{% block content %}
+<h2 style="text-align:center; margin-top:32px;">Заявки на регистрацию ассистентов</h2>
+<div style="max-width:500px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
+    {% if pending_users %}
+        {% for user in pending_users %}
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; border-bottom:1px solid #e5e7eb; padding-bottom:10px;">
+                <span style="font-size:16px; font-weight:500;">{{ user[1] }} <span style="color:#2563eb;">({{ user[2] }})</span></span>
+                <form method="post" style="display:inline;">
+                    <input type="hidden" name="user_id" value="{{ user[0] }}">
+                    <button name="action" value="approve" class="btn" style="margin-right:8px;">Одобрить</button>
+                    <button name="action" value="reject" class="btn btn-danger">Отклонить</button>
+                </form>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div style="text-align:center; color:#888;">Нет заявок на регистрацию.</div>
+    {% endif %}
+</div>
+{% endblock %}

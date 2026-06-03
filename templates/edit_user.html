@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Редактирование пользователя{% endblock %}
+{% block content %}
+<h2 style="text-align:center; margin-top:32px;">Редактирование пользователя</h2>
+<form method="post" style="max-width:400px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
+    <label>Логин:</label>
+    <input type="text" name="username" value="{{ user[1] }}" required style="width:100%;margin-bottom:18px;">
+    <label>Пароль:</label>
+    <input type="text" name="password" value="{{ user[2] }}" required style="width:100%;margin-bottom:18px;">
+    <label>Роль:</label>
+    <select name="role" style="width:100%;margin-bottom:18px;">
+        <option value="admin" {% if user[3] == 'admin' %}selected{% endif %}>Администратор</option>
+        <option value="assistant" {% if user[3] == 'assistant' %}selected{% endif %}>Ассистент</option>
+    </select>
+    <label>Статус:</label>
+    <select name="approved" style="width:100%;margin-bottom:18px;">
+        <option value="1" {% if user[4] == 1 %}selected{% endif %}>Одобрен</option>
+        <option value="0" {% if user[4] == 0 %}selected{% endif %}>Ожидает</option>
+    </select>
+    <div style="display:flex; justify-content:center; gap:10px;">
+        <button type="submit" class="btn" style="width:60%; text-align:center; display:block;">Сохранить</button>
+        <a href="{{ url_for('admin_panel') }}" class="btn btn-danger" style="width:60%; text-align:center; display:block;">Отмена</a>
+    </div>
+</form>
+{% endblock %}

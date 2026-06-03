@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Работа с файлами{% endblock %}
+{% block content %}
+<h1>Работа с файлами</h1>
+
+<div style="margin-bottom: 32px;">
+    <h2>Загрузка абитуриентов</h2>
+    <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>CSV</b> и содержать необходимые столбцы.</p>
+    <form method="post" enctype="multipart/form-data">
+        <div class="file-input-wrapper">
+            <label for="file">Загрузить файл абитуриентов (CSV):</label>
+            <input type="file" name="file" id="file" accept=".csv" required>
+            <button type="submit" class="btn">Загрузить абитуриентов</button>
+        </div>
+    </form>
+</div>
+
+<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+
+<div style="margin-top: 32px;">
+    <h2>Загрузка студентов</h2>
+    <p>Для загрузки списка студентов используйте отдельную форму ниже. Файл должен быть в формате <b>CSV</b> и содержать столбцы: <b>username, password, email, firstname, lastname, cohort1</b>.</p>
+    <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data">
+        <div class="file-input-wrapper">
+            <label for="students_file">Загрузить файл студентов (CSV):</label>
+            <input type="file" name="file" id="students_file" accept=".csv" required>
+            <button type="submit" class="btn">Загрузить студентов</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

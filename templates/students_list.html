@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Список студентов{% endblock %}
+{% block content %}
+<h1>Список студентов</h1>
+<form method="get" action="{{ url_for('students_list') }}" style="margin-bottom: 18px;">
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+        <input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
+        <input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
+        <input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
+        {% if cohorts %}
+        <select name="cohort">
+            <option value="">Все группы</option>
+            {% for c in cohorts %}
+            <option value="{{ c }}" {% if request.args.get('cohort') == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        <button type="submit" class="btn">Фильтровать</button>
+        <a href="{{ url_for('students_list') }}" class="btn btn-danger">Сбросить</a>
+        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-success">Скачать Excel</a>
+    </div>
+</form>
+<div style="overflow-x:auto;">
+<table>
+    <thead>
+        <tr>
+            <th>Логин</th>
+            <th>Пароль</th>
+            <th>Email</th>
+            <th>Фамилия</th>
+            <th>Имя</th>
+            <th>Группа</th>
+            {% if session.get('role') == 'admin' %}
+            <th>Действия</th>
+            {% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in students %}
+        <tr>
+            <td>{{ s['username'] }}</td>
+            <td>{{ s['password'] }}</td>
+            <td>{{ s['email'] }}</td>
+            <td>{{ s['lastname'] }}</td>
+            <td>{{ s['firstname'] }}</td>
+            <td>{{ s['cohort1'] }}</td>
+            {% if session.get('role') == 'admin' %}
+            <td>
+                <a href="{{ url_for('edit_student', username=s['username']) }}" class="btn">Редактировать</a>
+                <form method="post" action="{{ url_for('delete_student') }}" style="display:inline;" onsubmit="return confirm('Удалить студента?');">
+                    <input type="hidden" name="username" value="{{ s['username'] }}">
+                    <button type="submit" class="btn btn-danger">Удалить</button>
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if not students %}
+    <p>Нет данных о студентах.</p>
+{% endif %}
+{% endblock %}

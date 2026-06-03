@@ -1,0 +1,14 @@
+<!-- templates/students_upload.html -->
+{% extends "base.html" %}
+{% block title %}Загрузка студентов{% endblock %}
+{% block content %}
+<h2>Загрузка студентов</h2>
+<form method="post" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <button type="submit" class="btn btn-success">Загрузить</button>
+</form>
+{% if message %}
+    <div class="alert alert-info">{{ message }}</div>
+{% endif %}
+<a href="{{ url_for('students_list') }}" class="btn btn-secondary">Назад к списку</a>
+{% endblock %}
