@@ -5,11 +5,12 @@
 
 <div style="margin-bottom: 32px;">
     <h2>Загрузка абитуриентов</h2>
-    <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>CSV</b> и содержать необходимые столбцы.</p>
+    <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>Excel</b> и содержать столбцы: <b>ФИО, Договор</b>.</p>
+    <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary" style="margin-bottom: 16px; display: inline-block;">Скачать шаблон для абитуриентов</a></p>
     <form method="post" enctype="multipart/form-data">
         <div class="file-input-wrapper">
-            <label for="file">Загрузить файл абитуриентов (CSV):</label>
-            <input type="file" name="file" id="file" accept=".csv" required>
+            <label for="file">Загрузить файл абитуриентов (Excel):</label>
+            <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
             <button type="submit" class="btn">Загрузить абитуриентов</button>
         </div>
     </form>
@@ -20,6 +21,7 @@
 <div style="margin-top: 32px;">
     <h2>Загрузка студентов</h2>
     <p>Для загрузки списка студентов используйте отдельную форму ниже. Файл должен быть в формате <b>CSV</b> и содержать столбцы: <b>username, password, email, firstname, lastname, cohort1</b>.</p>
+    <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary" style="margin-bottom: 16px; display: inline-block;">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data">
         <div class="file-input-wrapper">
             <label for="students_file">Загрузить файл студентов (CSV):</label>

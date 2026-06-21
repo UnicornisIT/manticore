@@ -71,6 +71,14 @@ http://127.0.0.1:5000
 
 Скопируйте `.env.example` в `.env` и установите свои значения.
 
+## Загрузка студентов
+
+Для загрузки списка студентов используйте файл формата `CSV` с колонками:
+
+`username, password, email, firstname, lastname, cohort1`
+
+Пример шаблона для загрузки находится в `static/students_template.csv`.
+
 ## Безопасность
 
 ⚠️ **Перед развертыванием в production прочитайте [SECURITY.md](SECURITY.md)**

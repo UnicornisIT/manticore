@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Конфликты логинов абитуриентов{% endblock %}
 {% block content %}
-    <h1>Конфликты логинов абитуриентов (неуникальные логины)</h1>
+    <h1>Конфликты логинов абитуриентов</h1>
+    <div style="background:#eef6ff; border:1px solid #b3d7ff; padding:16px; margin:16px 0; border-radius:8px; color:#0c3f7f;">
+        В этом разделе отображаются абитуриенты с проблемными логинами: как неуникальные, так и те, для которых не удалось разобрать договор и сформировать корректный префикс (error000). Вы можете отредактировать запись и присвоить корректный логин.
+    </div>
     <div style="overflow-x:auto;">
     <table>
         <tr>
@@ -11,15 +14,22 @@
             <th>Фамилия</th>
             <th>Имя Отчество</th>
             <th>Время конфликта</th>
+            <th>Действия</th>
         </tr>
         {% for c in conflicts %}
         <tr>
-            <td>{{ c[0] }}</td>
             <td>{{ c[1] }}</td>
             <td>{{ c[2] }}</td>
             <td>{{ c[3] }}</td>
             <td>{{ c[4] }}</td>
             <td>{{ c[5] }}</td>
+            <td>{{ c[6] }}</td>
+            <td style="white-space: nowrap;">
+                <a href="{{ url_for('edit_conflict', conflict_id=c[0]) }}" class="btn" style="padding:6px 12px; font-size:0.9em;">Редактировать</a>
+                <form method="post" action="{{ url_for('delete_conflict', conflict_id=c[0]) }}" style="display:inline;" onsubmit="return confirm('Удалить запись?');">
+                    <button type="submit" class="btn btn-danger" style="padding:6px 12px; font-size:0.9em;">Удалить</button>
+                </form>
+            </td>
         </tr>
         {% endfor %}
     </table>
