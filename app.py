@@ -21,7 +21,7 @@ DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
 
 spec_codes = {
     "ЛД": "1", "АД": "2", "СД": "3", "СтО": "4",
-    "СтПр": "5", "ФМ": "6", "ЛабД": "7", "СтД": "8"
+    "СтПр": "5", "СтП": "5", "ФМ": "6", "ЛабД": "7", "СтД": "8"
 }
 
 base_codes = {
@@ -33,23 +33,25 @@ base_codes = {
 }
 
 def parse_dogovor(dogovor):
-    year_match = re.search(r'20\d{2}', dogovor)
+    # Нормализуем дефисы, пробелы и регистр
+    normalized = dogovor.strip().replace('–', '-').replace('—', '-').replace('\u2011', '-').replace(' ', '-').upper()
+    year_match = re.search(r'20\d{2}', normalized)
     spec_match = None
 
-    # Определяем специальность
+    # Определяем специальность - ищем в нормализованной строке
     for spec in sorted(spec_codes.keys(), key=len, reverse=True):
-        if spec in dogovor:
+        if spec.upper() in normalized:
             spec_match = spec
             break
 
-    # Определяем базу образования по последнему дефису
+    # Определяем базу образования по последнему элементу после дефиса
     base_match = None
-    parts = dogovor.strip().split('-')
+    parts = normalized.split('-')
     if len(parts) >= 2:
         last_part = parts[-1].strip()
         # Проверяем по словарю base_codes
         for base in sorted(base_codes.keys(), key=len, reverse=True):
-            if last_part == base:
+            if last_part == base.upper():
                 base_match = base
                 break
 
@@ -161,6 +163,7 @@ def save_abiturient(fio, dogovor, login, fam, imotch):
             'INSERT INTO abiturients (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
             (fio, dogovor, login, fam, imotch)
         )
+        conn.commit()
 
 def save_pending_duplicate(fio, dogovor, login, fam, imotch):
     with sqlite3.connect(DB_PATH) as conn:
@@ -168,6 +171,7 @@ def save_pending_duplicate(fio, dogovor, login, fam, imotch):
             'INSERT INTO pending_duplicates (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
             (fio, dogovor, login, fam, imotch)
         )
+        conn.commit()
 
 def save_login_conflict(fio, dogovor, login, fam, imotch):
     with sqlite3.connect(DB_PATH) as conn:
@@ -175,6 +179,7 @@ def save_login_conflict(fio, dogovor, login, fam, imotch):
             'INSERT INTO login_conflicts (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
             (fio, dogovor, login, fam, imotch)
         )
+        conn.commit()
 
 def process_excel(file_path):
     df = pd.read_excel(file_path, engine="openpyxl")
@@ -190,9 +195,19 @@ def process_excel(file_path):
 
     logins = []
     used_logins = set(existing_logins)
+    error_count = 1
 
     for idx, row in df.iterrows():
         prefix = row["login_prefix"]
+        if prefix == "error":
+            login = f"error{error_count:03d}"
+            while login in used_logins:
+                error_count += 1
+                login = f"error{error_count:03d}"
+            logins.append(login)
+            used_logins.add(login)
+            error_count += 1
+            continue
         number = 1
         while True:
             login = f"{prefix}{number:03d}"
@@ -206,6 +221,10 @@ def process_excel(file_path):
     df["is_duplicate"] = df["Фамилия"].apply(lambda fam: bool(is_fio_duplicate(fam)))
 
     for idx, row in df.iterrows():
+        if row["login_prefix"] == "error":
+            save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"])
+            continue
+
         if not row["is_duplicate"]:
             try:
                 save_abiturient(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"])
@@ -494,11 +513,71 @@ def download_template():
 @app.route('/login_conflicts')
 def login_conflicts():
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT fio, dogovor, login, fam, imotch, conflict_time FROM login_conflicts ORDER BY conflict_time DESC')
+        cur = conn.execute('SELECT id, fio, dogovor, login, fam, imotch, conflict_time FROM login_conflicts ORDER BY conflict_time DESC')
         conflicts = cur.fetchall()
     return render_template('login_conflicts.html', conflicts=conflicts)
 
-@app.route('/delete_database', methods=['POST'])
+@app.route('/edit_conflict/<int:conflict_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def edit_conflict(conflict_id):
+    if request.method == 'POST':
+        new_login = request.form.get('login', '').strip()
+        if not new_login:
+            flash('Логин не может быть пустым')
+            return redirect(url_for('edit_conflict', conflict_id=conflict_id))
+        
+        with sqlite3.connect(DB_PATH) as conn:
+            # Проверяем уникальность логина
+            cur = conn.execute('SELECT 1 FROM abiturients WHERE login=?', (new_login,))
+            if cur.fetchone():
+                flash(f'Логин {new_login} уже существует в базе абитуриентов!')
+                return redirect(url_for('edit_conflict', conflict_id=conflict_id))
+            
+            # Получаем данные конфликта
+            cur = conn.execute('SELECT fio, dogovor, fam, imotch FROM login_conflicts WHERE id=?', (conflict_id,))
+            conflict = cur.fetchone()
+            if not conflict:
+                flash('Запись не найдена')
+                return redirect(url_for('login_conflicts'))
+            
+            fio, dogovor, fam, imotch = conflict
+            
+            # Сохраняем в основную таблицу абитуриентов
+            try:
+                conn.execute(
+                    'INSERT INTO abiturients (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
+                    (fio, dogovor, new_login, fam, imotch)
+                )
+                # Удаляем из конфликтов
+                conn.execute('DELETE FROM login_conflicts WHERE id=?', (conflict_id,))
+                conn.commit()
+                flash(f'Абитуриент успешно добавлен с логином {new_login}')
+                return redirect(url_for('login_conflicts'))
+            except sqlite3.IntegrityError:
+                flash(f'Логин {new_login} уже существует!')
+                return redirect(url_for('edit_conflict', conflict_id=conflict_id))
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute('SELECT id, fio, dogovor, login, fam, imotch FROM login_conflicts WHERE id=?', (conflict_id,))
+        conflict = cur.fetchone()
+    
+    if not conflict:
+        flash('Запись не найдена')
+        return redirect(url_for('login_conflicts'))
+    
+    return render_template('edit_conflict.html', conflict=conflict)
+
+@app.route('/delete_conflict/<int:conflict_id>', methods=['POST'])
+@login_required
+@role_required('admin')
+def delete_conflict(conflict_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('DELETE FROM login_conflicts WHERE id=?', (conflict_id,))
+        conn.commit()
+    flash('Запись удалена')
+    return redirect(url_for('login_conflicts'))
+
 @login_required
 @role_required('admin')
 def delete_database():
@@ -523,7 +602,14 @@ def manual_create():
 
         prefix = parse_dogovor(dogovor)
         if prefix == "error":
-            message = "Ошибка: не удалось сгенерировать префикс логина. Проверьте данные."
+            # Сохраняем ошибочный логин в конфликты
+            error_login = "error001"
+            with sqlite3.connect(DB_PATH) as conn:
+                cur = conn.execute('SELECT COUNT(*) FROM login_conflicts WHERE login LIKE "error%"')
+                error_count = cur.fetchone()[0]
+                error_login = f"error{error_count + 1:03d}"
+            save_login_conflict(fio, dogovor, error_login, fam, imotch)
+            message = f"Ошибка парсинга договора! Запись отправлена в раздел 'Конфликты логинов' с логином {error_login}."
         else:
             with sqlite3.connect(DB_PATH) as conn:
                 cur = conn.execute('SELECT login FROM abiturients')
