@@ -6,7 +6,7 @@
         <label>Год поступления:</label>
         <select name="year" required>
             {% for y in years %}
-            <option value="{{ y }}">{{ y }}</option>
+            <option value="{{ y }}" {% if y == campaign_year %}selected{% endif %}>{{ y }}</option>
             {% endfor %}
         </select><br><br>
         <label>Специальность:</label>

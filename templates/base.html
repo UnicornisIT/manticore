@@ -123,6 +123,44 @@
             background: #111;
             color: #fff;
         }
+        .campaign-switcher {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin: -8px 0 24px 0;
+            color: #374151;
+            font-weight: 500;
+            flex-wrap: wrap;
+        }
+        .campaign-switcher select {
+            padding: 7px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #fff;
+            color: #111827;
+            font-size: 15px;
+        }
+        .email-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            color: #fff;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .email-status.has-email {
+            background: #16a34a;
+        }
+        .email-status.no-email {
+            background: #ef4444;
+        }
+        .email-status-cell {
+            text-align: center;
+        }
         @media (max-width: 900px) {
             .container {
                 padding: 8px;
@@ -158,6 +196,15 @@
             <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>
+        <form method="post" action="{{ url_for('set_campaign') }}" class="campaign-switcher">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <label for="global_campaign_year">Приемная кампания</label>
+            <select name="campaign_year" id="global_campaign_year" onchange="this.form.submit()">
+                {% for y in campaign_years %}
+                <option value="{{ y }}" {% if y == active_campaign_year %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </form>
         {% endif %}
         {% block content %}{% endblock %}
     </div>
@@ -170,7 +217,7 @@
                 <a href="mailto:earov18@gmail.com" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="Email">Email</a><br>
                 <span style="font-size:13px; margin-top:6px; display:inline-block;">Вы вошли под пользователем: <span style="font-weight:600;">{{ session.get('user') }}</span></span>
             </div>
-            {% if session.get('user') == 'admin' %}
+            {% if session.get('role') == 'admin' %}
                 <div style="margin-top:14px;">
                     <a href="{{ url_for('admin_panel') }}" class="btn" style="margin:0 auto; display:inline-block;">Панель администратора</a>
                 </div>

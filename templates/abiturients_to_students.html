@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Миграция абитуриентов в студенты{% endblock %}
 {% block content %}
-<h2>Миграция абитуриентов в студенты</h2>
+<h2>Миграция абитуриентов в студенты: {{ active_campaign_year }}</h2>
 <form method="post" style="max-width: 600px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 12px; box-shadow: 0 2px 8px #e5e7eb;">
+    <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
     <div style="margin-bottom: 18px;">
         <label for="cohort1" style="font-weight: 500;">Группа для новых студентов:</label>
         <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px;">
