@@ -1,5 +1,6 @@
 import os
 import re
+import csv
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
 from werkzeug.utils import secure_filename
@@ -36,6 +37,26 @@ def clean_campaign_year(value, fallback):
 DEFAULT_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('DEFAULT_CAMPAIGN_YEAR'), str(date.today().year))
 LEGACY_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('LEGACY_CAMPAIGN_YEAR'), '2025')
 BASE_CAMPAIGN_YEARS = [str(y) for y in range(2020, 2031)]
+MAX_GROUP_STUDENTS = 25
+GROUPS_TEMPLATE_CSV = (
+    'group_name\n'
+    '26ФМ-11-1\n'
+    '26СД-9-1\n'
+    '26ЛД-11-1\n'
+)
+
+_group_name_re = re.compile(r'^\d{2}[A-Za-zА-Яа-яЁё]+-(?:\d{1,2}(?:[A-Za-zА-Яа-яЁё])?|[A-Za-zА-Яа-яЁё]+)-\d+$')
+_group_head_re = re.compile(r'^(\d{2})([A-Za-zА-Яа-яЁё]+)$')
+_specialty_aliases = {
+    'ФМ': 'ФМ',
+    'СД': 'СД',
+    'СТО': 'СтО',
+    'СТП': 'СтП',
+    'СТД': 'СтД',
+    'СТПР': 'СтПр',
+    'АД': 'АД',
+    'ЛД': 'ЛД',
+}
 
 def normalize_campaign_year(value, fallback=None):
     return clean_campaign_year(value, fallback or DEFAULT_CAMPAIGN_YEAR)
@@ -299,6 +320,20 @@ def ensure_campaign_column(conn, table):
         if fixed_year != campaign_year:
             conn.execute(f'UPDATE {table} SET campaign_year=? WHERE id=?', (fixed_year, row_id))
 
+def ensure_students_origin_columns(conn):
+    columns = get_table_columns(conn, 'students')
+    if not columns:
+        return
+
+    origin_columns = {
+        'source_campaign_year': 'TEXT',
+        'source_dogovor': 'TEXT',
+        'source_fio': 'TEXT',
+    }
+    for column, column_type in origin_columns.items():
+        if column not in columns:
+            conn.execute(f'ALTER TABLE students ADD COLUMN {column} {column_type}')
+
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         create_abiturients_table(conn)
@@ -346,7 +381,10 @@ def init_db():
                 email TEXT,
                 firstname TEXT,
                 lastname TEXT,
-                cohort1 TEXT
+                cohort1 TEXT,
+                source_campaign_year TEXT,
+                source_dogovor TEXT,
+                source_fio TEXT
             )
         ''')
         conn.execute('''
@@ -368,6 +406,7 @@ def init_db():
         ''')
         ensure_campaign_column(conn, 'pending_duplicates')
         ensure_campaign_column(conn, 'login_conflicts')
+        ensure_students_origin_columns(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
@@ -579,6 +618,189 @@ def process_students_excel(file_path):
                     (row["username"], row["password"], row["email"], row["firstname"], row["lastname"], row["cohort1"])
                 )
     return True
+
+def normalize_specialty(value):
+    value = re.sub(r'\s+', '', str(value or ''))
+    key = value.upper().replace('Ё', 'Е')
+    return _specialty_aliases.get(key, value)
+
+def normalize_group_base(value):
+    value = re.sub(r'\s+', '', str(value or '')).upper()
+    return value.replace('I', 'И').replace('M', 'М')
+
+def normalize_group_name(value):
+    value = str(value or '').strip()
+    value = value.replace('–', '-').replace('—', '-').replace('−', '-')
+    value = re.sub(r'\s+', '', value)
+    parts = value.split('-')
+    if len(parts) < 2:
+        return value
+
+    head_match = _group_head_re.fullmatch(parts[0])
+    if head_match:
+        year_code, specialty = head_match.groups()
+        parts[0] = f'{year_code}{normalize_specialty(specialty)}'
+
+    parts[1] = normalize_group_base(parts[1])
+    return '-'.join(parts)
+
+def build_group_name(year_code, specialty, base, subgroup='1'):
+    year_code = re.sub(r'\D+', '', str(year_code or '').strip())
+    if len(year_code) == 4 and year_code.startswith('20'):
+        year_code = year_code[-2:]
+
+    specialty = normalize_specialty(specialty)
+    base = normalize_group_base(base)
+    subgroup = re.sub(r'\D+', '', str(subgroup or '').strip()) or '1'
+    if not year_code or not specialty or not base:
+        return ''
+
+    return normalize_group_name(f'{year_code}{specialty}-{base}-{subgroup}')
+
+def is_valid_group_name(group_name):
+    return bool(_group_name_re.fullmatch(group_name or ''))
+
+def base_group_name(group_name):
+    parts = (group_name or '').split('-')
+    if len(parts) > 2 and parts[-1].isdigit():
+        return '-'.join(parts[:-1])
+    return group_name
+
+def group_subgroup_index(group_name):
+    parts = (group_name or '').split('-')
+    if len(parts) > 2 and parts[-1].isdigit():
+        return int(parts[-1])
+    return 1
+
+def subgroup_name(root_group, index):
+    return root_group if index == 1 else f'{root_group}-{index}'
+
+def find_row_value(row, aliases):
+    normalized_row = {
+        str(key or '').strip().casefold(): value
+        for key, value in row.items()
+    }
+    for alias in aliases:
+        value = normalized_row.get(alias.casefold())
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ''
+
+def read_groups_csv(file_path):
+    last_error = None
+    for encoding in ('utf-8-sig', 'cp1251', 'utf-8'):
+        try:
+            with open(file_path, newline='', encoding=encoding) as csv_file:
+                sample = csv_file.read(4096)
+                csv_file.seek(0)
+                delimiter = ';' if sample.count(';') >= sample.count(',') else ','
+                reader = csv.DictReader(csv_file, delimiter=delimiter)
+                if not reader.fieldnames:
+                    raise ValueError('в CSV не найдены заголовки')
+                return list(reader)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+
+    if last_error:
+        raise ValueError('не удалось прочитать CSV в кодировке UTF-8 или Windows-1251')
+    return []
+
+def group_exists_casefold(existing_groups, group_name):
+    return group_name.casefold() in existing_groups
+
+def process_groups_csv(file_path):
+    rows = read_groups_csv(file_path)
+    created_groups = []
+    skipped_groups = []
+    errors = []
+
+    with sqlite3.connect(DB_PATH) as conn:
+        existing_groups = {
+            row[0].casefold(): row[0]
+            for row in conn.execute('SELECT name FROM groups')
+        }
+
+        for row_number, row in enumerate(rows, start=2):
+            group_name = find_row_value(row, ['group_name', 'name', 'group', 'группа', 'название', 'название_группы'])
+            if group_name:
+                group_name = normalize_group_name(group_name)
+            else:
+                group_name = build_group_name(
+                    find_row_value(row, ['year_code', 'year', 'год', 'год_поступления']),
+                    find_row_value(row, ['specialty', 'spec', 'специальность', 'направление']),
+                    find_row_value(row, ['base', 'база', 'база_классов']),
+                    find_row_value(row, ['subgroup', 'subgroup_number', 'подгруппа', 'номер_подгруппы']),
+                )
+
+            if not group_name:
+                errors.append(f'строка {row_number}: не указана группа')
+                continue
+            if not is_valid_group_name(group_name):
+                errors.append(f'строка {row_number}: неверный формат группы "{group_name}"')
+                continue
+
+            if group_exists_casefold(existing_groups, group_name):
+                skipped_groups.append(group_name)
+                continue
+            conn.execute('INSERT INTO groups (name) VALUES (?)', (group_name,))
+            existing_groups[group_name.casefold()] = group_name
+            created_groups.append(group_name)
+
+    return {
+        'created': created_groups,
+        'skipped': skipped_groups,
+        'errors': errors,
+    }
+
+def get_group_student_count(conn, group_name):
+    cur = conn.execute('SELECT COUNT(*) FROM students WHERE cohort1=?', (group_name,))
+    return cur.fetchone()[0]
+
+def get_next_subgroup_name(conn, group_name):
+    root_group = base_group_name(group_name)
+    current_index = group_subgroup_index(group_name)
+    existing_indices = {current_index}
+
+    for row in conn.execute('SELECT name FROM groups'):
+        existing_name = row[0]
+        if base_group_name(existing_name).casefold() == root_group.casefold():
+            existing_indices.add(group_subgroup_index(existing_name))
+
+    next_index = current_index + 1
+    while next_index in existing_indices:
+        next_index += 1
+    return f'{root_group}-{next_index}'
+
+def is_last_subgroup(conn, group_name):
+    root_group = base_group_name(group_name)
+    current_index = group_subgroup_index(group_name)
+    max_index = current_index
+
+    for row in conn.execute('SELECT name FROM groups'):
+        existing_name = row[0]
+        if base_group_name(existing_name).casefold() == root_group.casefold():
+            max_index = max(max_index, group_subgroup_index(existing_name))
+
+    return current_index == max_index
+
+def get_groups_with_counts(conn):
+    groups = []
+    for row in conn.execute('SELECT name FROM groups ORDER BY name'):
+        name = row[0]
+        count = get_group_student_count(conn, name)
+        is_full = count >= MAX_GROUP_STUDENTS
+        can_create_next = is_full and is_last_subgroup(conn, name)
+        groups.append({
+            'name': name,
+            'count': count,
+            'capacity': MAX_GROUP_STUDENTS,
+            'fill': f'{count}/{MAX_GROUP_STUDENTS}',
+            'is_full': is_full,
+            'can_create_next': can_create_next,
+            'next_name': get_next_subgroup_name(conn, name) if can_create_next else '',
+        })
+    return groups
 
 def login_required(f):
     @wraps(f)
@@ -1283,7 +1505,45 @@ def delete_student():
     username = request.form.get('username')
     if username:
         with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.execute(
+                '''
+                SELECT username, email, firstname, lastname, source_campaign_year, source_dogovor, source_fio
+                FROM students
+                WHERE username=?
+                ''',
+                (username,)
+            )
+            student = cur.fetchone()
+            if not student:
+                flash('Студент не найден')
+                return redirect(url_for('students_list'))
+
+            username, email, firstname, lastname, source_campaign_year, source_dogovor, source_fio = student
+            if source_campaign_year:
+                campaign_year = normalize_campaign_year(source_campaign_year, source_campaign_year)
+                fio = source_fio or ' '.join(part for part in [lastname, firstname] if part).strip()
+                _, fallback_fam, fallback_imotch = split_fio(fio)
+                fam = lastname or fallback_fam
+                imotch = firstname or fallback_imotch
+
+                abiturient_exists = conn.execute(
+                    'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
+                    (username, campaign_year)
+                ).fetchone()
+                if abiturient_exists:
+                    flash(f'Абитуриент {username} уже есть в кампании {campaign_year}')
+                else:
+                    conn.execute(
+                        '''
+                        INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch, email)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''',
+                        (fio, source_dogovor or '', username, campaign_year, fam, imotch, email)
+                    )
+                    flash(f'Студент {username} возвращен в абитуриенты кампании {campaign_year}')
+
             conn.execute('DELETE FROM students WHERE username=?', (username,))
+            flash('Студент удален')
     return redirect(url_for('students_list'))
 
 @app.route('/abiturients_to_students', methods=['GET', 'POST'])
@@ -1293,41 +1553,108 @@ def abiturients_to_students():
     campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
         # Получаем список групп из таблицы groups
-        cur = conn.execute('SELECT name FROM groups ORDER BY name')
-        groups = [row[0] for row in cur.fetchall()]
+        groups = get_groups_with_counts(conn)
         # Получаем список абитуриентов
         cur = conn.execute(
-            'SELECT id, fio, login, fam, imotch FROM abiturients WHERE campaign_year=? ORDER BY fio',
+            'SELECT id, fio, login, fam, imotch, email FROM abiturients WHERE campaign_year=? ORDER BY fio',
             (campaign_year,)
         )
         abiturients = [
-            {'id': row[0], 'fio': row[1], 'login': row[2], 'lastname': row[3], 'firstname': row[4]}
+            {
+                'id': row[0],
+                'fio': row[1],
+                'login': row[2],
+                'lastname': row[3],
+                'firstname': row[4],
+                'email': (row[5] or '').strip(),
+                'has_email': bool((row[5] or '').strip()),
+            }
             for row in cur.fetchall()
         ]
     if request.method == 'POST':
-        cohort1 = request.form.get('cohort1')
+        cohort1 = request.form.get('cohort1', '').strip()
         ids = request.form.getlist('abiturient_ids')
         if not cohort1 or not ids:
             flash('Выберите группу и хотя бы одного абитуриента')
             return redirect(url_for('abiturients_to_students'))
         with sqlite3.connect(DB_PATH) as conn:
+            group_exists = conn.execute('SELECT 1 FROM groups WHERE name=?', (cohort1,)).fetchone()
+            if not group_exists:
+                flash('Выберите группу из справочника академических групп')
+                return redirect(url_for('abiturients_to_students'))
+
+            skipped_without_email = []
+            skipped_duplicates = []
+            selected_abiturients = []
             for ab_id in ids:
                 cur = conn.execute(
-                    'SELECT fio, login, fam, imotch FROM abiturients WHERE id=? AND campaign_year=?',
+                    'SELECT fio, dogovor, login, fam, imotch, email FROM abiturients WHERE id=? AND campaign_year=?',
                     (ab_id, campaign_year)
                 )
                 ab = cur.fetchone()
                 if ab:
-                    fio, username, lastname, firstname = ab
-                    password = username  # или сгенерировать
-                    email = ''
-                    conn.execute(
-                        'INSERT INTO students (username, password, email, firstname, lastname, cohort1) VALUES (?, ?, ?, ?, ?, ?)',
-                        (username, password, email, firstname, lastname, cohort1)
-                    )
-                    conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (ab_id, campaign_year))
-        flash('Миграция завершена')
-        return redirect(url_for('students_list'))
+                    fio, dogovor, username, lastname, firstname, email = ab
+                    email = (email or '').strip()
+                    if not email:
+                        skipped_without_email.append(username or fio or str(ab_id))
+                        continue
+
+                    student_exists = conn.execute('SELECT 1 FROM students WHERE username=?', (username,)).fetchone()
+                    if student_exists:
+                        skipped_duplicates.append(username)
+                        continue
+
+                    selected_abiturients.append((ab_id, username, email, firstname, lastname, fio, dogovor))
+
+            current_count = get_group_student_count(conn, cohort1)
+            free_places = MAX_GROUP_STUDENTS - current_count
+            if selected_abiturients and len(selected_abiturients) > free_places:
+                next_group = get_next_subgroup_name(conn, cohort1)
+                flash(f'В группе {cohort1} свободно мест: {max(free_places, 0)}/{MAX_GROUP_STUDENTS}. Создайте или выберите следующую подгруппу: {next_group}')
+                if skipped_without_email:
+                    names = ', '.join(skipped_without_email[:10])
+                    suffix = '...' if len(skipped_without_email) > 10 else ''
+                    flash(f'Не перенесены без почты: {names}{suffix}')
+                if skipped_duplicates:
+                    names = ', '.join(skipped_duplicates[:10])
+                    suffix = '...' if len(skipped_duplicates) > 10 else ''
+                    flash(f'Не перенесены, уже есть в студентах: {names}{suffix}')
+                return redirect(url_for('abiturients_to_students'))
+
+            migrated_count = 0
+            next_group_after_full = ''
+            for ab_id, username, email, firstname, lastname, fio, dogovor in selected_abiturients:
+                conn.execute(
+                    '''
+                    INSERT INTO students
+                        (username, password, email, firstname, lastname, cohort1, source_campaign_year, source_dogovor, source_fio)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (username, 'cron', email, firstname, lastname, cohort1, campaign_year, dogovor, fio)
+                )
+                conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (ab_id, campaign_year))
+                migrated_count += 1
+            if current_count + migrated_count >= MAX_GROUP_STUDENTS:
+                next_group_after_full = get_next_subgroup_name(conn, cohort1)
+
+        if migrated_count:
+            flash(f'Мигрировано студентов: {migrated_count}')
+            flash(f'Группа {cohort1}: {current_count + migrated_count}/{MAX_GROUP_STUDENTS}')
+        if next_group_after_full:
+            flash(f'Группа {cohort1} заполнена. Следующая подгруппа: {next_group_after_full}')
+        if skipped_without_email:
+            names = ', '.join(skipped_without_email[:10])
+            suffix = '...' if len(skipped_without_email) > 10 else ''
+            flash(f'Не перенесены без почты: {names}{suffix}')
+        if skipped_duplicates:
+            names = ', '.join(skipped_duplicates[:10])
+            suffix = '...' if len(skipped_duplicates) > 10 else ''
+            flash(f'Не перенесены, уже есть в студентах: {names}{suffix}')
+        if not migrated_count and not skipped_without_email and not skipped_duplicates:
+            flash('Не удалось найти выбранных абитуриентов для текущей кампании')
+
+        target = 'students_list' if migrated_count and not skipped_without_email and not skipped_duplicates else 'abiturients_to_students'
+        return redirect(url_for(target))
     return render_template('abiturients_to_students.html', abiturients=abiturients, groups=groups, campaign_year=campaign_year)
 
 @app.route('/add_group', methods=['GET', 'POST'])
@@ -1335,12 +1662,61 @@ def abiturients_to_students():
 @role_required('admin')
 def add_group():
     if request.method == 'POST':
-        group_name = request.form.get('group_name', '').strip()
+        groups_file = request.files.get('groups_file')
+        if groups_file and groups_file.filename:
+            filename = secure_filename(groups_file.filename) or 'groups_upload.csv'
+            if not filename.lower().endswith('.csv'):
+                flash('Загрузите файл групп в формате CSV')
+                return redirect(url_for('add_group'))
+
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            groups_file.save(filepath)
+            try:
+                result = process_groups_csv(filepath)
+            except Exception as exc:
+                flash(f'Ошибка загрузки групп: {exc}')
+                return redirect(url_for('add_group'))
+
+            if result['created']:
+                flash(f'Добавлено групп: {len(result["created"])}')
+            if result['skipped']:
+                flash(f'Пропущено дублей: {len(result["skipped"])}')
+            if result['errors']:
+                errors = '; '.join(result['errors'][:5])
+                suffix = '...' if len(result['errors']) > 5 else ''
+                flash(f'Ошибки в CSV: {errors}{suffix}')
+            if not result['created'] and not result['errors']:
+                flash('Новые группы не добавлены')
+            return redirect(url_for('add_group'))
+
+        source_group = normalize_group_name(request.form.get('source_group', ''))
+        group_name = normalize_group_name(request.form.get('group_name', ''))
         if group_name:
+            if not is_valid_group_name(group_name):
+                flash('Название группы должно быть в формате 26ФМ-11-1')
+                return redirect(url_for('add_group'))
             with sqlite3.connect(DB_PATH) as conn:
+                if source_group:
+                    source_exists = conn.execute('SELECT 1 FROM groups WHERE name=?', (source_group,)).fetchone()
+                    source_count = get_group_student_count(conn, source_group) if source_exists else 0
+                    expected_group = get_next_subgroup_name(conn, source_group) if source_exists else ''
+                    if not source_exists or source_count < MAX_GROUP_STUDENTS or not is_last_subgroup(conn, source_group) or group_name != expected_group:
+                        flash('Дополнительную подгруппу можно создать только для последней заполненной группы')
+                        return redirect(url_for('add_group'))
+
+                existing = {
+                    row[0].casefold(): row[0]
+                    for row in conn.execute('SELECT name FROM groups')
+                }
+                if group_exists_casefold(existing, group_name):
+                    flash('Такая группа уже существует')
+                    return redirect(url_for('add_group'))
                 try:
                     conn.execute('INSERT INTO groups (name) VALUES (?)', (group_name,))
-                    flash('Группа добавлена')
+                    if source_group:
+                        flash(f'Создана дополнительная подгруппа {group_name} для {source_group}')
+                    else:
+                        flash('Группа добавлена')
                 except sqlite3.IntegrityError:
                     flash('Такая группа уже существует')
         else:
@@ -1348,9 +1724,16 @@ def add_group():
         return redirect(url_for('add_group'))
     # Список всех групп для отображения
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT name FROM groups ORDER BY name')
-        groups = [row[0] for row in cur.fetchall()]
+        groups = get_groups_with_counts(conn)
     return render_template('add_group.html', groups=groups)
+
+@app.route('/groups_template/download')
+@login_required
+@role_required('admin')
+def download_groups_template():
+    output = io.BytesIO(GROUPS_TEMPLATE_CSV.encode('utf-8-sig'))
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
