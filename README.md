@@ -647,6 +647,40 @@ copy uploads\baze.db uploads\baze_backup_before_update.db
 
 ## Типовые ошибки
 
+### `.venv` не создается
+
+Если запуск остановился на создании виртуального окружения или папка `.venv` появилась не полностью:
+
+1. Закройте окно запуска.
+2. Удалите папку `.venv` из папки проекта.
+3. Запустите `start_one_click.bat` еще раз.
+4. Если `.venv` снова не появилась, откройте файл `install_run.log` в папке проекта. В нем будет точная причина ошибки.
+5. Проверьте, что установлен Python 3.11 64-bit:
+
+```powershell
+py -3.11 --version
+```
+
+Ожидаемый вариант:
+
+```text
+Python 3.11.x
+```
+
+6. Запустите снова:
+
+```text
+start_one_click.bat
+```
+
+Если `py -3.11 --version` не работает, установите Python 3.11 64-bit с сайта:
+
+```text
+https://www.python.org/downloads/windows/
+```
+
+При установке включите галочку `Add Python to PATH`.
+
 ### `No module named dotenv`
 
 Пакет `python-dotenv` не установлен.
