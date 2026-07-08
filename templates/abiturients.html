@@ -7,7 +7,7 @@
     {% extends "base.html" %}
     {% block title %}Список абитуриентов и логинов{% endblock %}
     {% block content %}
-    <h1>Список абитуриентов и логинов</h1>
+    <h1>Список абитуриентов и логинов: {{ active_campaign_year }}</h1>
     <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
     <form method="get" action="{{ url_for('abiturients') }}" style="margin-bottom: 18px; display: flex; gap: 12px; flex-wrap: wrap;">
         <select name="spec">
@@ -23,7 +23,7 @@
             {% endfor %}
         </select>
         <select name="year">
-            <option value="">Все года</option>
+            <option value="">Все года в договоре</option>
             {% for y in years %}
             <option value="{{ y }}" {% if request.args.get('year') == y %}selected{% endif %}>{{ y }}</option>
             {% endfor %}
@@ -42,8 +42,10 @@
             <tr>
                 {% set dir = 'asc' if order_dir == 'desc' else 'desc' %}
                 <th><a href="{{ url_for('abiturients', order_by='fio', order_dir=dir) }}">ФИО</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='campaign_year', order_dir=dir) }}">Кампания</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='dogovor', order_dir=dir) }}">Договор</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='login', order_dir=dir) }}">Логин</a></th>
+                <th><a href="{{ url_for('abiturients', order_by='email', order_dir=dir) }}">Почта</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='fam', order_dir=dir) }}">Фамилия</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='imotch', order_dir=dir) }}">Имя Отчество</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='created_at', order_dir=dir) }}">Дата добавления</a></th>
@@ -52,18 +54,28 @@
             {% for a in abiturients %}
             <tr>
                 <td style="max-width:220px; word-break:break-word; white-space:pre-line; overflow-wrap:break-word;">{{ a['fio'] }}</td>
+                <td>{{ a['campaign_year'] }}</td>
                 <td>{{ a['dogovor'] }}</td>
                 <td>{{ a['login'] }}</td>
+                <td class="email-status-cell">
+                    {% if a['email'] %}
+                        <span class="email-status has-email" title="Почта добавлена">@</span>
+                    {% else %}
+                        <span class="email-status no-email" title="Почта не добавлена">@</span>
+                    {% endif %}
+                </td>
                 <td>{{ a['fam'] }}</td>
                 <td>{{ a['imotch'] }}</td>
                 <td>{{ a['created_at'] }}</td>
                 <td>
                     {% if session.get('role') == 'admin' %}
                         <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
+                            <input type="hidden" name="id" value="{{ a['id'] }}">
                             <input type="hidden" name="login" value="{{ a['login'] }}">
+                            <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">
                             <button type="submit" class="btn btn-danger">Удалить</button>
                         </form>
-                        <a href="{{ url_for('edit_abiturient', login=a['login']) }}" class="btn">Редактировать</a>
+                        <a href="{{ url_for('edit_abiturient', login=a['login'], campaign_year=a['campaign_year']) }}" class="btn">Редактировать</a>
                     {% else %}
                         <button type="button" class="btn btn-danger" onclick="alert('У вас недостаточно прав для удаления!'); return false;">Удалить</button>
                         <button type="button" class="btn" onclick="alert('У вас недостаточно прав для редактирования данных!'); return false;">Редактировать</button>
