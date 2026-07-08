@@ -7,7 +7,7 @@
         <a href="{{ url_for('approve_users') }}" class="btn btn-warning">Одобрить заявки пользователей</a>
         <a href="{{ url_for('add_user') }}" class="btn btn-primary">Добавить пользователя</a>
         <a href="{{ url_for('abiturients_to_students') }}" class="btn btn-primary">Миграция абитуриентов</a>
-        <a href="{{ url_for('add_group') }}" class="btn btn-primary">Создать группу</a>
+        <a href="{{ url_for('add_group') }}" class="btn btn-primary">Академические группы</a>
         <form method="post" action="{{ url_for('clear_abiturients') }}" style="display:inline;">
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
             <button type="submit" class="btn btn-danger" onclick="return confirm('Очистить абитуриентов, дубли и конфликты текущей кампании? Это действие необратимо.');">
