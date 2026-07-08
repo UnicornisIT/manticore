@@ -5,11 +5,13 @@
     <div style="max-width: 600px; margin: 0 auto;">
         <div style="background:#f0f8ff; border:1px solid #4da6ff; padding:16px; margin:16px 0; border-radius:8px;">
             <p><strong>ФИО:</strong> {{ conflict[1] }}</p>
+            <p><strong>Кампания:</strong> {{ conflict[6] }}</p>
             <p><strong>Договор:</strong> {{ conflict[2] }}</p>
             <p><strong>Текущий логин:</strong> {{ conflict[3] }}</p>
         </div>
 
         <form method="post" style="border:1px solid #ddd; padding:20px; border-radius:8px; background:#f9f9f9;">
+            <input type="hidden" name="campaign_year" value="{{ conflict[6] }}">
             <label for="login" style="font-weight:500; display:block; margin-bottom:8px;">Новый логин:</label>
             <input type="text" id="login" name="login" required value="{{ conflict[3] }}" 
                    style="width:100%; padding:10px; margin-bottom:16px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">

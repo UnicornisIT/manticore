@@ -1,8 +1,17 @@
-# Python
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
-*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -11,27 +20,51 @@ venv/
 ENV/
 env/
 
-# VS Code
+# Local database, uploads, exports, and backups
+uploads/*
+!uploads/
+!uploads/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
+*.tmp
+
+# Generated office/data files
+*.xlsx
+*.xls
+*.csv
+*.ods
+!static/template.xlsx
+!static/students_template.csv
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+*.lock
+
+# Local copies and temporary packaging output
+_clean_copy/
+dist/
+build/
+*.zip
+*.7z
+*.rar
+
+# IDE/editor files
 .vscode/
-
-# Uploads and generated files
-uploads/baze.db
-uploads/*.xlsx
-uploads/*.xls
-uploads/*.csv
-uploads/*.py[cod]
-
-# Environment files
-.env
-.env.local
+.idea/
+*.swp
+*.swo
+*~
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE files
-*.swp
-*.swo
-*~
-.idea/
-
+# Codex/local agent state
+.agents/
+.codex/

@@ -9,6 +9,14 @@
     <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary" style="margin-bottom: 16px; display: inline-block;">Скачать шаблон для абитуриентов</a></p>
     <form method="post" enctype="multipart/form-data">
         <div class="file-input-wrapper">
+            <label for="campaign_year_upload">Приемная кампания:</label>
+            <select name="campaign_year" id="campaign_year_upload" required>
+                {% for y in campaign_years %}
+                <option value="{{ y }}" {% if y == active_campaign_year %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="file-input-wrapper">
             <label for="file">Загрузить файл абитуриентов (Excel):</label>
             <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
             <button type="submit" class="btn">Загрузить абитуриентов</button>

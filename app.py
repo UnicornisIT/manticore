@@ -1,12 +1,17 @@
 import os
 import re
 import pandas as pd
-from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
 from werkzeug.utils import secure_filename
 import sqlite3
 import io
 from functools import wraps
-from dotenv import load_dotenv
+from datetime import date
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,6 +24,28 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
 
+_campaign_year_re = re.compile(r'^20\d{2}$')
+_dogovor_year_re = re.compile(r'20\d{2}')
+
+def clean_campaign_year(value, fallback):
+    value = str(value or '').strip()
+    if _campaign_year_re.fullmatch(value):
+        return value
+    return fallback
+
+DEFAULT_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('DEFAULT_CAMPAIGN_YEAR'), str(date.today().year))
+LEGACY_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('LEGACY_CAMPAIGN_YEAR'), '2025')
+BASE_CAMPAIGN_YEARS = [str(y) for y in range(2020, 2031)]
+
+def normalize_campaign_year(value, fallback=None):
+    return clean_campaign_year(value, fallback or DEFAULT_CAMPAIGN_YEAR)
+
+def infer_campaign_year(dogovor, fallback=LEGACY_CAMPAIGN_YEAR):
+    match = _dogovor_year_re.search(str(dogovor or ''))
+    if match:
+        return normalize_campaign_year(match.group(0), fallback)
+    return fallback
+
 spec_codes = {
     "ЛД": "1", "АД": "2", "СД": "3", "СтО": "4",
     "СтПр": "5", "СтП": "5", "ФМ": "6", "ЛабД": "7", "СтД": "8"
@@ -26,7 +53,7 @@ spec_codes = {
 
 base_codes = {
     "2НМ": "inm", "2М": "im",
-    "НМ": "nm", "М": "m",
+    "НМ": "nm", "М": "im",
     "11и": "11i", "9и": "9i",
     "11И": "11i", "9И": "9i",
     "11": "11", "9": "9", 
@@ -64,37 +91,237 @@ def parse_dogovor(dogovor):
 
     return f"{year_code}{spec_code}{base_code}"
 
+def split_fio(fio):
+    fio = ' '.join(str(fio or '').split())
+    if not fio:
+        return '', '', ''
+    fam, imotch = fio.split(' ', 1) if ' ' in fio else (fio, '')
+    return fio, fam, imotch
+
+def get_table_columns(conn, table):
+    cur = conn.execute(f'PRAGMA table_info({table})')
+    return [row[1] for row in cur.fetchall()]
+
+def table_exists(conn, table):
+    cur = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,)
+    )
+    return cur.fetchone() is not None
+
+def get_unique_table_name(conn, base_name):
+    existing_tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if base_name not in existing_tables:
+        return base_name
+
+    suffix = 2
+    while f'{base_name}_{suffix}' in existing_tables:
+        suffix += 1
+    return f'{base_name}_{suffix}'
+
+def create_abiturients_table(conn):
+    conn.execute(f'''
+        CREATE TABLE IF NOT EXISTS abiturients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fio TEXT,
+            dogovor TEXT,
+            login TEXT,
+            campaign_year TEXT NOT NULL DEFAULT '{LEGACY_CAMPAIGN_YEAR}',
+            fam TEXT,
+            imotch TEXT,
+            email TEXT,
+            comment TEXT,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        )
+    ''')
+
+def migrate_abiturients_table(conn):
+    columns = get_table_columns(conn, 'abiturients')
+    if not columns:
+        create_abiturients_table(conn)
+        return
+
+    table_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='abiturients'"
+    ).fetchone()
+    table_sql = re.sub(r'\s+', ' ', (table_sql_row[0] if table_sql_row else '').lower())
+    has_global_login_unique = 'login text unique' in table_sql
+
+    if 'campaign_year' in columns and not has_global_login_unique:
+        conn.execute(
+            "UPDATE abiturients SET campaign_year=? WHERE campaign_year IS NULL OR campaign_year=''",
+            (LEGACY_CAMPAIGN_YEAR,)
+        )
+        conn.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_abiturients_campaign_login
+            ON abiturients (campaign_year, login)
+        ''')
+        return
+
+    existing_tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    backup_table = 'abiturients_legacy_campaign_migration'
+    suffix = 1
+    while backup_table in existing_tables:
+        suffix += 1
+        backup_table = f'abiturients_legacy_campaign_migration_{suffix}'
+
+    conn.execute(f'ALTER TABLE abiturients RENAME TO {backup_table}')
+    create_abiturients_table(conn)
+
+    old_columns = get_table_columns(conn, backup_table)
+    copy_columns = [
+        'id', 'fio', 'dogovor', 'login', 'campaign_year',
+        'fam', 'imotch', 'email', 'comment', 'created_at'
+    ]
+    selectable_columns = [column for column in copy_columns if column in old_columns]
+    if selectable_columns:
+        cur = conn.execute(f'SELECT {", ".join(selectable_columns)} FROM {backup_table}')
+        for values in cur.fetchall():
+            row = dict(zip(selectable_columns, values))
+            campaign_year = normalize_campaign_year(
+                row.get('campaign_year'),
+                infer_campaign_year(row.get('dogovor'))
+            )
+            conn.execute(
+                '''
+                INSERT OR IGNORE INTO abiturients
+                    (id, fio, dogovor, login, campaign_year, fam, imotch, email, comment, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    row.get('id'),
+                    row.get('fio'),
+                    row.get('dogovor'),
+                    row.get('login'),
+                    campaign_year,
+                    row.get('fam'),
+                    row.get('imotch'),
+                    row.get('email'),
+                    row.get('comment'),
+                    row.get('created_at'),
+                )
+            )
+    conn.execute(f'DROP TABLE {backup_table}')
+    conn.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_abiturients_campaign_login
+        ON abiturients (campaign_year, login)
+    ''')
+
+def migrate_legacy_students_abiturients_table(conn):
+    if not table_exists(conn, 'students'):
+        return
+
+    columns = get_table_columns(conn, 'students')
+    legacy_columns = {'fio', 'dogovor', 'login', 'fam', 'imotch'}
+    moodle_columns = {'username', 'password', 'firstname', 'lastname', 'cohort1'}
+    if not legacy_columns.issubset(columns) or moodle_columns.issubset(columns):
+        return
+
+    backup_table = get_unique_table_name(conn, 'students_legacy_abiturients_backup')
+    conn.execute(f'ALTER TABLE students RENAME TO {backup_table}')
+
+    old_columns = get_table_columns(conn, backup_table)
+    copy_columns = [
+        'id', 'fio', 'dogovor', 'login', 'fam',
+        'imotch', 'email', 'comment', 'created_at'
+    ]
+    selectable_columns = [column for column in copy_columns if column in old_columns]
+    if not selectable_columns:
+        return
+
+    preserve_ids = conn.execute('SELECT COUNT(*) FROM abiturients').fetchone()[0] == 0
+    cur = conn.execute(f'SELECT {", ".join(selectable_columns)} FROM {backup_table}')
+    for values in cur.fetchall():
+        row = dict(zip(selectable_columns, values))
+        campaign_year = infer_campaign_year(row.get('dogovor'))
+        if preserve_ids and 'id' in selectable_columns:
+            conn.execute(
+                '''
+                INSERT OR IGNORE INTO abiturients
+                    (id, fio, dogovor, login, campaign_year, fam, imotch, email, comment, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    row.get('id'),
+                    row.get('fio'),
+                    row.get('dogovor'),
+                    row.get('login'),
+                    campaign_year,
+                    row.get('fam'),
+                    row.get('imotch'),
+                    row.get('email'),
+                    row.get('comment'),
+                    row.get('created_at'),
+                )
+            )
+        else:
+            conn.execute(
+                '''
+                INSERT OR IGNORE INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, comment, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    row.get('fio'),
+                    row.get('dogovor'),
+                    row.get('login'),
+                    campaign_year,
+                    row.get('fam'),
+                    row.get('imotch'),
+                    row.get('email'),
+                    row.get('comment'),
+                    row.get('created_at'),
+                )
+            )
+
+def ensure_campaign_column(conn, table):
+    columns = get_table_columns(conn, table)
+    if not columns:
+        return
+
+    added_column = False
+    if 'campaign_year' not in columns:
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN campaign_year TEXT DEFAULT '{LEGACY_CAMPAIGN_YEAR}'"
+        )
+        added_column = True
+
+    cur = conn.execute(f'SELECT id, dogovor, campaign_year FROM {table}')
+    for row_id, dogovor, campaign_year in cur.fetchall():
+        if added_column:
+            fixed_year = infer_campaign_year(dogovor)
+        else:
+            fixed_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
+        if fixed_year != campaign_year:
+            conn.execute(f'UPDATE {table} SET campaign_year=? WHERE id=?', (fixed_year, row_id))
+
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS abiturients (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fio TEXT,
-                dogovor TEXT,
-                login TEXT UNIQUE,
-                fam TEXT,
-                imotch TEXT,
-                email TEXT,
-                comment TEXT,
-                created_at TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        ''')
-        conn.execute('''
+        create_abiturients_table(conn)
+        migrate_abiturients_table(conn)
+        migrate_legacy_students_abiturients_table(conn)
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS pending_duplicates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fio TEXT,
                 dogovor TEXT,
                 login TEXT,
+                campaign_year TEXT NOT NULL DEFAULT '{LEGACY_CAMPAIGN_YEAR}',
                 fam TEXT,
                 imotch TEXT
             )
         ''')
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS login_conflicts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fio TEXT,
                 dogovor TEXT,
                 login TEXT,
+                campaign_year TEXT NOT NULL DEFAULT '{LEGACY_CAMPAIGN_YEAR}',
                 fam TEXT,
                 imotch TEXT,
                 conflict_time TEXT DEFAULT (datetime('now', 'localtime'))
@@ -139,6 +366,11 @@ def init_db():
                 name TEXT UNIQUE
             )
         ''')
+        ensure_campaign_column(conn, 'pending_duplicates')
+        ensure_campaign_column(conn, 'login_conflicts')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
 
 init_db()
 
@@ -147,41 +379,123 @@ _default_admin_password = os.environ.get('ADMIN_DEFAULT_PASSWORD', 'admin123')
 with sqlite3.connect(DB_PATH) as conn:
     conn.execute("INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)", ("admin", _default_admin_password, "admin", 1))
 
-def is_login_exists(login):
+def get_campaign_years():
+    years = set(BASE_CAMPAIGN_YEARS)
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT 1 FROM abiturients WHERE login=?', (login,))
+        for table in ('abiturients', 'pending_duplicates', 'login_conflicts'):
+            if 'campaign_year' not in get_table_columns(conn, table):
+                continue
+            cur = conn.execute(
+                f"SELECT DISTINCT campaign_year FROM {table} WHERE campaign_year IS NOT NULL AND campaign_year != ''"
+            )
+            years.update(str(row[0]) for row in cur.fetchall() if row[0])
+    return sorted(years)
+
+def get_latest_campaign_year():
+    years = []
+    with sqlite3.connect(DB_PATH) as conn:
+        for table in ('abiturients', 'pending_duplicates', 'login_conflicts'):
+            if 'campaign_year' not in get_table_columns(conn, table):
+                continue
+            cur = conn.execute(
+                f"SELECT DISTINCT campaign_year FROM {table} WHERE campaign_year IS NOT NULL AND campaign_year != ''"
+            )
+            years.extend(str(row[0]) for row in cur.fetchall() if row[0])
+    return max(years) if years else DEFAULT_CAMPAIGN_YEAR
+
+def get_active_campaign_year():
+    if not has_request_context():
+        return DEFAULT_CAMPAIGN_YEAR
+    requested_year = request.values.get('campaign_year')
+    fallback_year = session.get('campaign_year') or get_latest_campaign_year()
+    campaign_year = normalize_campaign_year(requested_year or fallback_year, fallback_year)
+    if session.get('user'):
+        session['campaign_year'] = campaign_year
+    return campaign_year
+
+def get_used_logins(campaign_year):
+    used_logins = set()
+    with sqlite3.connect(DB_PATH) as conn:
+        for table in ('abiturients', 'pending_duplicates', 'login_conflicts'):
+            cur = conn.execute(
+                f"SELECT login FROM {table} WHERE campaign_year=? AND login IS NOT NULL",
+                (campaign_year,)
+            )
+            used_logins.update(row[0] for row in cur.fetchall())
+    return used_logins
+
+def get_prefixed_logins(table, prefix, campaign_year):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            f"SELECT login FROM {table} WHERE campaign_year=? AND login LIKE ?",
+            (campaign_year, f'{prefix}%')
+        )
+        return set(row[0] for row in cur.fetchall())
+
+def next_numbered_login(prefix, existing_logins):
+    number = 1
+    while True:
+        login = f"{prefix}{number:03d}"
+        if login not in existing_logins:
+            return login
+        number += 1
+
+@app.context_processor
+def inject_campaign_context():
+    if not has_request_context():
+        return {}
+    return {
+        'campaign_years': get_campaign_years(),
+        'active_campaign_year': get_active_campaign_year(),
+    }
+
+def is_login_exists(login, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
+            (login, campaign_year)
+        )
         return cur.fetchone() is not None
 
-def is_fio_duplicate(fam):
+def is_fio_duplicate(fam, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT fio FROM abiturients WHERE fam=?', (fam,))
+        cur = conn.execute(
+            'SELECT fio FROM abiturients WHERE fam=? AND campaign_year=?',
+            (fam, campaign_year)
+        )
         return cur.fetchall()
 
-def save_abiturient(fio, dogovor, login, fam, imotch):
+def save_abiturient(fio, dogovor, login, fam, imotch, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            'INSERT INTO abiturients (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
-            (fio, dogovor, login, fam, imotch)
+            'INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+            (fio, dogovor, login, campaign_year, fam, imotch)
         )
         conn.commit()
 
-def save_pending_duplicate(fio, dogovor, login, fam, imotch):
+def save_pending_duplicate(fio, dogovor, login, fam, imotch, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            'INSERT INTO pending_duplicates (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
-            (fio, dogovor, login, fam, imotch)
+            'INSERT INTO pending_duplicates (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+            (fio, dogovor, login, campaign_year, fam, imotch)
         )
         conn.commit()
 
-def save_login_conflict(fio, dogovor, login, fam, imotch):
+def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            'INSERT INTO login_conflicts (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
-            (fio, dogovor, login, fam, imotch)
+            'INSERT INTO login_conflicts (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+            (fio, dogovor, login, campaign_year, fam, imotch)
         )
         conn.commit()
 
-def process_excel(file_path):
+def process_excel(file_path, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     df = pd.read_excel(file_path, engine="openpyxl")
     fio_split = df["ФИО"].str.split(' ', n=2, expand=True)
     df["Фамилия"] = fio_split[0]
@@ -189,12 +503,8 @@ def process_excel(file_path):
 
     df["login_prefix"] = df["Договор"].apply(parse_dogovor)
 
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT login FROM abiturients')
-        existing_logins = set(row[0] for row in cur.fetchall())
-
     logins = []
-    used_logins = set(existing_logins)
+    used_logins = get_used_logins(campaign_year)
     error_count = 1
 
     for idx, row in df.iterrows():
@@ -217,34 +527,28 @@ def process_excel(file_path):
                 break
             number += 1
     df["login"] = logins
+    df["campaign_year"] = campaign_year
 
-    df["is_duplicate"] = df["Фамилия"].apply(lambda fam: bool(is_fio_duplicate(fam)))
+    df["is_duplicate"] = df["Фамилия"].apply(lambda fam: bool(is_fio_duplicate(fam, campaign_year)))
 
     for idx, row in df.iterrows():
         if row["login_prefix"] == "error":
-            save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"])
+            save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
             continue
 
         if not row["is_duplicate"]:
             try:
-                save_abiturient(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"])
+                save_abiturient(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
             except sqlite3.IntegrityError:
-                save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"])
+                save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
                 continue
         else:
-            with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute('SELECT login FROM pending_duplicates WHERE login LIKE "dubl%"')
-                dubl_logins = set(row[0] for row in cur.fetchall())
-            dubl_number = 1
-            while True:
-                dubl_login = f"dubl{dubl_number:03d}"
-                if dubl_login not in dubl_logins:
-                    break
-                dubl_number += 1
-            save_pending_duplicate(row["ФИО"], row["Договор"], dubl_login, row["Фамилия"], row["Имя_Отчество"])
+            dubl_logins = get_prefixed_logins('pending_duplicates', 'dubl', campaign_year)
+            dubl_login = next_numbered_login('dubl', dubl_logins)
+            save_pending_duplicate(row["ФИО"], row["Договор"], dubl_login, row["Фамилия"], row["Имя_Отчество"], campaign_year)
 
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], "abiturients_with_logins.xlsx")
-    df[["ФИО", "Договор", "login", "Фамилия", "Имя_Отчество", "is_duplicate"]].to_excel(output_path, index=False)
+    df[["campaign_year", "ФИО", "Договор", "login", "Фамилия", "Имя_Отчество", "is_duplicate"]].to_excel(output_path, index=False)
     return output_path
 
 def process_students_excel(file_path):
@@ -307,8 +611,18 @@ def vaanedain_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+@app.route('/set_campaign', methods=['POST'])
+@login_required
+def set_campaign():
+    campaign_year = normalize_campaign_year(request.form.get('campaign_year'), DEFAULT_CAMPAIGN_YEAR)
+    session['campaign_year'] = campaign_year
+    next_url = request.form.get('next') or url_for('index')
+    if not next_url.startswith('/') or next_url.startswith('//'):
+        next_url = url_for('index')
+    return redirect(next_url)
+
 @app.route('/approve_users', methods=['GET', 'POST'])
-@vaanedain_required
+@admin_required
 def approve_users():
     with sqlite3.connect(DB_PATH) as conn:
         if request.method == 'POST':
@@ -325,50 +639,54 @@ def approve_users():
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
+    campaign_year = get_active_campaign_year()
     if request.method == 'POST':
         file = request.files['file']
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        result_path = process_excel(filepath)
+        result_path = process_excel(filepath, campaign_year)
         return send_file(result_path, as_attachment=True)
     return render_template('index.html')
 
 @app.route('/file_work', methods=['GET', 'POST'])
 @login_required
 def file_work():
+    campaign_year = get_active_campaign_year()
     if request.method == 'POST':
         file = request.files['file']
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        result_path = process_excel(filepath)
+        result_path = process_excel(filepath, campaign_year)
         return send_file(result_path, as_attachment=True)
-    return render_template('file_work.html')
+    return render_template('file_work.html', campaign_year=campaign_year)
 
 @app.route('/abiturients')
 @login_required
 def abiturients():
+    campaign_year = get_active_campaign_year()
     order_by = request.args.get('order_by', 'created_at')
     order_dir = request.args.get('order_dir', 'desc')
     spec = request.args.get('spec')
     base = request.args.get('base')
     year = request.args.get('year')
     is_i = request.args.get('is_i')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i)
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year)
     specs = list(spec_codes.keys())
     bases = list(base_codes.keys())
-    years = [str(y) for y in range(2020, 2031)]
-    return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years)
+    years = get_campaign_years()
+    return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
-def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None):
-    valid_columns = {'id', 'fio', 'dogovor', 'login', 'fam', 'imotch', 'created_at', 'email'}
+def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email'}
     if order_by not in valid_columns:
         order_by = 'created_at'
     if order_dir.lower() not in {'asc', 'desc'}:
         order_dir = 'desc'
-    query = "SELECT * FROM abiturients WHERE 1=1"
-    params = []
+    query = "SELECT * FROM abiturients WHERE campaign_year=?"
+    params = [campaign_year]
     if spec:
         query += " AND dogovor LIKE ?"
         params.append(f"%{spec}%")
@@ -420,25 +738,35 @@ def get_all_students(order_by='username', order_dir='asc', cohort=None, lastname
         columns = [desc[0] for desc in cur.description]
         return [dict(zip(columns, row)) for row in rows]
 
-def get_pending_duplicates():
+def get_pending_duplicates(campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT id, fio, dogovor, login, fam, imotch FROM pending_duplicates')
+        cur = conn.execute(
+            'SELECT id, fio, dogovor, login, fam, imotch, campaign_year FROM pending_duplicates WHERE campaign_year=?',
+            (campaign_year,)
+        )
         return cur.fetchall()
 
-def approve_duplicate(dup_id):
+def approve_duplicate(dup_id, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT fio, dogovor, login, fam, imotch FROM pending_duplicates WHERE id=?', (dup_id,))
+        cur = conn.execute(
+            'SELECT fio, dogovor, login, fam, imotch, campaign_year FROM pending_duplicates WHERE id=? AND campaign_year=?',
+            (dup_id, campaign_year)
+        )
         row = cur.fetchone()
         if row:
+            fio, dogovor, login, fam, imotch, row_campaign_year = row
             conn.execute(
-                'INSERT INTO abiturients (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
-                row
+                'INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+                (fio, dogovor, login, row_campaign_year, fam, imotch)
             )
-            conn.execute('DELETE FROM pending_duplicates WHERE id=?', (dup_id,))
+            conn.execute('DELETE FROM pending_duplicates WHERE id=? AND campaign_year=?', (dup_id, campaign_year))
 
-def reject_duplicate(dup_id):
+def reject_duplicate(dup_id, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('DELETE FROM pending_duplicates WHERE id=?', (dup_id,))
+        conn.execute('DELETE FROM pending_duplicates WHERE id=? AND campaign_year=?', (dup_id, campaign_year))
 
 @app.route('/duplicates', methods=['GET', 'POST'])
 @login_required
@@ -465,40 +793,47 @@ def role_required(role):
 @login_required
 @role_required('admin')
 def duplicates_abiturients():
+    campaign_year = get_active_campaign_year()
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'reject_all':
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute('DELETE FROM pending_duplicates')
+                conn.execute('DELETE FROM pending_duplicates WHERE campaign_year=?', (campaign_year,))
         else:
             dup_id = request.form.get('dup_id')
             if action == 'approve':
-                approve_duplicate(dup_id)
+                approve_duplicate(dup_id, campaign_year)
             elif action == 'reject':
-                reject_duplicate(dup_id)
-    duplicates = get_pending_duplicates()
-    return render_template('duplicates_abiturients.html', duplicates=duplicates)
+                reject_duplicate(dup_id, campaign_year)
+    duplicates = get_pending_duplicates(campaign_year)
+    return render_template('duplicates_abiturients.html', duplicates=duplicates, campaign_year=campaign_year)
 
 @app.route('/delete_abiturient', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_abiturient():
+    campaign_year = get_active_campaign_year()
+    abiturient_id = request.form.get('id')
     login = request.form.get('login')
-    if login:
+    if abiturient_id:
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute('DELETE FROM abiturients WHERE login=?', (login,))
+            conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (abiturient_id, campaign_year))
+    elif login:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute('DELETE FROM abiturients WHERE login=? AND campaign_year=?', (login, campaign_year))
     return redirect(url_for('abiturients'))
 
 @app.route('/abiturients/download')
 @login_required
 def download_abiturients():
+    campaign_year = get_active_campaign_year()
     order_by = request.args.get('order_by', 'created_at')
     order_dir = request.args.get('order_dir', 'desc')
     spec = request.args.get('spec')
     base = request.args.get('base')
     year = request.args.get('year')
     is_i = request.args.get('is_i')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i)
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year)
     df = pd.DataFrame(abiturients)
     output = io.BytesIO()
     df.to_excel(output, index=False)
@@ -512,15 +847,25 @@ def download_template():
 
 @app.route('/login_conflicts')
 def login_conflicts():
+    campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT id, fio, dogovor, login, fam, imotch, conflict_time FROM login_conflicts ORDER BY conflict_time DESC')
+        cur = conn.execute(
+            '''
+            SELECT id, fio, dogovor, login, fam, imotch, campaign_year, conflict_time
+            FROM login_conflicts
+            WHERE campaign_year=?
+            ORDER BY conflict_time DESC
+            ''',
+            (campaign_year,)
+        )
         conflicts = cur.fetchall()
-    return render_template('login_conflicts.html', conflicts=conflicts)
+    return render_template('login_conflicts.html', conflicts=conflicts, campaign_year=campaign_year)
 
 @app.route('/edit_conflict/<int:conflict_id>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_conflict(conflict_id):
+    campaign_year = get_active_campaign_year()
     if request.method == 'POST':
         new_login = request.form.get('login', '').strip()
         if not new_login:
@@ -529,28 +874,34 @@ def edit_conflict(conflict_id):
         
         with sqlite3.connect(DB_PATH) as conn:
             # Проверяем уникальность логина
-            cur = conn.execute('SELECT 1 FROM abiturients WHERE login=?', (new_login,))
+            cur = conn.execute(
+                'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
+                (new_login, campaign_year)
+            )
             if cur.fetchone():
                 flash(f'Логин {new_login} уже существует в базе абитуриентов!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
             
             # Получаем данные конфликта
-            cur = conn.execute('SELECT fio, dogovor, fam, imotch FROM login_conflicts WHERE id=?', (conflict_id,))
+            cur = conn.execute(
+                'SELECT fio, dogovor, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
+                (conflict_id, campaign_year)
+            )
             conflict = cur.fetchone()
             if not conflict:
                 flash('Запись не найдена')
                 return redirect(url_for('login_conflicts'))
             
-            fio, dogovor, fam, imotch = conflict
+            fio, dogovor, fam, imotch, row_campaign_year = conflict
             
             # Сохраняем в основную таблицу абитуриентов
             try:
                 conn.execute(
-                    'INSERT INTO abiturients (fio, dogovor, login, fam, imotch) VALUES (?, ?, ?, ?, ?)',
-                    (fio, dogovor, new_login, fam, imotch)
+                    'INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+                    (fio, dogovor, new_login, row_campaign_year, fam, imotch)
                 )
                 # Удаляем из конфликтов
-                conn.execute('DELETE FROM login_conflicts WHERE id=?', (conflict_id,))
+                conn.execute('DELETE FROM login_conflicts WHERE id=? AND campaign_year=?', (conflict_id, campaign_year))
                 conn.commit()
                 flash(f'Абитуриент успешно добавлен с логином {new_login}')
                 return redirect(url_for('login_conflicts'))
@@ -559,7 +910,10 @@ def edit_conflict(conflict_id):
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
     
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT id, fio, dogovor, login, fam, imotch FROM login_conflicts WHERE id=?', (conflict_id,))
+        cur = conn.execute(
+            'SELECT id, fio, dogovor, login, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
+            (conflict_id, campaign_year)
+        )
         conflict = cur.fetchone()
     
     if not conflict:
@@ -572,8 +926,9 @@ def edit_conflict(conflict_id):
 @login_required
 @role_required('admin')
 def delete_conflict(conflict_id):
+    campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('DELETE FROM login_conflicts WHERE id=?', (conflict_id,))
+        conn.execute('DELETE FROM login_conflicts WHERE id=? AND campaign_year=?', (conflict_id, campaign_year))
         conn.commit()
     flash('Запись удалена')
     return redirect(url_for('login_conflicts'))
@@ -592,8 +947,14 @@ def delete_database():
 def manual_create():
     message = None
     conflict_info = None
+    campaign_year = get_active_campaign_year()
+    years = get_campaign_years()
+    specs = list(spec_codes.keys())
+    bases = list(base_codes.keys())
     if request.method == 'POST':
-        year = request.form.get('year')
+        year = normalize_campaign_year(request.form.get('year'), campaign_year)
+        campaign_year = year
+        session['campaign_year'] = campaign_year
         spec = request.form.get('spec')
         base = request.form.get('base')
         fio = request.form.get('fio').strip()
@@ -605,19 +966,16 @@ def manual_create():
             # Сохраняем ошибочный логин в конфликты
             error_login = "error001"
             with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute('SELECT COUNT(*) FROM login_conflicts WHERE login LIKE "error%"')
-                error_count = cur.fetchone()[0]
-                error_login = f"error{error_count + 1:03d}"
-            save_login_conflict(fio, dogovor, error_login, fam, imotch)
+                cur = conn.execute(
+                    'SELECT login FROM login_conflicts WHERE campaign_year=? AND login LIKE ?',
+                    (campaign_year, 'error%')
+                )
+                error_logins = set(row[0] for row in cur.fetchall())
+                error_login = next_numbered_login('error', error_logins)
+            save_login_conflict(fio, dogovor, error_login, fam, imotch, campaign_year)
             message = f"Ошибка парсинга договора! Запись отправлена в раздел 'Конфликты логинов' с логином {error_login}."
         else:
-            with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute('SELECT login FROM abiturients')
-                existing_logins = set(row[0] for row in cur.fetchall())
-                cur = conn.execute('SELECT login FROM login_conflicts')
-                existing_logins.update(row[0] for row in cur.fetchall())
-                cur = conn.execute('SELECT login FROM pending_duplicates')
-                existing_logins.update(row[0] for row in cur.fetchall())
+            existing_logins = get_used_logins(campaign_year)
 
             number = 1
             while True:
@@ -626,34 +984,27 @@ def manual_create():
                     break
                 number += 1
 
-            if is_fio_duplicate(fam):
-                with sqlite3.connect(DB_PATH) as conn:
-                    cur = conn.execute('SELECT login FROM pending_duplicates WHERE login LIKE "dubl%"')
-                    dubl_logins = set(row[0] for row in cur.fetchall())
-                dubl_number = 1
-                while True:
-                    dubl_login = f"dubl{dubl_number:03d}"
-                    if dubl_login not in dubl_logins:
-                        break
-                    dubl_number += 1
-                save_pending_duplicate(fio, dogovor, dubl_login, fam, imotch)
+            if is_fio_duplicate(fam, campaign_year):
+                dubl_logins = get_prefixed_logins('pending_duplicates', 'dubl', campaign_year)
+                dubl_login = next_numbered_login('dubl', dubl_logins)
+                save_pending_duplicate(fio, dogovor, dubl_login, fam, imotch, campaign_year)
                 message = f"Дублирующее ФИО! Запись отправлена в раздел 'Дублирующиеся ФИО'. Логин: {dubl_login}"
             else:
                 try:
-                    save_abiturient(fio, dogovor, login, fam, imotch)
+                    save_abiturient(fio, dogovor, login, fam, imotch, campaign_year)
                     message = f"Логин успешно создан: {login}"
                 except sqlite3.IntegrityError:
-                    save_login_conflict(fio, dogovor, login, fam, imotch)
+                    save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year)
                     with sqlite3.connect(DB_PATH) as conn:
-                        cur = conn.execute('SELECT fio, dogovor FROM abiturients WHERE login=?', (login,))
+                        cur = conn.execute(
+                            'SELECT fio, dogovor FROM abiturients WHERE login=? AND campaign_year=?',
+                            (login, campaign_year)
+                        )
                         conflict_info = cur.fetchone()
                     message = f"Конфликт логина! Запись отправлена в раздел 'Конфликты логинов'."
-        return render_template('manual_create.html', message=message, conflict_info=conflict_info)
+        return render_template('manual_create.html', message=message, conflict_info=conflict_info, years=years, specs=specs, bases=bases, campaign_year=campaign_year)
 
-    years = [str(y) for y in range(2020, 2031)]
-    specs = list(spec_codes.keys())
-    bases = list(base_codes.keys())
-    return render_template('manual_create.html', years=years, specs=specs, bases=bases)
+    return render_template('manual_create.html', years=years, specs=specs, bases=bases, campaign_year=campaign_year)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -682,27 +1033,44 @@ def logout():
 @login_required
 @role_required('admin')
 def edit_abiturient(login):
+    campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT fio, dogovor, login, fam, imotch, email, comment FROM abiturients WHERE login=?', (login,))
+        cur = conn.execute(
+            'SELECT fio, dogovor, login, fam, imotch, email, comment, campaign_year FROM abiturients WHERE login=? AND campaign_year=?',
+            (login, campaign_year)
+        )
         abiturient = cur.fetchone()
     if not abiturient:
         flash('Абитуриент не найден')
         return redirect(url_for('abiturients'))
 
     if request.method == 'POST':
+        fio, fam, imotch = split_fio(request.form.get('fio', ''))
+        if not fio:
+            flash('ФИО не может быть пустым')
+            return render_template('edit_abiturient.html', abiturient=abiturient)
         email = request.form.get('email', '').strip()
         new_login = request.form.get('login', '').strip()
         comment = request.form.get('comment', '').strip()
         if new_login != login:
             with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute('SELECT 1 FROM abiturients WHERE login=?', (new_login,))
+                cur = conn.execute(
+                    'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
+                    (new_login, campaign_year)
+                )
                 if cur.fetchone():
                     flash('Такой логин уже существует!')
                     return render_template('edit_abiturient.html', abiturient=abiturient)
-                conn.execute('UPDATE abiturients SET email=?, login=?, comment=? WHERE login=?', (email, new_login, comment, login))
+                conn.execute(
+                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, login=?, comment=? WHERE login=? AND campaign_year=?',
+                    (fio, fam, imotch, email, new_login, comment, login, campaign_year)
+                )
         else:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute('UPDATE abiturients SET email=?, comment=? WHERE login=?', (email, comment, login))
+                conn.execute(
+                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, comment=? WHERE login=? AND campaign_year=?',
+                    (fio, fam, imotch, email, comment, login, campaign_year)
+                )
         flash('Данные обновлены')
         return redirect(url_for('abiturients'))
 
@@ -725,7 +1093,7 @@ def register():
     return render_template('register.html')
 
 @app.route('/admin_panel')
-@vaanedain_required
+@admin_required
 def admin_panel():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute('SELECT id, username, password, role, approved FROM users')
@@ -733,7 +1101,7 @@ def admin_panel():
     return render_template('admin_panel.html', all_users=all_users)
 
 @app.route('/delete_user', methods=['POST'])
-@vaanedain_required
+@admin_required
 def delete_user():
     user_id = request.form.get('user_id')
     with sqlite3.connect(DB_PATH) as conn:
@@ -741,7 +1109,7 @@ def delete_user():
     return redirect(url_for('admin_panel'))
 
 @app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
-@vaanedain_required
+@admin_required
 def edit_user(user_id):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute('SELECT id, username, password, role, approved FROM users WHERE id=?', (user_id,))
@@ -757,7 +1125,7 @@ def edit_user(user_id):
     return render_template('edit_user.html', user=user)
 
 @app.route('/add_user', methods=['GET', 'POST'])
-@vaanedain_required
+@admin_required
 def add_user():
     if request.method == 'POST':
         username = request.form.get('username').strip()
@@ -777,12 +1145,14 @@ def add_user():
     return render_template('add_user.html')
 
 @app.route('/clear_abiturients', methods=['POST'])
-@vaanedain_required
+@admin_required
 def clear_abiturients():
+    campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('DELETE FROM abiturients')
-        conn.execute('DELETE FROM pending_duplicates')
-    flash('Таблица абитуриентов и дублирующие записи успешно очищены.', 'success')
+        conn.execute('DELETE FROM abiturients WHERE campaign_year=?', (campaign_year,))
+        conn.execute('DELETE FROM pending_duplicates WHERE campaign_year=?', (campaign_year,))
+        conn.execute('DELETE FROM login_conflicts WHERE campaign_year=?', (campaign_year,))
+    flash(f'Абитуриенты, дубли и конфликты кампании {campaign_year} успешно очищены.', 'success')
     return redirect(url_for('admin_panel'))
 
 @app.route('/students_upload', methods=['GET', 'POST'])
@@ -920,12 +1290,16 @@ def delete_student():
 @login_required
 @role_required('admin')
 def abiturients_to_students():
+    campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
         # Получаем список групп из таблицы groups
         cur = conn.execute('SELECT name FROM groups ORDER BY name')
         groups = [row[0] for row in cur.fetchall()]
         # Получаем список абитуриентов
-        cur = conn.execute('SELECT id, fio, login, fam, imotch FROM abiturients')
+        cur = conn.execute(
+            'SELECT id, fio, login, fam, imotch FROM abiturients WHERE campaign_year=? ORDER BY fio',
+            (campaign_year,)
+        )
         abiturients = [
             {'id': row[0], 'fio': row[1], 'login': row[2], 'lastname': row[3], 'firstname': row[4]}
             for row in cur.fetchall()
@@ -938,7 +1312,10 @@ def abiturients_to_students():
             return redirect(url_for('abiturients_to_students'))
         with sqlite3.connect(DB_PATH) as conn:
             for ab_id in ids:
-                cur = conn.execute('SELECT fio, login, fam, imotch FROM abiturients WHERE id=?', (ab_id,))
+                cur = conn.execute(
+                    'SELECT fio, login, fam, imotch FROM abiturients WHERE id=? AND campaign_year=?',
+                    (ab_id, campaign_year)
+                )
                 ab = cur.fetchone()
                 if ab:
                     fio, username, lastname, firstname = ab
@@ -948,10 +1325,10 @@ def abiturients_to_students():
                         'INSERT INTO students (username, password, email, firstname, lastname, cohort1) VALUES (?, ?, ?, ?, ?, ?)',
                         (username, password, email, firstname, lastname, cohort1)
                     )
-                    conn.execute('DELETE FROM abiturients WHERE id=?', (ab_id,))
+                    conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (ab_id, campaign_year))
         flash('Миграция завершена')
         return redirect(url_for('students_list'))
-    return render_template('abiturients_to_students.html', abiturients=abiturients, groups=groups)
+    return render_template('abiturients_to_students.html', abiturients=abiturients, groups=groups, campaign_year=campaign_year)
 
 @app.route('/add_group', methods=['GET', 'POST'])
 @login_required

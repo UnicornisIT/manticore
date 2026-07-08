@@ -9,8 +9,9 @@
         <a href="{{ url_for('abiturients_to_students') }}" class="btn btn-primary">Миграция абитуриентов</a>
         <a href="{{ url_for('add_group') }}" class="btn btn-primary">Создать группу</a>
         <form method="post" action="{{ url_for('clear_abiturients') }}" style="display:inline;">
-            <button type="submit" class="btn btn-danger" onclick="return confirm('Вы уверены, что хотите очистить таблицу абитуриентов? Это действие необратимо.');">
-                Очистить таблицу абитуриентов
+            <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+            <button type="submit" class="btn btn-danger" onclick="return confirm('Очистить абитуриентов, дубли и конфликты текущей кампании? Это действие необратимо.');">
+                Очистить абитуриентов {{ active_campaign_year }}
             </button>
         </form>
     </div>

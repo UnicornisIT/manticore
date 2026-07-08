@@ -3,12 +3,13 @@
 {% block content %}
 <h1>Редактирование абитуриента</h1>
 <form method="post" style="max-width:400px;">
-    <div><b>ФИО:</b> {{ abiturient[0] }}</div>
+    <div><b>Кампания:</b> {{ abiturient[7] }}</div>
     <div><b>Договор:</b> {{ abiturient[1] }}</div>
     <div><b>Логин:</b> {{ abiturient[2] }}</div>
-    <div><b>Фамилия:</b> {{ abiturient[3] }}</div>
-    <div><b>Имя Отчество:</b> {{ abiturient[4] }}</div>
+    <label for="fio">ФИО:</label>
+    <input type="text" name="fio" id="fio" value="{{ abiturient[0] or '' }}" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label for="email">Email:</label>
+    <input type="hidden" name="campaign_year" value="{{ abiturient[7] }}">
     <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label for="login">Логин:</label>
     <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
