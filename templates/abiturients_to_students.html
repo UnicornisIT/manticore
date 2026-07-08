@@ -1,31 +1,165 @@
 {% extends "base.html" %}
 {% block title %}Миграция абитуриентов в студенты{% endblock %}
+{% block head %}
+<style>
+    .sort-button {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        display: inline;
+        font: inherit;
+        font-weight: 600;
+        margin: 0;
+        min-width: 0;
+        padding: 0;
+        text-align: left;
+    }
+    .sort-button::after {
+        color: #64748b;
+        content: " A-Z";
+        font-size: 12px;
+        font-weight: 500;
+        margin-left: 6px;
+        opacity: 0.55;
+    }
+    .sort-button[data-sort-direction="asc"]::after {
+        color: #2563eb;
+        content: " A-Z";
+        opacity: 1;
+    }
+    .sort-button[data-sort-direction="desc"]::after {
+        color: #2563eb;
+        content: " Z-A";
+        opacity: 1;
+    }
+</style>
+{% endblock %}
 {% block content %}
 <h2>Миграция абитуриентов в студенты: {{ active_campaign_year }}</h2>
-<form method="post" style="max-width: 600px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 12px; box-shadow: 0 2px 8px #e5e7eb;">
+
+<form method="post" style="max-width: 980px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 8px; box-shadow: 0 2px 8px #e5e7eb;">
     <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-    <div style="margin-bottom: 18px;">
-        <label for="cohort1" style="font-weight: 500;">Группа для новых студентов:</label>
-        <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px;">
-            <option value="">Выберите группу</option>
-            {% for group in groups %}
-            <option value="{{ group }}">{{ group }}</option>
-            {% endfor %}
-        </select>
+    <div style="margin-bottom: 18px; display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
+            <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:220px;">
+                <option value="">Выберите группу</option>
+                {% for group in groups %}
+                <option value="{{ group.name }}" {% if group.is_full %}disabled{% endif %}>
+                    {{ group.name }} ({{ group.fill }}){% if group.is_full %} - заполнена{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <a href="{{ url_for('add_group') }}" class="btn">Справочник групп</a>
     </div>
+
     <div style="margin-bottom: 18px;">
-        <label style="font-weight: 500;">Выберите абитуриентов:</label>
-        <div style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px;">
-            {% for ab in abiturients %}
-            <div>
-                <label>
-                    <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}">
-                    {{ ab.fio }} ({{ ab.login }}) — {{ ab.lastname }} {{ ab.firstname }}
-                </label>
-            </div>
-            {% endfor %}
+        <label style="font-weight: 500;">Абитуриенты:</label>
+        <div style="max-height: 460px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; background:#fff; margin-top:8px;">
+            <table style="min-width: 760px;">
+                <thead>
+                    <tr>
+                        <th style="width:44px;">
+                            <input type="checkbox" id="select_all_ready" title="Выбрать всех с почтой">
+                        </th>
+                        <th><button type="button" class="sort-button" data-sort-key="fio">ФИО</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="login">Логин</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="email">Email</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="status">Статус</button></th>
+                    </tr>
+                </thead>
+                <tbody id="abiturients_table_body">
+                    {% for ab in abiturients %}
+                    <tr
+                        data-fio="{{ (ab.fio or '')|lower }}"
+                        data-login="{{ (ab.login or '')|lower }}"
+                        data-email="{{ (ab.email or '')|lower }}"
+                        data-status="{{ 'готов' if ab.has_email else 'нет почты' }}"
+                    >
+                        <td>
+                            <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}" {% if not ab.has_email %}disabled{% endif %}>
+                        </td>
+                        <td style="white-space: normal; min-width:240px;">{{ ab.fio }}</td>
+                        <td>{{ ab.login }}</td>
+                        <td>{{ ab.email if ab.email else '-' }}</td>
+                        <td>
+                            {% if ab.has_email %}
+                                <span style="color:#166534; font-weight:600;">Готов</span>
+                            {% else %}
+                                <span style="color:#b91c1c; font-weight:600;">Нет почты</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
-    <button type="submit" class="btn btn-success">Мигрировать выбранных</button>
+
+    <button type="submit" class="btn btn-success" {% if not groups %}disabled{% endif %}>Мигрировать выбранных</button>
 </form>
+
+<script>
+const selectAllReady = document.getElementById('select_all_ready');
+if (selectAllReady) {
+    selectAllReady.addEventListener('change', function() {
+        document.querySelectorAll('input[name="abiturient_ids"]:not(:disabled)').forEach(function(input) {
+            input.checked = selectAllReady.checked;
+        });
+    });
+}
+
+const abiturientsTableBody = document.getElementById('abiturients_table_body');
+const sortButtons = document.querySelectorAll('.sort-button[data-sort-key]');
+let activeSort = { key: null, direction: 'asc' };
+
+function getSortValue(row, key) {
+    return (row.dataset[key] || '').trim();
+}
+
+sortButtons.forEach(function(button) {
+    button.addEventListener('click', function() {
+        const key = button.dataset.sortKey;
+        const direction = activeSort.key === key && activeSort.direction === 'asc' ? 'desc' : 'asc';
+        const rows = Array.from(abiturientsTableBody.querySelectorAll('tr'));
+
+        rows.sort(function(firstRow, secondRow) {
+            const firstValue = getSortValue(firstRow, key);
+            const secondValue = getSortValue(secondRow, key);
+            const firstMissing = key === 'email' && !firstValue;
+            const secondMissing = key === 'email' && !secondValue;
+
+            if (firstMissing && secondMissing) {
+                return 0;
+            }
+            if (firstMissing) {
+                return 1;
+            }
+            if (secondMissing) {
+                return -1;
+            }
+
+            const result = firstValue.localeCompare(secondValue, 'ru', {
+                numeric: true,
+                sensitivity: 'base',
+            });
+
+            return direction === 'asc' ? result : -result;
+        });
+
+        rows.forEach(function(row) {
+            abiturientsTableBody.appendChild(row);
+        });
+
+        sortButtons.forEach(function(item) {
+            item.removeAttribute('data-sort-direction');
+        });
+        button.dataset.sortDirection = direction;
+        activeSort = { key: key, direction: direction };
+    });
+});
+</script>
 {% endblock %}
