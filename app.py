@@ -153,6 +153,7 @@ def create_abiturients_table(conn):
             fam TEXT,
             imotch TEXT,
             email TEXT,
+            paid INTEGER DEFAULT 0,
             comment TEXT,
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         )
@@ -171,6 +172,8 @@ def migrate_abiturients_table(conn):
     has_global_login_unique = 'login text unique' in table_sql
 
     if 'campaign_year' in columns and not has_global_login_unique:
+        if 'paid' not in columns:
+            conn.execute('ALTER TABLE abiturients ADD COLUMN paid INTEGER DEFAULT 0')
         conn.execute(
             "UPDATE abiturients SET campaign_year=? WHERE campaign_year IS NULL OR campaign_year=''",
             (LEGACY_CAMPAIGN_YEAR,)
@@ -196,7 +199,7 @@ def migrate_abiturients_table(conn):
     old_columns = get_table_columns(conn, backup_table)
     copy_columns = [
         'id', 'fio', 'dogovor', 'login', 'campaign_year',
-        'fam', 'imotch', 'email', 'comment', 'created_at'
+        'fam', 'imotch', 'email', 'paid', 'comment', 'created_at'
     ]
     selectable_columns = [column for column in copy_columns if column in old_columns]
     if selectable_columns:
@@ -248,7 +251,7 @@ def migrate_legacy_students_abiturients_table(conn):
     old_columns = get_table_columns(conn, backup_table)
     copy_columns = [
         'id', 'fio', 'dogovor', 'login', 'fam',
-        'imotch', 'email', 'comment', 'created_at'
+        'imotch', 'email', 'paid', 'comment', 'created_at'
     ]
     selectable_columns = [column for column in copy_columns if column in old_columns]
     if not selectable_columns:
@@ -895,15 +898,16 @@ def abiturients():
     year = request.args.get('year')
     is_i = request.args.get('is_i')
     has_email = request.args.get('has_email')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email)
+    has_paid = request.args.get('has_paid')
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email, has_paid)
     specs = list(spec_codes.keys())
     bases = list(base_codes.keys())
     years = get_campaign_years()
     return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
-def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None):
+def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None, has_paid=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
-    valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email'}
+    valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email', 'paid'}
     if order_by not in valid_columns:
         order_by = 'created_at'
     if order_dir.lower() not in {'asc', 'desc'}:
@@ -925,11 +929,14 @@ def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base
     elif is_i == '0':
         query += " AND login NOT LIKE ?"
         params.append("%i%")
-    # Filter by email presence: '1' - has email, '0' - no email
     if has_email == '1':
         query += " AND email IS NOT NULL AND email <> ''"
     elif has_email == '0':
         query += " AND (email IS NULL OR email = '')"
+    if has_paid == '1':
+        query += " AND paid = 1"
+    elif has_paid == '0':
+        query += " AND paid = 0"
     query += f" ORDER BY {order_by} {order_dir.upper()}"
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(query, params)
@@ -1050,6 +1057,28 @@ def delete_abiturient():
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('DELETE FROM abiturients WHERE login=? AND campaign_year=?', (login, campaign_year))
     return redirect(url_for('abiturients'))
+
+@app.route('/toggle_abiturient_paid', methods=['POST'])
+@login_required
+@role_required('admin')
+def toggle_abiturient_paid():
+    campaign_year = get_active_campaign_year()
+    abiturient_id = request.form.get('id')
+    paid = 1 if request.form.get('paid') == '1' else 0
+    query_params = {
+        'spec': request.form.get('spec', ''),
+        'base': request.form.get('base', ''),
+        'year': request.form.get('year', ''),
+        'is_i': request.form.get('is_i', ''),
+        'has_email': request.form.get('has_email', ''),
+        'has_paid': request.form.get('has_paid', ''),
+        'order_by': request.form.get('order_by', 'created_at'),
+        'order_dir': request.form.get('order_dir', 'desc')
+    }
+    if abiturient_id:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute('UPDATE abiturients SET paid=? WHERE id=? AND campaign_year=?', (paid, abiturient_id, campaign_year))
+    return redirect(url_for('abiturients', **{k: v for k, v in query_params.items() if v}))
 
 @app.route('/abiturients/download')
 @login_required
@@ -1265,7 +1294,7 @@ def edit_abiturient(login):
     campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
-            'SELECT fio, dogovor, login, fam, imotch, email, comment, campaign_year FROM abiturients WHERE login=? AND campaign_year=?',
+            'SELECT fio, dogovor, login, fam, imotch, email, comment, campaign_year, paid FROM abiturients WHERE login=? AND campaign_year=?',
             (login, campaign_year)
         )
         abiturient = cur.fetchone()
@@ -1279,6 +1308,7 @@ def edit_abiturient(login):
             flash('ФИО не может быть пустым')
             return render_template('edit_abiturient.html', abiturient=abiturient)
         email = request.form.get('email', '').strip()
+        paid = 1 if request.form.get('paid') == '1' else 0
         new_login = request.form.get('login', '').strip()
         comment = request.form.get('comment', '').strip()
         if new_login != login:
@@ -1291,14 +1321,14 @@ def edit_abiturient(login):
                     flash('Такой логин уже существует!')
                     return render_template('edit_abiturient.html', abiturient=abiturient)
                 conn.execute(
-                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, login=?, comment=? WHERE login=? AND campaign_year=?',
-                    (fio, fam, imotch, email, new_login, comment, login, campaign_year)
+                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, login=?, comment=? WHERE login=? AND campaign_year=?',
+                    (fio, fam, imotch, email, paid, new_login, comment, login, campaign_year)
                 )
         else:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, comment=? WHERE login=? AND campaign_year=?',
-                    (fio, fam, imotch, email, comment, login, campaign_year)
+                    'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, comment=? WHERE login=? AND campaign_year=?',
+                    (fio, fam, imotch, email, paid, comment, login, campaign_year)
                 )
         flash('Данные обновлены')
         return redirect(url_for('abiturients'))
@@ -1563,7 +1593,7 @@ def abiturients_to_students():
         groups = get_groups_with_counts(conn)
         # Получаем список абитуриентов
         cur = conn.execute(
-            'SELECT id, fio, login, fam, imotch, email FROM abiturients WHERE campaign_year=? ORDER BY fio',
+            'SELECT id, fio, login, fam, imotch, email, paid FROM abiturients WHERE campaign_year=? ORDER BY fio',
             (campaign_year,)
         )
         abiturients = [
@@ -1574,6 +1604,7 @@ def abiturients_to_students():
                 'lastname': row[3],
                 'firstname': row[4],
                 'email': (row[5] or '').strip(),
+                'paid': bool(row[6]),
                 'has_email': bool((row[5] or '').strip()),
             }
             for row in cur.fetchall()
@@ -1595,14 +1626,14 @@ def abiturients_to_students():
             selected_abiturients = []
             for ab_id in ids:
                 cur = conn.execute(
-                    'SELECT fio, dogovor, login, fam, imotch, email FROM abiturients WHERE id=? AND campaign_year=?',
+                    'SELECT fio, dogovor, login, fam, imotch, email, paid FROM abiturients WHERE id=? AND campaign_year=?',
                     (ab_id, campaign_year)
                 )
                 ab = cur.fetchone()
                 if ab:
-                    fio, dogovor, username, lastname, firstname, email = ab
+                    fio, dogovor, username, lastname, firstname, email, paid = ab
                     email = (email or '').strip()
-                    if not email:
+                    if not email or not paid:
                         skipped_without_email.append(username or fio or str(ab_id))
                         continue
 

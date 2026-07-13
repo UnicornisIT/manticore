@@ -38,6 +38,11 @@
             <option value="1" {% if request.args.get('has_email') == '1' %}selected{% endif %}>Есть почта</option>
             <option value="0" {% if request.args.get('has_email') == '0' %}selected{% endif %}>Нет почты</option>
         </select>
+        <select name="has_paid">
+            <option value="">Все по оплате</option>
+            <option value="1" {% if request.args.get('has_paid') == '1' %}selected{% endif %}>Оплачен</option>
+            <option value="0" {% if request.args.get('has_paid') == '0' %}selected{% endif %}>Не оплачен</option>
+        </select>
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
         <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
@@ -74,6 +79,20 @@
                 <td>{{ a['created_at'] }}</td>
                 <td>
                     {% if session.get('role') == 'admin' %}
+                        <form method="post" action="{{ url_for('toggle_abiturient_paid') }}" style="display:inline; margin-right: 8px;">
+                            <input type="hidden" name="id" value="{{ a['id'] }}">
+                            <input type="hidden" name="spec" value="{{ request.args.get('spec', '') }}">
+                            <input type="hidden" name="base" value="{{ request.args.get('base', '') }}">
+                            <input type="hidden" name="year" value="{{ request.args.get('year', '') }}">
+                            <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
+                            <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
+                            <input type="hidden" name="order_by" value="{{ order_by }}">
+                            <input type="hidden" name="order_dir" value="{{ order_dir }}">
+                            <label style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin:0;">
+                                <input type="checkbox" name="paid" value="1" {% if a['paid'] %}checked{% endif %} onchange="this.form.submit()">
+                                Оплачено
+                            </label>
+                        </form>
                         <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
                             <input type="hidden" name="id" value="{{ a['id'] }}">
                             <input type="hidden" name="login" value="{{ a['login'] }}">

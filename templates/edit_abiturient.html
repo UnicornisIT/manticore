@@ -11,6 +11,10 @@
     <label for="email">Email:</label>
     <input type="hidden" name="campaign_year" value="{{ abiturient[7] }}">
     <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <div style="margin-bottom:18px; display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" id="paid" name="paid" value="1" {% if abiturient[8] == 1 %}checked{% endif %}>
+        <label for="paid" style="margin:0;">Договор оплачен</label>
+    </div>
     <label for="login">Логин:</label>
     <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label for="comment">Комментарий:</label>
