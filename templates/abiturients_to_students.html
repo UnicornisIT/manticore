@@ -77,19 +77,21 @@
                         data-fio="{{ (ab.fio or '')|lower }}"
                         data-login="{{ (ab.login or '')|lower }}"
                         data-email="{{ (ab.email or '')|lower }}"
-                        data-status="{{ 'готов' if ab.has_email else 'нет почты' }}"
+                        data-status="{{ 'готов к миграции' if ab.has_email and ab.paid else 'не готов' }}"
                     >
                         <td>
-                            <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}" {% if not ab.has_email %}disabled{% endif %}>
+                            <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}" {% if not ab.has_email or not ab.paid %}disabled{% endif %}>
                         </td>
                         <td style="white-space: normal; min-width:240px;">{{ ab.fio }}</td>
                         <td>{{ ab.login }}</td>
                         <td>{{ ab.email if ab.email else '-' }}</td>
                         <td>
-                            {% if ab.has_email %}
-                                <span style="color:#166534; font-weight:600;">Готов</span>
-                            {% else %}
+                            {% if ab.has_email and ab.paid %}
+                                <span style="color:#166534; font-weight:600;">Готов к миграции</span>
+                            {% elif not ab.has_email %}
                                 <span style="color:#b91c1c; font-weight:600;">Нет почты</span>
+                            {% else %}
+                                <span style="color:#b91c1c; font-weight:600;">Не оплачен</span>
                             {% endif %}
                         </td>
                     </tr>
