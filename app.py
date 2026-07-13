@@ -894,13 +894,14 @@ def abiturients():
     base = request.args.get('base')
     year = request.args.get('year')
     is_i = request.args.get('is_i')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year)
+    has_email = request.args.get('has_email')
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email)
     specs = list(spec_codes.keys())
     bases = list(base_codes.keys())
     years = get_campaign_years()
     return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
-def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None):
+def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email'}
     if order_by not in valid_columns:
@@ -924,6 +925,11 @@ def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base
     elif is_i == '0':
         query += " AND login NOT LIKE ?"
         params.append("%i%")
+    # Filter by email presence: '1' - has email, '0' - no email
+    if has_email == '1':
+        query += " AND email IS NOT NULL AND email <> ''"
+    elif has_email == '0':
+        query += " AND (email IS NULL OR email = '')"
     query += f" ORDER BY {order_by} {order_dir.upper()}"
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(query, params)
@@ -1055,7 +1061,8 @@ def download_abiturients():
     base = request.args.get('base')
     year = request.args.get('year')
     is_i = request.args.get('is_i')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year)
+    has_email = request.args.get('has_email')
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email)
     df = pd.DataFrame(abiturients)
     output = io.BytesIO()
     df.to_excel(output, index=False)
