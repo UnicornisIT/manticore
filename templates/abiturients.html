@@ -33,6 +33,11 @@
             <option value="1" {% if request.args.get('is_i') == '1' %}selected{% endif %}>Индивидуальный график (i)</option>
             <option value="0" {% if request.args.get('is_i') == '0' %}selected{% endif %}>Очная форма</option>
         </select>
+        <select name="has_email">
+            <option value="">Все по почте</option>
+            <option value="1" {% if request.args.get('has_email') == '1' %}selected{% endif %}>Есть почта</option>
+            <option value="0" {% if request.args.get('has_email') == '0' %}selected{% endif %}>Нет почты</option>
+        </select>
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
         <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
