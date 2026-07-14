@@ -47,7 +47,19 @@
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
-        align-items: end;
+        align-items: flex-end;
+    }
+    .migration-controls select,
+    .migration-controls .btn {
+        box-sizing: border-box;
+        height: 36px;
+        margin: 0;
+    }
+    .migration-controls .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 18px;
     }
     .migration-table-block {
         margin-bottom: 18px;
@@ -90,7 +102,9 @@
                 {% endfor %}
             </select>
         </div>
-        <a href="{{ url_for('add_group') }}" class="btn">Справочник групп</a>
+        {% if session.get('role') == 'admin' %}
+            <a href="{{ url_for('add_group') }}" class="btn">Справочник групп</a>
+        {% endif %}
     </div>
 
     <div class="migration-table-block">

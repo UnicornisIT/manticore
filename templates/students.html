@@ -1,10 +1,49 @@
 <!-- templates/students.html -->
 {% extends "base.html" %}
 {% block title %}Список студентов{% endblock %}
+{% block head %}
+<style>
+    .students-filter {
+        margin-bottom: 18px;
+    }
+    .students-filter-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .students-filter-row input,
+    .students-filter-row select,
+    .students-filter-row .btn {
+        box-sizing: border-box;
+        height: 38px;
+        margin: 0;
+        font-size: 15px;
+    }
+    .students-filter-row input,
+    .students-filter-row select {
+        min-width: 180px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+    }
+    .students-filter-row select {
+        min-width: 120px;
+    }
+    .students-filter-row .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 18px;
+        line-height: 1;
+    }
+</style>
+{% endblock %}
 {% block content %}
 <h1>Список студентов</h1>
-<form method="get" action="{{ url_for('students_list') }}" style="margin-bottom: 18px;">
-    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+<form method="get" action="{{ url_for('students_list') }}" class="students-filter">
+    <div class="students-filter-row">
         <input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
         <input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
         <input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">

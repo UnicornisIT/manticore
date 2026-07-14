@@ -1,71 +1,190 @@
 {% extends "base.html" %}
 {% block title %}Академические группы{% endblock %}
+{% block head %}
+<style>
+    .groups-page {
+        max-width: 1040px;
+    }
+    .groups-page h2 {
+        margin-bottom: 18px;
+    }
+    .groups-note {
+        max-width: 980px;
+        color: #374151;
+        line-height: 1.45;
+    }
+    .groups-layout {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 24px;
+        align-items: start;
+        max-width: 980px;
+        margin-top: 18px;
+    }
+    .groups-card {
+        background: #f3f6fa;
+        padding: 24px 28px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(44, 62, 80, 0.08);
+    }
+    .groups-card h3 {
+        margin-top: 0;
+    }
+    .groups-field {
+        margin-bottom: 18px;
+    }
+    .groups-field label {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 600;
+    }
+    .groups-field input[type="text"],
+    .groups-field input[type="file"] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 15px;
+    }
+    .groups-field input[type="text"] {
+        height: 36px;
+        padding: 8px 10px;
+    }
+    .groups-field input[type="file"] {
+        padding: 5px;
+    }
+    .groups-field input[type="file"]::file-selector-button {
+        height: 30px;
+        margin-right: 10px;
+        border: 0;
+        border-radius: 5px;
+        padding: 0 12px;
+        color: #fff;
+        background: #3b82f6;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .groups-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .groups-actions .btn,
+    .groups-table-actions .btn {
+        box-sizing: border-box;
+        height: 36px;
+        min-width: 104px;
+        margin: 0;
+        padding: 0 16px;
+        border-radius: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        font-weight: 600;
+        text-align: center;
+    }
+    .groups-btn-secondary {
+        background: #e5e7eb;
+        color: #1f2937;
+    }
+    .groups-btn-secondary:hover,
+    .groups-btn-secondary:focus {
+        background: #d1d5db;
+    }
+    .groups-table-wrap {
+        overflow-x: auto;
+        max-width: 640px;
+    }
+    .groups-table {
+        min-width: 420px;
+    }
+    .groups-table-actions form {
+        display: inline-flex;
+        margin: 0;
+    }
+    .groups-description {
+        margin-bottom: 18px;
+        color: #374151;
+        line-height: 1.45;
+    }
+</style>
+{% endblock %}
 {% block content %}
-<h2>Академические группы</h2>
-<p style="max-width: 980px; color:#374151;">Группы являются общим справочником и не зависят от выбранной приемной кампании. Заполненность считается по общему списку студентов.</p>
+<div class="groups-page">
+    <h2>Академические группы</h2>
+    <p class="groups-note">Группы являются общим справочником и не зависят от выбранной приемной кампании. Заполненность считается по общему списку студентов.</p>
 
-<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; align-items:start; max-width: 980px;">
-    <form method="post" style="background: #f3f6fa; padding: 24px 28px 18px 28px; border-radius: 8px; box-shadow: 0 2px 8px #e5e7eb;">
-        <h3 style="margin-top:0;">Добавить одну группу</h3>
-        <div style="margin-bottom: 18px;">
-            <label for="group_name" style="font-weight: 500;">Название группы:</label>
-            <input type="text" id="group_name" name="group_name" class="form-control" required placeholder="26ФМ-11-1" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; box-sizing:border-box; margin-top:6px;">
-        </div>
-        <button type="submit" class="btn btn-success">Добавить</button>
-        <a href="{{ url_for('admin_panel') }}" class="btn btn-danger">Назад</a>
-    </form>
+    <div class="groups-layout">
+        <form method="post" class="groups-card">
+            <h3>Добавить одну группу</h3>
+            <div class="groups-field">
+                <label for="group_name">Название группы:</label>
+                <input type="text" id="group_name" name="group_name" required placeholder="26ФМ-11-1">
+            </div>
+            <div class="groups-actions">
+                <button type="submit" class="btn">Добавить</button>
+                <a href="{{ url_for('admin_panel') }}" class="btn groups-btn-secondary">Назад</a>
+            </div>
+        </form>
 
-    <form method="post" enctype="multipart/form-data" style="background: #f3f6fa; padding: 24px 28px 18px 28px; border-radius: 8px; box-shadow: 0 2px 8px #e5e7eb;">
-        <h3 style="margin-top:0;">Загрузить CSV</h3>
-        <div style="margin-bottom: 12px; color:#374151; line-height:1.45;">
-            В шаблоне укажите готовые названия групп, например 26ФМ-11-1. Заполненность считается автоматически по списку студентов.
-        </div>
-        <div style="margin-bottom: 18px;">
-            <label for="groups_file" style="font-weight: 500;">Файл CSV:</label>
-            <input type="file" id="groups_file" name="groups_file" accept=".csv" required style="width:100%; margin-top:6px;">
-        </div>
-        <a href="{{ url_for('download_groups_template') }}" class="btn">Скачать шаблон</a>
-        <button type="submit" class="btn btn-success">Загрузить</button>
-    </form>
-</div>
-
-{% if groups %}
-    <h3 style="margin-top: 32px;">Существующие группы</h3>
-    <div style="overflow-x:auto; max-width: 640px;">
-        <table style="min-width: 420px;">
-            <thead>
-                <tr>
-                    <th>Название</th>
-                    <th>Заполненность</th>
-                    <th>Действие</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for group in groups %}
-                <tr>
-                    <td>{{ group.name }}</td>
-                    <td>
-                        <span style="font-weight:600; {% if group.is_full %}color:#b91c1c;{% else %}color:#166534;{% endif %}">
-                            {{ group.fill }}
-                        </span>
-                    </td>
-                    <td>
-                        {% if group.can_create_next %}
-                        <form method="post" style="display:inline;">
-                            <input type="hidden" name="group_name" value="{{ group.next_name }}">
-                            <input type="hidden" name="source_group" value="{{ group.name }}">
-                            <button type="submit" class="btn">Создать {{ group.next_name }}</button>
-                        </form>
-                        {% elif group.is_full %}
-                        <span style="color:#64748b;">Следующая подгруппа создана</span>
-                        {% else %}
-                        <span style="color:#64748b;">Есть места</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <form method="post" enctype="multipart/form-data" class="groups-card">
+            <h3>Загрузить CSV</h3>
+            <div class="groups-description">
+                В шаблоне укажите готовые названия групп, например 26ФМ-11-1. Заполненность считается автоматически по списку студентов.
+            </div>
+            <div class="groups-field">
+                <label for="groups_file">Файл CSV:</label>
+                <input type="file" id="groups_file" name="groups_file" accept=".csv" required>
+            </div>
+            <div class="groups-actions">
+                <a href="{{ url_for('download_groups_template') }}" class="btn groups-btn-secondary">Скачать шаблон</a>
+                <button type="submit" class="btn">Загрузить</button>
+            </div>
+        </form>
     </div>
-{% endif %}
+
+    {% if groups %}
+        <h3 style="margin-top: 32px;">Существующие группы</h3>
+        <div class="groups-table-wrap">
+            <table class="groups-table">
+                <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>Заполненность</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for group in groups %}
+                    <tr>
+                        <td>{{ group.name }}</td>
+                        <td>
+                            <span style="font-weight:600; {% if group.is_full %}color:#b91c1c;{% else %}color:#166534;{% endif %}">
+                                {{ group.fill }}
+                            </span>
+                        </td>
+                        <td class="groups-table-actions">
+                            {% if group.can_create_next %}
+                            <form method="post">
+                                <input type="hidden" name="group_name" value="{{ group.next_name }}">
+                                <input type="hidden" name="source_group" value="{{ group.name }}">
+                                <button type="submit" class="btn">Создать {{ group.next_name }}</button>
+                            </form>
+                            {% elif group.is_full %}
+                            <span style="color:#64748b;">Следующая подгруппа создана</span>
+                            {% else %}
+                            <span style="color:#64748b;">Есть места</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
 {% endblock %}

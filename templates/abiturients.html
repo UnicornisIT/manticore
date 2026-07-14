@@ -1,15 +1,63 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Список абитуриентов и логинов</title>
-</head>
-<body>
-    {% extends "base.html" %}
+{% extends "base.html" %}
     {% block title %}Список абитуриентов и логинов{% endblock %}
+    {% block head %}
+    <style>
+        .abiturients-filter {
+            margin-bottom: 18px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .abiturients-filter select,
+        .abiturients-filter .btn {
+            box-sizing: border-box;
+            height: 38px;
+            margin: 0;
+            font-size: 15px;
+        }
+        .abiturients-filter select {
+            min-width: 145px;
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #fff;
+            color: #111827;
+        }
+        .abiturients-filter .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 18px;
+            line-height: 1;
+        }
+        .abiturients-actions {
+            margin-bottom: 12px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .abiturients-actions .btn {
+            box-sizing: border-box;
+            height: 38px;
+            margin: 0;
+            padding: 0 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+    {% endblock %}
     {% block content %}
     <h1>Список абитуриентов и логинов: {{ active_campaign_year }}</h1>
-    <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
-    <form method="get" action="{{ url_for('abiturients') }}" style="margin-bottom: 18px; display: flex; gap: 12px; flex-wrap: wrap;">
+    <div class="abiturients-actions">
+        {% if session.get('role') in ['admin', 'assistant'] %}
+            <a href="{{ url_for('abiturients_to_students') }}" class="btn" style="background:#16a34a;">Миграция абитуриентов</a>
+        {% endif %}
+        <a href="{{ url_for('login_conflicts') }}" class="btn">Конфликты логинов</a>
+    </div>
+    <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
         <select name="spec">
             <option value="">Все специальности</option>
             {% for s in specs %}
@@ -45,6 +93,7 @@
         </select>
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
+        <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
         <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
     </form>
     <div style="overflow-x:auto;">
@@ -110,5 +159,3 @@
         </table>
     </div>
     {% endblock %}
-</body>
-</html>
