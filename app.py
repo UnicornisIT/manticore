@@ -80,9 +80,30 @@ base_codes = {
     "11": "11", "9": "9", 
 }
 
+_dogovor_latin_lookalikes = str.maketrans({
+    'A': 'А',
+    'B': 'В',
+    'C': 'С',
+    'E': 'Е',
+    'H': 'Н',
+    'I': 'И',
+    'K': 'К',
+    'M': 'М',
+    'O': 'О',
+    'P': 'Р',
+    'T': 'Т',
+    'X': 'Х',
+})
+_dogovor_dash_re = re.compile(r'[\u2010-\u2015\u2212]')
+
+def normalize_dogovor_text(dogovor):
+    normalized = str(dogovor or '').strip()
+    normalized = _dogovor_dash_re.sub('-', normalized).replace(' ', '-')
+    return normalized.upper().translate(_dogovor_latin_lookalikes)
+
 def parse_dogovor(dogovor):
     # Нормализуем дефисы, пробелы и регистр
-    normalized = dogovor.strip().replace('–', '-').replace('—', '-').replace('\u2011', '-').replace(' ', '-').upper()
+    normalized = normalize_dogovor_text(dogovor)
     year_match = re.search(r'20\d{2}', normalized)
     spec_match = None
 
@@ -431,6 +452,11 @@ def get_campaign_years():
                 f"SELECT DISTINCT campaign_year FROM {table} WHERE campaign_year IS NOT NULL AND campaign_year != ''"
             )
             years.update(str(row[0]) for row in cur.fetchall() if row[0])
+        if table_exists(conn, 'students') and 'source_campaign_year' in get_table_columns(conn, 'students'):
+            cur = conn.execute(
+                "SELECT DISTINCT source_campaign_year FROM students WHERE source_campaign_year IS NOT NULL AND source_campaign_year != ''"
+            )
+            years.update(str(row[0]) for row in cur.fetchall() if row[0])
     return sorted(years)
 
 def get_latest_campaign_year():
@@ -441,6 +467,11 @@ def get_latest_campaign_year():
                 continue
             cur = conn.execute(
                 f"SELECT DISTINCT campaign_year FROM {table} WHERE campaign_year IS NOT NULL AND campaign_year != ''"
+            )
+            years.extend(str(row[0]) for row in cur.fetchall() if row[0])
+        if table_exists(conn, 'students') and 'source_campaign_year' in get_table_columns(conn, 'students'):
+            cur = conn.execute(
+                "SELECT DISTINCT source_campaign_year FROM students WHERE source_campaign_year IS NOT NULL AND source_campaign_year != ''"
             )
             years.extend(str(row[0]) for row in cur.fetchall() if row[0])
     return max(years) if years else DEFAULT_CAMPAIGN_YEAR
@@ -463,7 +494,12 @@ def get_used_logins(campaign_year):
                 f"SELECT login FROM {table} WHERE campaign_year=? AND login IS NOT NULL",
                 (campaign_year,)
             )
-            used_logins.update(row[0] for row in cur.fetchall())
+            used_logins.update(str(row[0]).strip() for row in cur.fetchall() if str(row[0]).strip())
+        if table_exists(conn, 'students') and 'username' in get_table_columns(conn, 'students'):
+            cur = conn.execute(
+                "SELECT username FROM students WHERE username IS NOT NULL AND username != ''"
+            )
+            used_logins.update(str(row[0]).strip() for row in cur.fetchall() if str(row[0]).strip())
     return used_logins
 
 def get_prefixed_logins(table, prefix, campaign_year):
@@ -493,12 +529,21 @@ def inject_campaign_context():
 
 def is_login_exists(login, campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    login = str(login or '').strip()
+    if not login:
+        return False
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
             'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
             (login, campaign_year)
         )
-        return cur.fetchone() is not None
+        if cur.fetchone() is not None:
+            return True
+        if table_exists(conn, 'students') and 'username' in get_table_columns(conn, 'students'):
+            cur = conn.execute('SELECT 1 FROM students WHERE username=?', (login,))
+            if cur.fetchone() is not None:
+                return True
+        return False
 
 def is_fio_duplicate(fam, campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
@@ -511,6 +556,8 @@ def is_fio_duplicate(fam, campaign_year=None):
 
 def save_abiturient(fio, dogovor, login, fam, imotch, campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
+    if is_login_exists(login, campaign_year):
+        raise sqlite3.IntegrityError(f'Login already exists: {login}')
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             'INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1132,12 +1179,8 @@ def edit_conflict(conflict_id):
         
         with sqlite3.connect(DB_PATH) as conn:
             # Проверяем уникальность логина
-            cur = conn.execute(
-                'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
-                (new_login, campaign_year)
-            )
-            if cur.fetchone():
-                flash(f'Логин {new_login} уже существует в базе абитуриентов!')
+            if is_login_exists(new_login, campaign_year):
+                flash(f'Логин {new_login} уже используется!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
             
             # Получаем данные конфликта
@@ -1222,14 +1265,7 @@ def manual_create():
         prefix = parse_dogovor(dogovor)
         if prefix == "error":
             # Сохраняем ошибочный логин в конфликты
-            error_login = "error001"
-            with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute(
-                    'SELECT login FROM login_conflicts WHERE campaign_year=? AND login LIKE ?',
-                    (campaign_year, 'error%')
-                )
-                error_logins = set(row[0] for row in cur.fetchall())
-                error_login = next_numbered_login('error', error_logins)
+            error_login = next_numbered_login('error', get_used_logins(campaign_year))
             save_login_conflict(fio, dogovor, error_login, fam, imotch, campaign_year)
             message = f"Ошибка парсинга договора! Запись отправлена в раздел 'Конфликты логинов' с логином {error_login}."
         else:
@@ -1312,14 +1348,10 @@ def edit_abiturient(login):
         new_login = request.form.get('login', '').strip()
         comment = request.form.get('comment', '').strip()
         if new_login != login:
+            if is_login_exists(new_login, campaign_year):
+                flash('Такой логин уже существует!')
+                return render_template('edit_abiturient.html', abiturient=abiturient)
             with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.execute(
-                    'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
-                    (new_login, campaign_year)
-                )
-                if cur.fetchone():
-                    flash('Такой логин уже существует!')
-                    return render_template('edit_abiturient.html', abiturient=abiturient)
                 conn.execute(
                     'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, login=?, comment=? WHERE login=? AND campaign_year=?',
                     (fio, fam, imotch, email, paid, new_login, comment, login, campaign_year)

@@ -34,14 +34,51 @@
         content: " Z-A";
         opacity: 1;
     }
+    .migration-form {
+        max-width: 980px;
+        margin: 0 auto 140px auto;
+        background: #f3f6fa;
+        padding: 28px 32px 22px 32px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px #e5e7eb;
+    }
+    .migration-controls {
+        margin-bottom: 18px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: end;
+    }
+    .migration-table-block {
+        margin-bottom: 18px;
+    }
+    .migration-table-wrapper {
+        max-height: clamp(220px, calc(100vh - 600px), 360px);
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #fff;
+        margin-top: 8px;
+    }
+    .migration-actions {
+        margin-top: 18px;
+    }
+    @media (max-width: 700px) {
+        .migration-form {
+            padding: 18px 16px 20px 16px;
+        }
+        .migration-table-wrapper {
+            max-height: 320px;
+        }
+    }
 </style>
 {% endblock %}
 {% block content %}
 <h2>Миграция абитуриентов в студенты: {{ active_campaign_year }}</h2>
 
-<form method="post" style="max-width: 980px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 8px; box-shadow: 0 2px 8px #e5e7eb;">
+<form method="post" target="_blank" rel="noopener" class="migration-form">
     <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-    <div style="margin-bottom: 18px; display: flex; gap: 12px; flex-wrap: wrap; align-items: end;">
+    <div class="migration-controls">
         <div>
             <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
             <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:220px;">
@@ -56,9 +93,9 @@
         <a href="{{ url_for('add_group') }}" class="btn">Справочник групп</a>
     </div>
 
-    <div style="margin-bottom: 18px;">
+    <div class="migration-table-block">
         <label style="font-weight: 500;">Абитуриенты:</label>
-        <div style="max-height: 460px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; background:#fff; margin-top:8px;">
+        <div class="migration-table-wrapper">
             <table style="min-width: 760px;">
                 <thead>
                     <tr>
@@ -101,7 +138,9 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-success" {% if not groups %}disabled{% endif %}>Мигрировать выбранных</button>
+    <div class="migration-actions">
+        <button type="submit" class="btn btn-success" {% if not groups %}disabled{% endif %}>Мигрировать выбранных</button>
+    </div>
 </form>
 
 <script>
