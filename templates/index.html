@@ -12,9 +12,9 @@
         flex-direction: column;
         align-items: center;
         justify-content: flex-start;
-        gap: 24px;
+        gap: 22px;
         min-height: 0;
-        padding: 28px 0 48px 0;
+        padding: 24px 0 42px 0;
     }
     .home-content h1 {
         margin: 0;
@@ -27,13 +27,94 @@
         margin: 0;
         text-align: center;
     }
+    .home-summary {
+        width: min(920px, 100%);
+        box-sizing: border-box;
+        margin-top: 4px;
+        padding: 22px 24px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+    .home-summary h2 {
+        margin: 0 0 10px;
+        text-align: center;
+        color: #1f2937;
+        font-size: 22px;
+    }
+    .home-summary-text {
+        width: 100%;
+        margin: 0 auto 18px;
+        color: #374151;
+        text-align: center;
+        line-height: 1.5;
+    }
+    .home-summary-text span {
+        display: block;
+    }
+    .home-features {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+    }
+    .home-feature {
+        min-height: 82px;
+        padding: 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #fff;
+        box-sizing: border-box;
+    }
+    .home-feature strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #2563eb;
+    }
+    .home-feature span {
+        display: block;
+        color: #4b5563;
+        font-size: 14px;
+        line-height: 1.35;
+    }
     @media (max-height: 720px) {
         .home-content {
             padding-top: 12px;
+            gap: 14px;
         }
         .home-content .logo-img {
-            width: 220px !important;
-            height: 150px !important;
+            width: 180px !important;
+            height: 120px !important;
+        }
+        .home-summary {
+            padding: 16px 18px;
+        }
+        .home-summary h2 {
+            font-size: 19px;
+            margin-bottom: 8px;
+        }
+        .home-summary-text {
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .home-feature {
+            min-height: 72px;
+            padding: 11px;
+        }
+        .home-feature span {
+            font-size: 13px;
+        }
+    }
+    @media (max-width: 900px) {
+        .home-features {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+    @media (max-width: 560px) {
+        .home-features {
+            grid-template-columns: 1fr;
+        }
+        .home-summary {
+            padding: 18px 16px;
         }
     }
 </style>
@@ -47,5 +128,31 @@
     <p>
         Для работы с файлами перейдите на страницу <a href="{{ url_for('file_work') }}" class="btn">Работа с файлами</a>
     </p>
+    <section class="home-summary" aria-label="Описание сервиса">
+        <h2>Сервис подготовки логинов Moodle</h2>
+        <p class="home-summary-text">
+            <span>Система помогает приемной комиссии вести абитуриентов и студентов,</span>
+            <span>формировать уникальные логины, контролировать дубли</span>
+            <span>и быстро готовить данные для загрузки в Moodle.</span>
+        </p>
+        <div class="home-features">
+            <div class="home-feature">
+                <strong>Импорт файлов</strong>
+                <span>Загрузка списков абитуриентов и студентов из Excel или CSV.</span>
+            </div>
+            <div class="home-feature">
+                <strong>Логины</strong>
+                <span>Автоматическое создание логинов по договору и приемной кампании.</span>
+            </div>
+            <div class="home-feature">
+                <strong>Проверка</strong>
+                <span>Поиск дублей, конфликтов и записей, требующих исправления.</span>
+            </div>
+            <div class="home-feature">
+                <strong>Миграция</strong>
+                <span>Перенос абитуриентов в студенты с назначением академических групп.</span>
+            </div>
+        </div>
+    </section>
 </div>
 {% endblock %}

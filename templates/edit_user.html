@@ -5,17 +5,20 @@
 <form method="post" style="max-width:400px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
     <label>Логин:</label>
     <input type="text" name="username" value="{{ user[1] }}" required style="width:100%;margin-bottom:18px;">
-    <label>Пароль:</label>
-    <input type="text" name="password" value="{{ user[2] }}" required style="width:100%;margin-bottom:18px;">
+    <label>Новый пароль:</label>
+    <input type="password" name="password" autocomplete="new-password" minlength="8" placeholder="Оставьте пустым, чтобы не менять" style="width:100%;margin-bottom:8px;">
+    <div style="font-size:13px; color:#64748b; margin-bottom:18px;">
+        Текущий пароль не отображается. При необходимости задайте новый пароль.
+    </div>
     <label>Роль:</label>
     <select name="role" style="width:100%;margin-bottom:18px;">
-        <option value="admin" {% if user[3] == 'admin' %}selected{% endif %}>Администратор</option>
-        <option value="assistant" {% if user[3] == 'assistant' %}selected{% endif %}>Ассистент</option>
+        <option value="admin" {% if user[2] == 'admin' %}selected{% endif %}>Администратор</option>
+        <option value="assistant" {% if user[2] == 'assistant' %}selected{% endif %}>Ассистент</option>
     </select>
     <label>Статус:</label>
     <select name="approved" style="width:100%;margin-bottom:18px;">
-        <option value="1" {% if user[4] == 1 %}selected{% endif %}>Одобрен</option>
-        <option value="0" {% if user[4] == 0 %}selected{% endif %}>Ожидает</option>
+        <option value="1" {% if user[3] == 1 %}selected{% endif %}>Одобрен</option>
+        <option value="0" {% if user[3] == 0 %}selected{% endif %}>Ожидает</option>
     </select>
     <div style="display:flex; justify-content:center; gap:10px;">
         <button type="submit" class="btn" style="width:60%; text-align:center; display:block;">Сохранить</button>

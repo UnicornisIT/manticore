@@ -1,14 +1,99 @@
 {% extends "base.html" %}
 {% block title %}Работа с файлами{% endblock %}
+{% block head %}
+<style>
+    .upload-section {
+        margin-bottom: 32px;
+    }
+    .upload-section + .upload-section {
+        margin-top: 32px;
+    }
+    .upload-template-link {
+        margin-bottom: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 38px;
+        padding: 0 18px;
+    }
+    .upload-form {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 900px;
+    }
+    .upload-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .upload-row label {
+        font-weight: 500;
+    }
+    .upload-row select {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 110px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 15px;
+    }
+    .file-picker {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .file-picker input[type="file"] {
+        inline-size: 1px;
+        block-size: 1px;
+        opacity: 0;
+        position: absolute;
+        pointer-events: none;
+    }
+    .file-picker-button {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 136px;
+        padding: 0 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        cursor: pointer;
+        font-size: 15px;
+    }
+    .file-picker-name {
+        color: #475569;
+        min-width: 130px;
+    }
+    .upload-row .btn {
+        box-sizing: border-box;
+        height: 38px;
+        margin: 0;
+        padding: 0 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+{% endblock %}
 {% block content %}
 <h1>Работа с файлами</h1>
 
-<div style="margin-bottom: 32px;">
+<div class="upload-section">
     <h2>Загрузка абитуриентов</h2>
     <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>Excel</b> и содержать столбцы: <b>ФИО, Договор</b>.</p>
-    <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary" style="margin-bottom: 16px; display: inline-block;">Скачать шаблон для абитуриентов</a></p>
-    <form method="post" enctype="multipart/form-data">
-        <div class="file-input-wrapper">
+    <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон для абитуриентов</a></p>
+    <form method="post" enctype="multipart/form-data" class="upload-form">
+        <div class="upload-row">
             <label for="campaign_year_upload">Приемная кампания:</label>
             <select name="campaign_year" id="campaign_year_upload" required>
                 {% for y in campaign_years %}
@@ -16,9 +101,13 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="file-input-wrapper">
+        <div class="upload-row">
             <label for="file">Загрузить файл абитуриентов (Excel):</label>
-            <input type="file" name="file" id="file" accept=".xlsx,.xls" required>
+            <span class="file-picker">
+                <input type="file" name="file" id="file" accept=".xlsx,.xls" required data-file-name-target="file_name">
+                <label for="file" class="file-picker-button">Выберите файл</label>
+                <span id="file_name" class="file-picker-name">Файл не выбран</span>
+            </span>
             <button type="submit" class="btn">Загрузить абитуриентов</button>
         </div>
     </form>
@@ -26,16 +115,31 @@
 
 <hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
 
-<div style="margin-top: 32px;">
+<div class="upload-section">
     <h2>Загрузка студентов</h2>
     <p>Для загрузки списка студентов используйте отдельную форму ниже. Файл должен быть в формате <b>CSV</b> и содержать столбцы: <b>username, password, email, firstname, lastname, cohort1</b>.</p>
-    <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary" style="margin-bottom: 16px; display: inline-block;">Скачать шаблон CSV</a></p>
-    <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data">
-        <div class="file-input-wrapper">
+    <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary upload-template-link">Скачать шаблон CSV</a></p>
+    <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        <div class="upload-row">
             <label for="students_file">Загрузить файл студентов (CSV):</label>
-            <input type="file" name="file" id="students_file" accept=".csv" required>
+            <span class="file-picker">
+                <input type="file" name="file" id="students_file" accept=".csv" required data-file-name-target="students_file_name">
+                <label for="students_file" class="file-picker-button">Выберите файл</label>
+                <span id="students_file_name" class="file-picker-name">Файл не выбран</span>
+            </span>
             <button type="submit" class="btn">Загрузить студентов</button>
         </div>
     </form>
 </div>
+<script>
+document.querySelectorAll('.file-picker input[type="file"]').forEach(function(input) {
+    const target = document.getElementById(input.dataset.fileNameTarget);
+    input.addEventListener('change', function() {
+        const fileName = input.files && input.files.length ? input.files[0].name : 'Файл не выбран';
+        if (target) {
+            target.textContent = fileName;
+        }
+    });
+});
+</script>
 {% endblock %}
