@@ -1,5 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Редактирование абитуриента{% endblock %}
+{% block head %}
+<style>
+    .edit-abiturient-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-top: 8px;
+    }
+    .edit-abiturient-actions .btn {
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 112px;
+        height: 36px;
+        margin: 0;
+        padding: 0 16px;
+    }
+</style>
+{% endblock %}
 {% block content %}
 <h1>Редактирование абитуриента</h1>
 <form method="post" style="max-width:400px;">
@@ -19,7 +39,9 @@
     <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label for="comment">Комментарий:</label>
     <textarea name="comment" id="comment" rows="6" style="width:100%;min-height:120px;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">{{ abiturient[6] or '' }}</textarea>
-    <button type="submit" class="btn">Сохранить</button>
-    <a href="{{ url_for('abiturients') }}" class="btn btn-danger" style="margin-left:10px;">Отмена</a>
+    <div class="edit-abiturient-actions">
+        <button type="submit" class="btn">Сохранить</button>
+        <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Отмена</a>
+    </div>
 </form>
 {% endblock %}

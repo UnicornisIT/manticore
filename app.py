@@ -3,9 +3,11 @@ import re
 import csv
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 import sqlite3
 import io
+import hmac
 from functools import wraps
 from datetime import date
 try:
@@ -358,6 +360,36 @@ def ensure_students_origin_columns(conn):
         if column not in columns:
             conn.execute(f'ALTER TABLE students ADD COLUMN {column} {column_type}')
 
+PASSWORD_HASH_PREFIXES = ('scrypt:', 'pbkdf2:', 'argon2:')
+MIN_PASSWORD_LENGTH = 8
+
+def is_password_hash(value):
+    return str(value or '').startswith(PASSWORD_HASH_PREFIXES)
+
+def hash_user_password(password):
+    return generate_password_hash(str(password or ''))
+
+def verify_user_password(stored_password, candidate_password):
+    if stored_password in (None, '') or candidate_password in (None, ''):
+        return False
+    stored_password = str(stored_password or '')
+    candidate_password = str(candidate_password or '')
+    if is_password_hash(stored_password):
+        return check_password_hash(stored_password, candidate_password)
+    return hmac.compare_digest(stored_password, candidate_password)
+
+def migrate_user_passwords(conn):
+    if not table_exists(conn, 'users'):
+        return
+
+    cur = conn.execute('SELECT id, password FROM users')
+    for user_id, password in cur.fetchall():
+        if password is not None and not is_password_hash(password):
+            conn.execute(
+                'UPDATE users SET password=? WHERE id=?',
+                (hash_user_password(password), user_id)
+            )
+
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         create_abiturients_table(conn)
@@ -397,6 +429,7 @@ def init_db():
                 approved INTEGER DEFAULT 0
             )
         ''')
+        migrate_user_passwords(conn)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -440,7 +473,10 @@ init_db()
 # Initialize default admin user (CHANGE PASSWORD AFTER FIRST LOGIN!)
 _default_admin_password = os.environ.get('ADMIN_DEFAULT_PASSWORD', 'admin123')
 with sqlite3.connect(DB_PATH) as conn:
-    conn.execute("INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)", ("admin", _default_admin_password, "admin", 1))
+    conn.execute(
+        "INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
+        ("admin", hash_user_password(_default_admin_password), "admin", 1)
+    )
 
 def get_campaign_years():
     years = set(BASE_CAMPAIGN_YEARS)
@@ -991,6 +1027,15 @@ def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base
         columns = [desc[0] for desc in cur.description]
         return [dict(zip(columns, row)) for row in rows]
 
+def normalize_student_search(value):
+    return ' '.join(str(value or '').split()).casefold()
+
+def student_field_matches(row, field, search_value):
+    search_value = normalize_student_search(search_value)
+    if not search_value:
+        return True
+    return search_value in normalize_student_search(row.get(field))
+
 def get_all_students(order_by='username', order_dir='asc', cohort=None, lastname=None, firstname=None, username=None):
     valid_columns = {'username', 'lastname', 'firstname', 'cohort1', 'email'}
     if order_by not in valid_columns:
@@ -1002,23 +1047,18 @@ def get_all_students(order_by='username', order_dir='asc', cohort=None, lastname
     if cohort:
         query += " AND cohort1 = ?"
         params.append(cohort)
-    if lastname:
-        query += " AND LOWER(lastname) LIKE ?"
-        params.append(f"%{lastname.lower()}%")
-    if firstname:
-        query += " AND LOWER(firstname) LIKE ?"
-        params.append(f"%{firstname.lower()}%")
-    if username:
-        query += " AND LOWER(username) LIKE ?"
-        params.append(f"%{username.lower()}%")
     query += f" ORDER BY {order_by} {order_dir.upper()}"
-    print("SQL:", query)
-    print("PARAMS:", params)
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(query, params)
         rows = cur.fetchall()
         columns = [desc[0] for desc in cur.description]
-        return [dict(zip(columns, row)) for row in rows]
+        students = [dict(zip(columns, row)) for row in rows]
+    return [
+        row for row in students
+        if student_field_matches(row, 'lastname', lastname)
+        and student_field_matches(row, 'firstname', firstname)
+        and student_field_matches(row, 'username', username)
+    ]
 
 def get_pending_duplicates(campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
@@ -1055,7 +1095,8 @@ def reject_duplicate(dup_id, campaign_year=None):
 def duplicates():
     return render_template('duplicates.html')
 
-def role_required(role):
+def role_required(*roles):
+    allowed_roles = set(roles)
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -1064,7 +1105,7 @@ def role_required(role):
             with sqlite3.connect(DB_PATH) as conn:
                 cur = conn.execute('SELECT role, approved FROM users WHERE username=?', (session['user'],))
                 user = cur.fetchone()
-                if not user or user[0] != role or user[1] != 1:
+                if not user or user[0] not in allowed_roles or user[1] != 1:
                     flash('Недостаточно прав')
                     return redirect(url_for('index'))
             return f(*args, **kwargs)
@@ -1151,6 +1192,7 @@ def download_template():
     return send_file(template_path, as_attachment=True, download_name='template.xlsx')
 
 @app.route('/login_conflicts')
+@login_required
 def login_conflicts():
     campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:
@@ -1303,16 +1345,22 @@ def manual_create():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
         with sqlite3.connect(DB_PATH) as conn:
-            cur = conn.execute('SELECT role, approved FROM users WHERE username=? AND password=?', (username, password))
+            cur = conn.execute(
+                'SELECT id, password, role, approved FROM users WHERE username=?',
+                (username,)
+            )
             user = cur.fetchone()
-            if user and user[1] == 1:
+            password_ok = bool(user and verify_user_password(user[1], password))
+            if password_ok and not is_password_hash(user[1]):
+                conn.execute('UPDATE users SET password=? WHERE id=?', (hash_user_password(password), user[0]))
+            if password_ok and user[3] == 1:
                 session['user'] = username
-                session['role'] = user[0]
+                session['role'] = user[2]
                 return redirect(url_for('index'))
-            elif user and user[1] == 0:
+            elif password_ok and user[3] == 0:
                 flash('Ожидайте одобрения администратора')
             else:
                 flash('Неверный логин или пароль')
@@ -1370,15 +1418,18 @@ def edit_abiturient(login):
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form.get('username').strip()
-        password = request.form.get('password').strip()
+        username = (request.form.get('username') or '').strip()
+        password = (request.form.get('password') or '').strip()
         role = 'assistant'
+        if not username or len(password) < MIN_PASSWORD_LENGTH:
+            flash(f'Логин обязателен, пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов')
+            return render_template('register.html')
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute('SELECT 1 FROM users WHERE username=?', (username,))
             if cur.fetchone():
                 flash('Пользователь уже существует')
                 return render_template('register.html')
-            conn.execute('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', (username, password, role))
+            conn.execute('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', (username, hash_user_password(password), role))
         flash('Заявка на регистрацию отправлена. Ожидайте одобрения администратора.')
         return redirect(url_for('login'))
     return render_template('register.html')
@@ -1387,7 +1438,7 @@ def register():
 @admin_required
 def admin_panel():
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT id, username, password, role, approved FROM users')
+        cur = conn.execute('SELECT id, username, role, approved FROM users')
         all_users = cur.fetchall()
     return render_template('admin_panel.html', all_users=all_users)
 
@@ -1403,15 +1454,39 @@ def delete_user():
 @admin_required
 def edit_user(user_id):
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT id, username, password, role, approved FROM users WHERE id=?', (user_id,))
+        cur = conn.execute('SELECT id, username, role, approved FROM users WHERE id=?', (user_id,))
         user = cur.fetchone()
+        if not user:
+            flash('Пользователь не найден')
+            return redirect(url_for('admin_panel'))
         if request.method == 'POST':
-            username = request.form.get('username')
-            password = request.form.get('password')
+            username = (request.form.get('username') or '').strip()
+            password = (request.form.get('password') or '').strip()
             role = request.form.get('role')
             approved = int(request.form.get('approved', 0))
-            conn.execute('UPDATE users SET username=?, password=?, role=?, approved=? WHERE id=?',
-                         (username, password, role, approved, user_id))
+            if not username:
+                flash('Логин не может быть пустым')
+                return render_template('edit_user.html', user=user)
+            duplicate = conn.execute(
+                'SELECT 1 FROM users WHERE username=? AND id<>?',
+                (username, user_id)
+            ).fetchone()
+            if duplicate:
+                flash('Пользователь с таким логином уже существует')
+                return render_template('edit_user.html', user=user)
+            if password:
+                if len(password) < MIN_PASSWORD_LENGTH:
+                    flash(f'Новый пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов')
+                    return render_template('edit_user.html', user=user)
+                conn.execute(
+                    'UPDATE users SET username=?, password=?, role=?, approved=? WHERE id=?',
+                    (username, hash_user_password(password), role, approved, user_id)
+                )
+            else:
+                conn.execute(
+                    'UPDATE users SET username=?, role=?, approved=? WHERE id=?',
+                    (username, role, approved, user_id)
+                )
             return redirect(url_for('admin_panel'))
     return render_template('edit_user.html', user=user)
 
@@ -1419,18 +1494,24 @@ def edit_user(user_id):
 @admin_required
 def add_user():
     if request.method == 'POST':
-        username = request.form.get('username').strip()
-        password = request.form.get('password').strip()
-        fio = request.form.get('fio').strip()
-        position = request.form.get('position').strip()
+        username = (request.form.get('username') or '').strip()
+        password = (request.form.get('password') or '').strip()
+        fio = (request.form.get('fio') or '').strip()
+        position = (request.form.get('position') or '').strip()
         role = request.form.get('role')
         approved = int(request.form.get('approved', 1))
+        if not username or len(password) < MIN_PASSWORD_LENGTH:
+            flash(f'Логин обязателен, пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов')
+            return render_template('add_user.html')
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute('SELECT 1 FROM users WHERE username=?', (username,))
             if cur.fetchone():
                 flash('Пользователь с таким логином уже существует')
                 return render_template('add_user.html')
-            conn.execute('INSERT INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)', (username, password, role, approved))
+            conn.execute(
+                'INSERT INTO users (username, password, fio, position, role, approved) VALUES (?, ?, ?, ?, ?, ?)',
+                (username, hash_user_password(password), fio, position, role, approved)
+            )
         flash('Пользователь успешно добавлен!')
         return redirect(url_for('admin_panel'))
     return render_template('add_user.html')
@@ -1469,38 +1550,14 @@ def students():
     lastname = request.args.get('lastname', '').strip()
     firstname = request.args.get('firstname', '').strip()
     username = request.args.get('username', '').strip()
-    cohort = request.args.get('cohort', '')
+    cohort = request.args.get('cohort', '').strip()
     order_by = request.args.get('order_by', 'username')
     order_dir = request.args.get('order_dir', 'asc')
-    allowed_order = ['username', 'lastname', 'firstname', 'cohort1', 'email']
-    if order_by not in allowed_order:
-        order_by = 'username'
-    if order_dir not in ['asc', 'desc']:
-        order_dir = 'asc'
-
-    query = 'SELECT username, password, email, firstname, lastname, cohort1 FROM students WHERE 1=1'
-    params = []
-
-    if lastname:
-        query += " AND LOWER(lastname) LIKE ?"
-        params.append(f"%{lastname.lower()}%")
-    if firstname:
-        query += " AND LOWER(firstname) LIKE ?"
-        params.append(f"%{firstname.lower()}%")
-    if username:
-        query += ' AND LOWER(username) LIKE ?'
-        params.append(f'%{username.lower()}%')
-    if cohort:
-        query += ' AND cohort1 = ?'
-        params.append(cohort)
-
-    query += f' ORDER BY {order_by} {order_dir}'
+    students = get_all_students(order_by, order_dir, cohort, lastname, firstname, username)
 
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(query, params)
-        students = cur.fetchall()
-        cur2 = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
-        cohorts = [row[0] for row in cur2.fetchall()]
+        cur = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
+        cohorts = [row[0] for row in cur.fetchall()]
 
     return render_template('students.html', students=students, cohorts=cohorts, order_by=order_by, order_dir=order_dir)
 
@@ -1617,7 +1674,7 @@ def delete_student():
 
 @app.route('/abiturients_to_students', methods=['GET', 'POST'])
 @login_required
-@role_required('admin')
+@role_required('admin', 'assistant')
 def abiturients_to_students():
     campaign_year = get_active_campaign_year()
     with sqlite3.connect(DB_PATH) as conn:

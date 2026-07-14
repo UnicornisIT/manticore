@@ -1,28 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Ручное создание логина абитуриента{% endblock %}
+{% block head %}
+<style>
+    .manual-login-form {
+        max-width: 520px;
+    }
+    .manual-field {
+        margin-bottom: 18px;
+    }
+    .manual-field label {
+        display: block;
+        font-weight: 500;
+        margin-bottom: 6px;
+    }
+    .manual-field input,
+    .manual-field select {
+        box-sizing: border-box;
+        width: 100%;
+        height: 38px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 15px;
+    }
+    .manual-field select {
+        max-width: 220px;
+    }
+    .manual-login-form .btn {
+        height: 38px;
+        margin: 0;
+        padding: 0 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+{% endblock %}
 {% block content %}
     <h1>Ручное создание логина абитуриента</h1>
-    <form method="post" style="max-width:500px;">
-        <label>Год поступления:</label>
-        <select name="year" required>
-            {% for y in years %}
-            <option value="{{ y }}" {% if y == campaign_year %}selected{% endif %}>{{ y }}</option>
-            {% endfor %}
-        </select><br><br>
-        <label>Специальность:</label>
-        <select name="spec" required>
-            {% for s in specs %}
-            <option value="{{ s }}">{{ s }}</option>
-            {% endfor %}
-        </select><br><br>
-        <label>Уровень образования:</label>
-        <select name="base" required>
-            {% for b in bases %}
-            <option value="{{ b }}">{{ b }}</option>
-            {% endfor %}
-        </select><br><br>
-        <label>ФИО абитуриента (через пробел):</label>
-        <input type="text" name="fio" required placeholder="Фамилия Имя Отчество"><br><br>
+    <form method="post" class="manual-login-form">
+        <div class="manual-field">
+            <label>Год поступления:</label>
+            <select name="year" required>
+                {% for y in years %}
+                <option value="{{ y }}" {% if y == campaign_year %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="manual-field">
+            <label>Специальность:</label>
+            <select name="spec" required>
+                {% for s in specs %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="manual-field">
+            <label>Уровень образования:</label>
+            <select name="base" required>
+                {% for b in bases %}
+                <option value="{{ b }}">{{ b }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="manual-field">
+            <label>ФИО абитуриента (через пробел):</label>
+            <input type="text" name="fio" required placeholder="Фамилия Имя Отчество">
+        </div>
         <button type="submit" class="btn">Создать логин</button>
     </form>
     {% if message %}

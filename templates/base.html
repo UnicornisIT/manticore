@@ -226,7 +226,6 @@
             <li><a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a></li>
             <li><a href="{{ url_for('students_list') }}" {% if request.endpoint == 'students' %}class="active"{% endif %}>Список студентов</a></li>
             <li><a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Дублирующиеся записи</a></li>
-            <li><a href="{{ url_for('login_conflicts') }}" {% if request.endpoint == 'login_conflicts' %}class="active"{% endif %}>Конфликты логинов</a></li>
             <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>

@@ -1,10 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Дублирующиеся ФИО абитуриентов</title>
-</head>
-<body>
-    {% extends "base.html" %}
+{% extends "base.html" %}
     {% block title %}Дублирующиеся ФИО абитуриентов{% endblock %}
     {% block content %}
         <h1>Дублирующиеся ФИО абитуриентов: {{ active_campaign_year }}</h1>
@@ -47,5 +41,3 @@
             {% endif %}
         </div>
     {% endblock %}
-</body>
-</html>

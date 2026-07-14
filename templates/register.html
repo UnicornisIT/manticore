@@ -7,7 +7,9 @@
     <label style="font-weight:500; margin-bottom:8px;">Логин:</label>
     <input type="text" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label style="font-weight:500; margin-bottom:8px;">Пароль:</label>
-    <input type="password" name="password" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <input type="password" name="password" autocomplete="new-password" minlength="8" required style="width:100%;margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
+    <div style="font-size:13px; color:#64748b; margin-bottom:18px;">Минимум 8 символов.</div>
     <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
+    <a href="{{ url_for('login') }}" class="btn" style="width:100%; margin-top:12px; text-align:center; background:#e5e7eb; color:#1f2937;">Вернуться к входу</a>
 </form>
 {% endblock %}

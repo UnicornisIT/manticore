@@ -1,16 +1,101 @@
 {% extends "base.html" %}
 {% block title %}Администрирование{% endblock %}
+{% block head %}
+<style>
+    .admin-panel-title {
+        text-align: center;
+        margin-top: 32px;
+    }
+    .admin-panel-card {
+        max-width: 960px;
+        margin: 32px auto;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(44, 62, 80, 0.08);
+        padding: 32px;
+    }
+    .admin-toolbar {
+        margin-bottom: 32px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 14px;
+        align-items: stretch;
+    }
+    .admin-toolbar form {
+        display: flex;
+        margin: 0;
+    }
+    .admin-action {
+        width: 100%;
+        min-height: 58px;
+        margin: 0;
+        padding: 0 16px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        line-height: 1.25;
+        font-weight: 600;
+        color: #fff;
+        background: #3b82f6;
+        box-shadow: 0 8px 18px rgba(59, 130, 246, 0.18);
+        transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+    }
+    .admin-action:hover,
+    .admin-action:focus {
+        background: #2563eb;
+        box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+        transform: translateY(-1px);
+    }
+    .admin-action-danger {
+        background: #ef4444;
+        box-shadow: 0 8px 18px rgba(239, 68, 68, 0.18);
+    }
+    .admin-action-danger:hover,
+    .admin-action-danger:focus {
+        background: #dc2626;
+        box-shadow: 0 10px 22px rgba(220, 38, 38, 0.22);
+    }
+    .admin-table-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .admin-table-actions form {
+        display: inline-flex;
+        margin: 0;
+    }
+    .admin-table-actions .btn {
+        height: 36px;
+        margin: 0;
+        padding: 0 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    @media (max-width: 700px) {
+        .admin-panel-card {
+            padding: 24px 18px;
+        }
+        .admin-toolbar {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
 {% block content %}
-<h1 style="text-align:center; margin-top:32px;">Панель администратора</h1>
-<div style="max-width:900px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
-    <div style="margin-bottom:32px; display:flex; gap:18px;">
-        <a href="{{ url_for('approve_users') }}" class="btn btn-warning">Одобрить заявки пользователей</a>
-        <a href="{{ url_for('add_user') }}" class="btn btn-primary">Добавить пользователя</a>
-        <a href="{{ url_for('abiturients_to_students') }}" class="btn btn-primary">Миграция абитуриентов</a>
-        <a href="{{ url_for('add_group') }}" class="btn btn-primary">Академические группы</a>
-        <form method="post" action="{{ url_for('clear_abiturients') }}" style="display:inline;">
+<h1 class="admin-panel-title">Панель администратора</h1>
+<div class="admin-panel-card">
+    <div class="admin-toolbar">
+        <a href="{{ url_for('approve_users') }}" class="btn admin-action">Одобрить заявки пользователей</a>
+        <a href="{{ url_for('add_user') }}" class="btn admin-action">Добавить пользователя</a>
+        <a href="{{ url_for('abiturients_to_students') }}" class="btn admin-action">Миграция абитуриентов</a>
+        <a href="{{ url_for('add_group') }}" class="btn admin-action">Академические группы</a>
+        <form method="post" action="{{ url_for('clear_abiturients') }}">
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-            <button type="submit" class="btn btn-danger" onclick="return confirm('Очистить абитуриентов, дубли и конфликты текущей кампании? Это действие необратимо.');">
+            <button type="submit" class="btn admin-action admin-action-danger" onclick="return confirm('Очистить абитуриентов, дубли и конфликты текущей кампании? Это действие необратимо.');">
                 Очистить абитуриентов {{ active_campaign_year }}
             </button>
         </form>
@@ -27,22 +112,24 @@
             {% for user in all_users %}
             <tr style="border-bottom:1px solid #e5e7eb;">
                 <td style="padding:8px; word-break:break-word;">{{ user[1] }}</td>
-                <td style="padding:8px; word-break:break-word;">{{ user[3] }}</td>
+                <td style="padding:8px; word-break:break-word;">{{ user[2] }}</td>
                 <td style="padding:8px; word-break:break-word;">
-                    {% if user[4] == 1 %}
+                    {% if user[3] == 1 %}
                         <span style="color:green;">Одобрен</span>
                     {% else %}
                         <span style="color:orange;">Ожидает</span>
                     {% endif %}
                 </td>
                 <td style="padding:8px; word-break:break-word;">
+                    <div class="admin-table-actions">
+                    <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn">Редактировать</a>
                     {% if user[1] != 'vaanedain' %}
-                    <form method="post" action="{{ url_for('delete_user') }}" style="display:inline;">
+                    <form method="post" action="{{ url_for('delete_user') }}">
                         <input type="hidden" name="user_id" value="{{ user[0] }}">
                         <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить пользователя?');">Удалить</button>
                     </form>
                     {% endif %}
-                    <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn" style="margin-left:8px;">Редактировать</a>
+                    </div>
                 </td>
             </tr>
             {% endfor %}

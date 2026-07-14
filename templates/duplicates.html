@@ -1,17 +1,30 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Дублирующиеся записи</title>
-</head>
-<body>
-    {% extends "base.html" %}
-    {% block title %}Дублирующиеся записи{% endblock %}
-    {% block content %}
-    <h1>Дублирующиеся записи</h1>
-    <div style="display: flex; gap: 24px; margin-top: 32px;">
-        <a href="{{ url_for('students_duplicates') }}" class="btn" style="padding: 16px 32px; font-size: 1.1em;">Дубли студентов</a>
-        <a href="{{ url_for('duplicates_abiturients') }}" class="btn" style="padding: 16px 32px; font-size: 1.1em;">Дубли абитуриентов</a>
-    </div>
-    {% endblock %}
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Дублирующиеся записи{% endblock %}
+{% block head %}
+<style>
+    .duplicates-actions {
+        display: flex;
+        gap: 24px;
+        margin-top: 32px;
+        flex-wrap: wrap;
+    }
+    .duplicates-actions .btn {
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 220px;
+        height: 54px;
+        margin: 0;
+        padding: 0 24px;
+        font-size: 17px;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Дублирующиеся записи</h1>
+<div class="duplicates-actions">
+    <a href="{{ url_for('students_duplicates') }}" class="btn">Дубли студентов</a>
+    <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дубли абитуриентов</a>
+</div>
+{% endblock %}
