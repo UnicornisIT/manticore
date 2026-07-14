@@ -1,104 +1,51 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Генерация логинов студентов</title>
-    <style>
-        body {
-            background: #f4f6fb;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
+{% extends "base.html" %}
+{% block title %}Главная страница{% endblock %}
+{% block head %}
+<style>
+    body.home-page .container {
+        display: flex;
+        flex-direction: column;
+    }
+    .home-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 24px;
+        min-height: 0;
+        padding: 28px 0 48px 0;
+    }
+    .home-content h1 {
+        margin: 0;
+        text-align: center;
+    }
+    .home-content .logo-container {
+        margin: 0;
+    }
+    .home-content p {
+        margin: 0;
+        text-align: center;
+    }
+    @media (max-height: 720px) {
+        .home-content {
+            padding-top: 12px;
         }
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-            margin-top: 40px;
-            margin-bottom: 10px;
+        .home-content .logo-img {
+            width: 220px !important;
+            height: 150px !important;
         }
-        .logo-img {
-            height: 80px;
-            width: auto;
-        }
-        h2 {
-            margin-top: 10px;
-            color: #2d3a4b;
-            font-weight: 600;
-            letter-spacing: 1px;
-        }
-        form {
-            background: #fff;
-            padding: 32px 40px;
-            border-radius: 12px;
-            box-shadow: 0 4px 24px rgba(44,62,80,0.08);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin-top: 24px;
-        }
-        .file-input-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 18px;
-        }
-        input[type="file"] {
-            font-size: 16px;
-        }
-        .remove-btn {
-            background: #ef4444;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .remove-btn:hover {
-            background: #b91c1c;
-        }
-        button[type="submit"] {
-            background: #3b82f6;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 12px 28px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button[type="submit"]:hover {
-            background: #2563eb;
-        }
-    </style>
-</head>
-<body>
-    {% extends "base.html" %}
-    {% block title %}Главная страница{% endblock %}
-    {% block content %}
-        <h1 style="text-align:center;">Главная страница</h1>
-        <div class="logo-container">
-            <img src="/static/logo.png" alt="Логотип" class="logo-img" style="width:300px; height:200px; object-fit:contain;">
-        </div>
-        <p style="text-align:center; margin-top:24px;">
-            Для работы с файлами перейдите на страницу <a href="{{ url_for('file_work') }}" class="btn">Работа с файлами</a>
-        </p>
-    {% endblock %}
-    <footer style="width:100%; margin-top:auto;">
-        <div style="background:#e5e7eb; color:#2d3a4b; text-align:center; padding:16px 0; font-size:14px; letter-spacing:0.5px;">
-            <div style="margin-bottom:8px;">logins_moodle • 
-                <a href="https://github.com" style="color:#2d3a4b; text-decoration:none;" title="GitHub репозиторий">GitHub</a> • 
-                <a href="https://t.me" style="color:#2d3a4b; text-decoration:none;" title="Telegram канал">Telegram</a> • 
-                <a href="mailto:dev-eva@outlook.com" style="color:#2d3a4b; text-decoration:none;" title="Email">Email</a>
-            </div>
-        </div>
-    </footer>
-</body>
-</html>
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="home-content">
+    <h1>Главная страница</h1>
+    <div class="logo-container">
+        <img src="/static/logo.png" alt="Логотип" class="logo-img" style="width:300px; height:200px; object-fit:contain;">
+    </div>
+    <p>
+        Для работы с файлами перейдите на страницу <a href="{{ url_for('file_work') }}" class="btn">Работа с файлами</a>
+    </p>
+</div>
+{% endblock %}
