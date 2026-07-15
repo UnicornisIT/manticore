@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/manticore-logo.png" alt="manticore" width="900">
+</p>
+
 # manticore
 
 `manticore` — Flask-приложение для подготовки логинов абитуриентов и студентов Moodle.
