@@ -263,7 +263,7 @@ password: значение ADMIN_DEFAULT_PASSWORD из .env
 Пример:
 
 ```env
-ADMIN_DEFAULT_PASSWORD=ChangeMeStrongPassword
+ADMIN_DEFAULT_PASSWORD=replace-with-strong-admin-password
 ```
 
 Важно: если база уже создана, изменение `ADMIN_DEFAULT_PASSWORD` не изменит пароль существующего пользователя `admin`. Это значение используется только при создании пользователя в новой базе.
@@ -274,12 +274,15 @@ ADMIN_DEFAULT_PASSWORD=ChangeMeStrongPassword
 
 ```env
 SECRET_KEY=replace-with-strong-secret-key-min-32-chars
-ADMIN_DEFAULT_PASSWORD=123
+ADMIN_DEFAULT_PASSWORD=replace-with-strong-admin-password
 UPLOAD_FOLDER=uploads
 DB_FILENAME=baze.db
 DEFAULT_CAMPAIGN_YEAR=2026
 LEGACY_CAMPAIGN_YEAR=2025
 FLASK_ENV=production
+APP_HOST=127.0.0.1
+APP_PORT=5000
+APP_DEBUG=false
 ```
 
 Описание:
@@ -293,18 +296,23 @@ FLASK_ENV=production
 | `DEFAULT_CAMPAIGN_YEAR` | Кампания по умолчанию для новых запусков, например `2026`. |
 | `LEGACY_CAMPAIGN_YEAR` | Год для старых записей, если год невозможно определить. |
 | `FLASK_ENV` | Окружение Flask. Для обычной работы можно оставить `production`. |
+| `APP_HOST` | Адрес запуска. `127.0.0.1` доступен только на этом компьютере, `0.0.0.0` открывает доступ в локальной сети. |
+| `APP_PORT` | Порт приложения, обычно `5000`. |
+| `APP_DEBUG` | Режим отладки. Для обычной работы оставьте `false`. |
 
 Не публикуйте `.env` в GitHub.
 
 ## Запуск в локальной сети
 
-Приложение уже запускается так:
+Для доступа из локальной сети укажите в `.env`:
 
-```python
-app.run(host="0.0.0.0", port=5000, debug=True)
+```env
+APP_HOST=0.0.0.0
+APP_PORT=5000
+APP_DEBUG=false
 ```
 
-`host="0.0.0.0"` означает, что приложение доступно не только на этом компьютере, но и в локальной сети.
+`APP_HOST=0.0.0.0` означает, что приложение доступно не только на этом компьютере, но и в локальной сети.
 
 ### Как открыть с другого компьютера
 
@@ -317,13 +325,13 @@ ipconfig
 Нужен IPv4-адрес, например:
 
 ```text
-192.168.30.25
+192.168.1.100
 ```
 
 На другом компьютере откройте:
 
 ```text
-http://192.168.30.25:5000
+http://192.168.1.100:5000
 ```
 
 ### Если сайт не открывается
