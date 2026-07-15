@@ -49,7 +49,15 @@
         flex-wrap: wrap;
         align-items: flex-end;
     }
+    .group-folder-form {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
     .migration-controls select,
+    .group-folder-form select,
     .migration-controls .btn {
         box-sizing: border-box;
         height: 36px;
@@ -75,6 +83,10 @@
     .migration-actions {
         margin-top: 18px;
     }
+    .groups-empty {
+        color: #64748b;
+        margin: 0 0 18px 0;
+    }
     @media (max-width: 700px) {
         .migration-form {
             padding: 18px 16px 20px 16px;
@@ -86,10 +98,29 @@
 </style>
 {% endblock %}
 {% block content %}
-<h2>Миграция абитуриентов в студенты: {{ active_campaign_year }}</h2>
+<h2>Миграция абитуриентов в студенты</h2>
+{% include "_campaign_switcher.html" %}
 
-<form method="post" target="_blank" rel="noopener" class="migration-form">
+<div class="migration-form">
+    <form method="get" class="group-folder-form">
+        <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+        <div>
+            <label for="group_year" style="font-weight: 500; display:block; margin-bottom:6px;">Папка групп:</label>
+            <select name="group_year" id="group_year" onchange="this.form.submit()" style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:150px;">
+                {% for y in group_years %}
+                <option value="{{ y }}" {% if y == group_year %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if not groups %}
+    <p class="groups-empty">В папке {{ group_year }} пока нет академических групп.</p>
+    {% endif %}
+
+    <form method="post" target="_blank" rel="noopener">
     <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+    <input type="hidden" name="group_year" value="{{ group_year }}">
     <div class="migration-controls">
         <div>
             <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
@@ -103,7 +134,7 @@
             </select>
         </div>
         {% if session.get('role') == 'admin' %}
-            <a href="{{ url_for('add_group') }}" class="btn">Справочник групп</a>
+            <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
         {% endif %}
     </div>
 
@@ -155,7 +186,8 @@
     <div class="migration-actions">
         <button type="submit" class="btn btn-success" {% if not groups %}disabled{% endif %}>Мигрировать выбранных</button>
     </div>
-</form>
+    </form>
+</div>
 
 <script>
 const selectAllReady = document.getElementById('select_all_ready');

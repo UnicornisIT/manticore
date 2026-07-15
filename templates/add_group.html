@@ -6,40 +6,56 @@
         max-width: 1040px;
     }
     .groups-page h2 {
-        margin-bottom: 18px;
+        margin-bottom: 10px;
     }
     .groups-note {
         max-width: 980px;
         color: #374151;
         line-height: 1.45;
+        margin-bottom: 16px;
     }
-    .groups-layout {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 24px;
-        align-items: start;
+    .groups-panel {
         max-width: 980px;
-        margin-top: 18px;
-    }
-    .groups-card {
         background: #f3f6fa;
-        padding: 24px 28px;
+        padding: 20px 24px 22px 24px;
         border-radius: 8px;
         box-shadow: 0 2px 10px rgba(44, 62, 80, 0.08);
     }
-    .groups-card h3 {
-        margin-top: 0;
+    .groups-panel-top {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #dbe3ee;
+    }
+    .groups-layout {
+        display: grid;
+        grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1fr) minmax(300px, 1.15fr);
+        gap: 18px;
+        align-items: start;
+        margin-top: 18px;
+    }
+    .groups-tool {
+        min-width: 0;
+    }
+    .groups-tool h3 {
+        margin: 0 0 12px 0;
+        font-size: 18px;
     }
     .groups-field {
-        margin-bottom: 18px;
+        margin-bottom: 12px;
     }
+    .groups-control label,
     .groups-field label {
         display: block;
         margin-bottom: 7px;
         font-weight: 600;
     }
     .groups-field input[type="text"],
-    .groups-field input[type="file"] {
+    .groups-field input[type="file"],
+    .groups-field select,
+    .groups-control select {
         width: 100%;
         box-sizing: border-box;
         border: 1px solid #cbd5e1;
@@ -48,9 +64,27 @@
         color: #111827;
         font-size: 15px;
     }
-    .groups-field input[type="text"] {
+    .groups-field input[type="text"],
+    .groups-field select,
+    .groups-control select {
         height: 36px;
         padding: 8px 10px;
+    }
+    .groups-control select {
+        min-width: 150px;
+    }
+    .groups-panel-top .groups-checkbox {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        margin-bottom: 0;
+        color: #374151;
+        font-weight: 600;
+    }
+    .groups-panel-top .groups-checkbox input {
+        width: 16px;
+        height: 16px;
     }
     .groups-field input[type="file"] {
         padding: 5px;
@@ -73,7 +107,8 @@
         flex-wrap: wrap;
     }
     .groups-actions .btn,
-    .groups-table-actions .btn {
+    .groups-table-actions .btn,
+    .groups-panel-top .btn {
         box-sizing: border-box;
         height: 36px;
         min-width: 104px;
@@ -95,60 +130,153 @@
     .groups-btn-secondary:focus {
         background: #d1d5db;
     }
+    .groups-btn-danger {
+        background: #dc2626;
+        color: #fff;
+    }
+    .groups-btn-danger:hover,
+    .groups-btn-danger:focus {
+        background: #b91c1c;
+    }
+    .groups-btn-muted {
+        background: #64748b;
+        color: #fff;
+    }
+    .groups-btn-muted:hover,
+    .groups-btn-muted:focus {
+        background: #475569;
+    }
     .groups-table-wrap {
         overflow-x: auto;
-        max-width: 640px;
+        max-width: 860px;
     }
     .groups-table {
-        min-width: 420px;
+        min-width: 720px;
     }
     .groups-table-actions form {
         display: inline-flex;
-        margin: 0;
+        margin: 2px 4px 2px 0;
     }
     .groups-description {
-        margin-bottom: 18px;
+        min-height: 22px;
+        margin-bottom: 12px;
         color: #374151;
+        font-size: 14px;
         line-height: 1.45;
+    }
+    .groups-folder-label {
+        margin-bottom: 14px;
+        color: #4b5563;
+        font-weight: 600;
+    }
+    .groups-empty {
+        color: #64748b;
+        margin-top: 16px;
+    }
+    .groups-hidden-row {
+        background: #f8fafc;
+        color: #64748b;
+    }
+    .groups-status {
+        display: inline-block;
+        margin-left: 8px;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    @media (max-width: 1100px) {
+        .groups-layout {
+            grid-template-columns: repeat(2, minmax(260px, 1fr));
+        }
+    }
+    @media (max-width: 700px) {
+        .groups-panel {
+            padding: 16px;
+        }
+        .groups-layout {
+            grid-template-columns: 1fr;
+        }
+        .groups-description {
+            min-height: 0;
+        }
     }
 </style>
 {% endblock %}
 {% block content %}
 <div class="groups-page">
     <h2>Академические группы</h2>
-    <p class="groups-note">Группы являются общим справочником и не зависят от выбранной приемной кампании. Заполненность считается по общему списку студентов.</p>
+    <p class="groups-note">Управление группами по папкам года.</p>
 
-    <div class="groups-layout">
-        <form method="post" class="groups-card">
-            <h3>Добавить одну группу</h3>
-            <div class="groups-field">
-                <label for="group_name">Название группы:</label>
-                <input type="text" id="group_name" name="group_name" required placeholder="26ФМ-11-1">
+    <div class="groups-panel">
+        <form method="get" class="groups-panel-top">
+            <div class="groups-control">
+                <label for="group_year">Папка групп:</label>
+                <select name="group_year" id="group_year" onchange="this.form.submit()">
+                    {% for y in group_years %}
+                    <option value="{{ y }}" {% if y == group_year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="groups-actions">
-                <button type="submit" class="btn">Добавить</button>
-                <a href="{{ url_for('admin_panel') }}" class="btn groups-btn-secondary">Назад</a>
-            </div>
+            <label class="groups-checkbox">
+                <input type="checkbox" name="show_hidden" value="1" onchange="this.form.submit()" {% if show_hidden %}checked{% endif %}>
+                Показать скрытые
+            </label>
+            <a href="{{ url_for('admin_panel') }}" class="btn groups-btn-secondary">Назад</a>
         </form>
 
-        <form method="post" enctype="multipart/form-data" class="groups-card">
-            <h3>Загрузить CSV</h3>
-            <div class="groups-description">
-                В шаблоне укажите готовые названия групп, например 26ФМ-11-1. Заполненность считается автоматически по списку студентов.
-            </div>
-            <div class="groups-field">
-                <label for="groups_file">Файл CSV:</label>
-                <input type="file" id="groups_file" name="groups_file" accept=".csv" required>
-            </div>
-            <div class="groups-actions">
-                <a href="{{ url_for('download_groups_template') }}" class="btn groups-btn-secondary">Скачать шаблон</a>
-                <button type="submit" class="btn">Загрузить</button>
-            </div>
-        </form>
+        <div class="groups-layout">
+            <form method="post" class="groups-tool">
+                <h3>Добавить</h3>
+                <input type="hidden" name="group_year" value="{{ group_year }}">
+                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                <div class="groups-description">Новая группа.</div>
+                <div class="groups-field">
+                    <label for="group_name">Название группы:</label>
+                    <input type="text" id="group_name" name="group_name" required placeholder="{{ group_year_code }}ФМ-11-1">
+                </div>
+                <div class="groups-actions">
+                    <button type="submit" class="btn">Добавить</button>
+                </div>
+            </form>
+
+            <form method="post" class="groups-tool">
+                <h3>Подгруппа</h3>
+                <input type="hidden" name="group_year" value="{{ group_year }}">
+                <input type="hidden" name="group_action" value="force_subgroup">
+                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                <div class="groups-description">Следующая подгруппа.</div>
+                <div class="groups-field">
+                    <label for="source_group_force">Исходная группа:</label>
+                    <select id="source_group_force" name="source_group" required {% if not visible_groups %}disabled{% endif %}>
+                        {% for group in visible_groups %}
+                        <option value="{{ group.name }}">{{ group.name }} ({{ group.fill }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="groups-actions">
+                    <button type="submit" class="btn" {% if not visible_groups %}disabled{% endif %}>Создать следующую</button>
+                </div>
+            </form>
+
+            <form method="post" enctype="multipart/form-data" class="groups-tool">
+                <h3>CSV</h3>
+                <input type="hidden" name="group_year" value="{{ group_year }}">
+                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                <div class="groups-description">Загрузка из файла.</div>
+                <div class="groups-field">
+                    <label for="groups_file">Файл CSV:</label>
+                    <input type="file" id="groups_file" name="groups_file" accept=".csv" required>
+                </div>
+                <div class="groups-actions">
+                    <a href="{{ url_for('download_groups_template', group_year=group_year) }}" class="btn groups-btn-secondary">Скачать шаблон</a>
+                    <button type="submit" class="btn">Загрузить</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     {% if groups %}
-        <h3 style="margin-top: 32px;">Существующие группы</h3>
+        <h3 style="margin-top: 32px;">Существующие группы: {{ group_year }}</h3>
         <div class="groups-table-wrap">
             <table class="groups-table">
                 <thead>
@@ -160,8 +288,11 @@
                 </thead>
                 <tbody>
                     {% for group in groups %}
-                    <tr>
-                        <td>{{ group.name }}</td>
+                    <tr {% if group.is_hidden %}class="groups-hidden-row"{% endif %}>
+                        <td>
+                            {{ group.name }}
+                            {% if group.is_hidden %}<span class="groups-status">скрыта</span>{% endif %}
+                        </td>
                         <td>
                             <span style="font-weight:600; {% if group.is_full %}color:#b91c1c;{% else %}color:#166534;{% endif %}">
                                 {{ group.fill }}
@@ -170,8 +301,10 @@
                         <td class="groups-table-actions">
                             {% if group.can_create_next %}
                             <form method="post">
+                                <input type="hidden" name="group_year" value="{{ group_year }}">
                                 <input type="hidden" name="group_name" value="{{ group.next_name }}">
                                 <input type="hidden" name="source_group" value="{{ group.name }}">
+                                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
                                 <button type="submit" class="btn">Создать {{ group.next_name }}</button>
                             </form>
                             {% elif group.is_full %}
@@ -179,12 +312,38 @@
                             {% else %}
                             <span style="color:#64748b;">Есть места</span>
                             {% endif %}
+                            {% if group.is_hidden %}
+                            <form method="post">
+                                <input type="hidden" name="group_year" value="{{ group_year }}">
+                                <input type="hidden" name="group_name" value="{{ group.name }}">
+                                <input type="hidden" name="group_action" value="show">
+                                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                                <button type="submit" class="btn groups-btn-muted">Показать</button>
+                            </form>
+                            {% else %}
+                            <form method="post">
+                                <input type="hidden" name="group_year" value="{{ group_year }}">
+                                <input type="hidden" name="group_name" value="{{ group.name }}">
+                                <input type="hidden" name="group_action" value="hide">
+                                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                                <button type="submit" class="btn groups-btn-secondary">Скрыть</button>
+                            </form>
+                            {% endif %}
+                            <form method="post" onsubmit="return confirm('Удалить группу {{ group.name }}?');">
+                                <input type="hidden" name="group_year" value="{{ group_year }}">
+                                <input type="hidden" name="group_name" value="{{ group.name }}">
+                                <input type="hidden" name="group_action" value="delete">
+                                {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+                                <button type="submit" class="btn groups-btn-danger">Удалить</button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+    {% else %}
+        <p class="groups-empty">В папке {{ group_year }} пока нет академических групп.</p>
     {% endif %}
 </div>
 {% endblock %}

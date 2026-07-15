@@ -3,12 +3,13 @@
 {% block head %}
 <style>
     .admin-panel-title {
-        text-align: center;
-        margin-top: 32px;
+        text-align: left;
+        margin-top: 0;
+        margin-bottom: 18px;
     }
     .admin-panel-card {
         max-width: 960px;
-        margin: 32px auto;
+        margin: 24px auto 32px auto;
         background: #fff;
         border-radius: 12px;
         box-shadow: 0 4px 24px rgba(44, 62, 80, 0.08);
@@ -87,6 +88,7 @@
 {% endblock %}
 {% block content %}
 <h1 class="admin-panel-title">Панель администратора</h1>
+{% include "_campaign_switcher.html" %}
 <div class="admin-panel-card">
     <div class="admin-toolbar">
         <a href="{{ url_for('approve_users') }}" class="btn admin-action">Одобрить заявки пользователей</a>

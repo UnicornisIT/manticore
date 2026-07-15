@@ -149,17 +149,18 @@
             background: #111;
             color: #fff;
         }
-        .campaign-switcher {
+        .page-campaign-switcher {
             display: flex;
-            justify-content: center;
             align-items: center;
             gap: 10px;
-            margin: -8px 0 24px 0;
+            margin: -12px 0 20px 0;
             color: #374151;
             font-weight: 500;
             flex-wrap: wrap;
         }
-        .campaign-switcher select {
+        .page-campaign-switcher select {
+            box-sizing: border-box;
+            height: 38px;
             padding: 7px 12px;
             border: 1px solid #cbd5e1;
             border-radius: 6px;
@@ -238,15 +239,6 @@
             <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>
-        <form method="post" action="{{ url_for('set_campaign') }}" class="campaign-switcher">
-            <input type="hidden" name="next" value="{{ request.path }}">
-            <label for="global_campaign_year">Приемная кампания</label>
-            <select name="campaign_year" id="global_campaign_year" onchange="this.form.submit()">
-                {% for y in campaign_years %}
-                <option value="{{ y }}" {% if y == active_campaign_year %}selected{% endif %}>{{ y }}</option>
-                {% endfor %}
-            </select>
-        </form>
         {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}

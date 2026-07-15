@@ -40,15 +40,15 @@ DEFAULT_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('DEFAULT_CAMPAIGN_YEA
 LEGACY_CAMPAIGN_YEAR = clean_campaign_year(os.environ.get('LEGACY_CAMPAIGN_YEAR'), '2025')
 BASE_CAMPAIGN_YEARS = [str(y) for y in range(2020, 2031)]
 MAX_GROUP_STUDENTS = 25
-GROUPS_TEMPLATE_CSV = (
-    'group_name\n'
-    '26ФМ-11-1\n'
-    '26СД-9-1\n'
-    '26ЛД-11-1\n'
+GROUPS_TEMPLATE_EXAMPLES = (
+    ('ФМ', '11'),
+    ('СД', '9'),
+    ('ЛД', '11'),
 )
 
 _group_name_re = re.compile(r'^\d{2}[A-Za-zА-Яа-яЁё]+-(?:\d{1,2}(?:[A-Za-zА-Яа-яЁё])?|[A-Za-zА-Яа-яЁё]+)-\d+$')
 _group_head_re = re.compile(r'^(\d{2})([A-Za-zА-Яа-яЁё]+)$')
+_group_year_code_re = re.compile(r'^\s*(\d{2})')
 _specialty_aliases = {
     'ФМ': 'ФМ',
     'СД': 'СД',
@@ -63,10 +63,24 @@ _specialty_aliases = {
 def normalize_campaign_year(value, fallback=None):
     return clean_campaign_year(value, fallback or DEFAULT_CAMPAIGN_YEAR)
 
+def normalize_group_year(value, fallback=None):
+    fallback = fallback or DEFAULT_CAMPAIGN_YEAR
+    value = str(value or '').strip()
+    if re.fullmatch(r'\d{2}', value):
+        value = f'20{value}'
+    return normalize_campaign_year(value, fallback)
+
 def infer_campaign_year(dogovor, fallback=LEGACY_CAMPAIGN_YEAR):
     match = _dogovor_year_re.search(str(dogovor or ''))
     if match:
         return normalize_campaign_year(match.group(0), fallback)
+    return fallback
+
+def infer_group_year(group_name, fallback=None):
+    fallback = normalize_group_year(fallback, DEFAULT_CAMPAIGN_YEAR)
+    match = _group_year_code_re.match(str(group_name or ''))
+    if match:
+        return normalize_group_year(match.group(1), fallback)
     return fallback
 
 spec_codes = {
@@ -360,6 +374,29 @@ def ensure_students_origin_columns(conn):
         if column not in columns:
             conn.execute(f'ALTER TABLE students ADD COLUMN {column} {column_type}')
 
+def ensure_group_year_column(conn):
+    if not table_exists(conn, 'groups'):
+        return
+
+    columns = get_table_columns(conn, 'groups')
+    if not columns:
+        return
+
+    if 'group_year' not in columns:
+        conn.execute('ALTER TABLE groups ADD COLUMN group_year TEXT')
+    if 'is_hidden' not in columns:
+        conn.execute('ALTER TABLE groups ADD COLUMN is_hidden INTEGER DEFAULT 0')
+
+    cur = conn.execute('SELECT id, name, group_year, is_hidden FROM groups')
+    for row_id, name, group_year, is_hidden in cur.fetchall():
+        fixed_year = normalize_group_year(group_year, infer_group_year(name, DEFAULT_CAMPAIGN_YEAR))
+        if fixed_year != group_year:
+            conn.execute('UPDATE groups SET group_year=? WHERE id=?', (fixed_year, row_id))
+        if is_hidden not in (0, 1):
+            conn.execute('UPDATE groups SET is_hidden=0 WHERE id=?', (row_id,))
+
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_groups_group_year_name ON groups (group_year, name)')
+
 PASSWORD_HASH_PREFIXES = ('scrypt:', 'pbkdf2:', 'argon2:')
 MIN_PASSWORD_LENGTH = 8
 
@@ -455,12 +492,15 @@ def init_db():
                 cohort1 TEXT
             )
         ''')
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE
+                name TEXT UNIQUE,
+                group_year TEXT NOT NULL DEFAULT '{DEFAULT_CAMPAIGN_YEAR}',
+                is_hidden INTEGER DEFAULT 0
             )
         ''')
+        ensure_group_year_column(conn)
         ensure_campaign_column(conn, 'pending_duplicates')
         ensure_campaign_column(conn, 'login_conflicts')
         ensure_students_origin_columns(conn)
@@ -521,6 +561,25 @@ def get_active_campaign_year():
     if session.get('user'):
         session['campaign_year'] = campaign_year
     return campaign_year
+
+def get_group_years(selected_year=None, include_base=False):
+    years = set(BASE_CAMPAIGN_YEARS if include_base else [])
+    if selected_year:
+        years.add(normalize_group_year(selected_year, DEFAULT_CAMPAIGN_YEAR))
+
+    with sqlite3.connect(DB_PATH) as conn:
+        if table_exists(conn, 'groups'):
+            columns = get_table_columns(conn, 'groups')
+            if 'group_year' in columns:
+                cur = conn.execute(
+                    "SELECT DISTINCT group_year FROM groups WHERE group_year IS NOT NULL AND group_year != ''"
+                )
+                years.update(normalize_group_year(row[0], DEFAULT_CAMPAIGN_YEAR) for row in cur.fetchall() if row[0])
+            else:
+                cur = conn.execute("SELECT name FROM groups WHERE name IS NOT NULL AND name != ''")
+                years.update(infer_group_year(row[0], DEFAULT_CAMPAIGN_YEAR) for row in cur.fetchall() if row[0])
+
+    return sorted(years)
 
 def get_used_logins(campaign_year):
     used_logins = set()
@@ -743,6 +802,14 @@ def build_group_name(year_code, specialty, base, subgroup='1'):
 
     return normalize_group_name(f'{year_code}{specialty}-{base}-{subgroup}')
 
+def build_groups_template_csv(group_year=None):
+    group_year = normalize_group_year(group_year, DEFAULT_CAMPAIGN_YEAR)
+    year_code = group_year[-2:]
+    rows = ['group_year;group_name']
+    for specialty, base in GROUPS_TEMPLATE_EXAMPLES:
+        rows.append(f'{group_year};{build_group_name(year_code, specialty, base)}')
+    return '\n'.join(rows) + '\n'
+
 def is_valid_group_name(group_name):
     return bool(_group_name_re.fullmatch(group_name or ''))
 
@@ -795,7 +862,8 @@ def read_groups_csv(file_path):
 def group_exists_casefold(existing_groups, group_name):
     return group_name.casefold() in existing_groups
 
-def process_groups_csv(file_path):
+def process_groups_csv(file_path, fallback_group_year=None):
+    fallback_group_year = normalize_group_year(fallback_group_year, get_active_campaign_year())
     rows = read_groups_csv(file_path)
     created_groups = []
     skipped_groups = []
@@ -819,19 +887,31 @@ def process_groups_csv(file_path):
                     find_row_value(row, ['subgroup', 'subgroup_number', 'подгруппа', 'номер_подгруппы']),
                 )
 
+            group_year_value = find_row_value(row, ['group_year', 'folder_year', 'year_folder', 'папка', 'год_папки', 'год_групп', 'год_группы'])
+            if group_year_value:
+                group_year = normalize_group_year(group_year_value, infer_group_year(group_name, fallback_group_year))
+                if str(group_year_value).strip() not in (group_year, group_year[-2:]):
+                    errors.append(f'строка {row_number}: неверный год папки "{group_year_value}"')
+                    continue
+            else:
+                group_year = infer_group_year(group_name, fallback_group_year)
+
             if not group_name:
                 errors.append(f'строка {row_number}: не указана группа')
                 continue
             if not is_valid_group_name(group_name):
                 errors.append(f'строка {row_number}: неверный формат группы "{group_name}"')
                 continue
+            if infer_group_year(group_name, group_year) != group_year:
+                errors.append(f'строка {row_number}: группа "{group_name}" не соответствует папке {group_year}')
+                continue
 
             if group_exists_casefold(existing_groups, group_name):
                 skipped_groups.append(group_name)
                 continue
-            conn.execute('INSERT INTO groups (name) VALUES (?)', (group_name,))
+            conn.execute('INSERT INTO groups (name, group_year) VALUES (?, ?)', (group_name, group_year))
             existing_groups[group_name.casefold()] = group_name
-            created_groups.append(group_name)
+            created_groups.append(f'{group_year}: {group_name}')
 
     return {
         'created': created_groups,
@@ -843,12 +923,17 @@ def get_group_student_count(conn, group_name):
     cur = conn.execute('SELECT COUNT(*) FROM students WHERE cohort1=?', (group_name,))
     return cur.fetchone()[0]
 
-def get_next_subgroup_name(conn, group_name):
+def get_next_subgroup_name(conn, group_name, group_year=None):
     root_group = base_group_name(group_name)
     current_index = group_subgroup_index(group_name)
     existing_indices = {current_index}
 
-    for row in conn.execute('SELECT name FROM groups'):
+    if group_year:
+        rows = conn.execute('SELECT name FROM groups WHERE group_year=?', (group_year,))
+    else:
+        rows = conn.execute('SELECT name FROM groups')
+
+    for row in rows:
         existing_name = row[0]
         if base_group_name(existing_name).casefold() == root_group.casefold():
             existing_indices.add(group_subgroup_index(existing_name))
@@ -858,33 +943,62 @@ def get_next_subgroup_name(conn, group_name):
         next_index += 1
     return f'{root_group}-{next_index}'
 
-def is_last_subgroup(conn, group_name):
+def is_last_subgroup(conn, group_name, group_year=None):
     root_group = base_group_name(group_name)
     current_index = group_subgroup_index(group_name)
     max_index = current_index
 
-    for row in conn.execute('SELECT name FROM groups'):
+    if group_year:
+        rows = conn.execute('SELECT name FROM groups WHERE group_year=?', (group_year,))
+    else:
+        rows = conn.execute('SELECT name FROM groups')
+
+    for row in rows:
         existing_name = row[0]
         if base_group_name(existing_name).casefold() == root_group.casefold():
             max_index = max(max_index, group_subgroup_index(existing_name))
 
     return current_index == max_index
 
-def get_groups_with_counts(conn):
+def get_groups_with_counts(conn, group_year=None, include_hidden=False):
+    group_year = normalize_group_year(group_year, get_active_campaign_year()) if group_year else None
     groups = []
-    for row in conn.execute('SELECT name FROM groups ORDER BY name'):
+    if group_year:
+        if include_hidden:
+            rows = conn.execute(
+                'SELECT name, group_year, is_hidden FROM groups WHERE group_year=? ORDER BY is_hidden, name',
+                (group_year,)
+            )
+        else:
+            rows = conn.execute(
+                'SELECT name, group_year, is_hidden FROM groups WHERE group_year=? AND COALESCE(is_hidden, 0)=0 ORDER BY name',
+                (group_year,)
+            )
+    else:
+        if include_hidden:
+            rows = conn.execute('SELECT name, group_year, is_hidden FROM groups ORDER BY group_year, is_hidden, name')
+        else:
+            rows = conn.execute(
+                'SELECT name, group_year, is_hidden FROM groups WHERE COALESCE(is_hidden, 0)=0 ORDER BY group_year, name'
+            )
+
+    for row in rows:
         name = row[0]
+        row_group_year = row[1] or infer_group_year(name, DEFAULT_CAMPAIGN_YEAR)
+        is_hidden = bool(row[2])
         count = get_group_student_count(conn, name)
         is_full = count >= MAX_GROUP_STUDENTS
-        can_create_next = is_full and is_last_subgroup(conn, name)
+        can_create_next = not is_hidden and is_full and is_last_subgroup(conn, name, row_group_year)
         groups.append({
             'name': name,
+            'group_year': row_group_year,
+            'is_hidden': is_hidden,
             'count': count,
             'capacity': MAX_GROUP_STUDENTS,
             'fill': f'{count}/{MAX_GROUP_STUDENTS}',
             'is_full': is_full,
             'can_create_next': can_create_next,
-            'next_name': get_next_subgroup_name(conn, name) if can_create_next else '',
+            'next_name': get_next_subgroup_name(conn, name, row_group_year) if can_create_next else '',
         })
     return groups
 
@@ -924,6 +1038,7 @@ def vaanedain_required(f):
 def set_campaign():
     campaign_year = normalize_campaign_year(request.form.get('campaign_year'), DEFAULT_CAMPAIGN_YEAR)
     session['campaign_year'] = campaign_year
+    session['group_year'] = campaign_year
     next_url = request.form.get('next') or url_for('index')
     if not next_url.startswith('/') or next_url.startswith('//'):
         next_url = url_for('index')
@@ -1677,9 +1792,11 @@ def delete_student():
 @role_required('admin', 'assistant')
 def abiturients_to_students():
     campaign_year = get_active_campaign_year()
+    group_year = normalize_group_year(request.values.get('group_year'), campaign_year)
+    group_years = get_group_years(group_year)
     with sqlite3.connect(DB_PATH) as conn:
         # Получаем список групп из таблицы groups
-        groups = get_groups_with_counts(conn)
+        groups = get_groups_with_counts(conn, group_year)
         # Получаем список абитуриентов
         cur = conn.execute(
             'SELECT id, fio, login, fam, imotch, email, paid FROM abiturients WHERE campaign_year=? ORDER BY fio',
@@ -1703,12 +1820,15 @@ def abiturients_to_students():
         ids = request.form.getlist('abiturient_ids')
         if not cohort1 or not ids:
             flash('Выберите группу и хотя бы одного абитуриента')
-            return redirect(url_for('abiturients_to_students'))
+            return redirect(url_for('abiturients_to_students', group_year=group_year))
         with sqlite3.connect(DB_PATH) as conn:
-            group_exists = conn.execute('SELECT 1 FROM groups WHERE name=?', (cohort1,)).fetchone()
+            group_exists = conn.execute(
+                'SELECT 1 FROM groups WHERE name=? AND group_year=? AND COALESCE(is_hidden, 0)=0',
+                (cohort1, group_year)
+            ).fetchone()
             if not group_exists:
-                flash('Выберите группу из справочника академических групп')
-                return redirect(url_for('abiturients_to_students'))
+                flash('Выберите видимую группу из справочника академических групп')
+                return redirect(url_for('abiturients_to_students', group_year=group_year))
 
             skipped_without_email = []
             skipped_duplicates = []
@@ -1736,7 +1856,7 @@ def abiturients_to_students():
             current_count = get_group_student_count(conn, cohort1)
             free_places = MAX_GROUP_STUDENTS - current_count
             if selected_abiturients and len(selected_abiturients) > free_places:
-                next_group = get_next_subgroup_name(conn, cohort1)
+                next_group = get_next_subgroup_name(conn, cohort1, group_year)
                 flash(f'В группе {cohort1} свободно мест: {max(free_places, 0)}/{MAX_GROUP_STUDENTS}. Создайте или выберите следующую подгруппу: {next_group}')
                 if skipped_without_email:
                     names = ', '.join(skipped_without_email[:10])
@@ -1746,7 +1866,7 @@ def abiturients_to_students():
                     names = ', '.join(skipped_duplicates[:10])
                     suffix = '...' if len(skipped_duplicates) > 10 else ''
                     flash(f'Не перенесены, уже есть в студентах: {names}{suffix}')
-                return redirect(url_for('abiturients_to_students'))
+                return redirect(url_for('abiturients_to_students', group_year=group_year))
 
             migrated_count = 0
             next_group_after_full = ''
@@ -1762,7 +1882,7 @@ def abiturients_to_students():
                 conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (ab_id, campaign_year))
                 migrated_count += 1
             if current_count + migrated_count >= MAX_GROUP_STUDENTS:
-                next_group_after_full = get_next_subgroup_name(conn, cohort1)
+                next_group_after_full = get_next_subgroup_name(conn, cohort1, group_year)
 
         if migrated_count:
             flash(f'Мигрировано студентов: {migrated_count}')
@@ -1781,28 +1901,121 @@ def abiturients_to_students():
             flash('Не удалось найти выбранных абитуриентов для текущей кампании')
 
         target = 'students_list' if migrated_count and not skipped_without_email and not skipped_duplicates else 'abiturients_to_students'
+        if target == 'abiturients_to_students':
+            return redirect(url_for(target, group_year=group_year))
         return redirect(url_for(target))
-    return render_template('abiturients_to_students.html', abiturients=abiturients, groups=groups, campaign_year=campaign_year)
+    return render_template(
+        'abiturients_to_students.html',
+        abiturients=abiturients,
+        groups=groups,
+        campaign_year=campaign_year,
+        group_year=group_year,
+        group_years=group_years,
+    )
 
 @app.route('/add_group', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def add_group():
+    group_year = normalize_group_year(request.values.get('group_year'), get_active_campaign_year())
+    show_hidden = request.values.get('show_hidden') == '1'
+
+    def add_group_url():
+        args = {'group_year': group_year}
+        if show_hidden:
+            args['show_hidden'] = '1'
+        return url_for('add_group', **args)
+
     if request.method == 'POST':
+        group_action = request.form.get('group_action', '').strip()
+        if group_action == 'force_subgroup':
+            source_group = normalize_group_name(request.form.get('source_group', ''))
+            if not source_group:
+                flash('Выберите исходную группу для новой подгруппы')
+                return redirect(add_group_url())
+
+            with sqlite3.connect(DB_PATH) as conn:
+                source_exists = conn.execute(
+                    'SELECT 1 FROM groups WHERE name=? AND group_year=? AND COALESCE(is_hidden, 0)=0',
+                    (source_group, group_year)
+                ).fetchone()
+                if not source_exists:
+                    flash('Исходная группа не найдена или скрыта')
+                    return redirect(add_group_url())
+
+                next_group = get_next_subgroup_name(conn, source_group, group_year)
+                if infer_group_year(next_group, group_year) != group_year:
+                    flash(f'Для папки {group_year} новая подгруппа должна начинаться с {group_year[-2:]}')
+                    return redirect(add_group_url())
+
+                existing = {
+                    row[0].casefold(): row[0]
+                    for row in conn.execute('SELECT name FROM groups')
+                }
+                if group_exists_casefold(existing, next_group):
+                    flash(f'Подгруппа {next_group} уже существует')
+                    return redirect(add_group_url())
+
+                conn.execute(
+                    'INSERT INTO groups (name, group_year) VALUES (?, ?)',
+                    (next_group, group_year)
+                )
+                flash(f'Принудительно создана подгруппа {next_group} для {source_group}')
+            return redirect(add_group_url())
+
+        if group_action in ('hide', 'show', 'delete'):
+            group_name = normalize_group_name(request.form.get('group_name', ''))
+            if not group_name:
+                flash('Выберите группу')
+                return redirect(add_group_url())
+
+            with sqlite3.connect(DB_PATH) as conn:
+                group_row = conn.execute(
+                    'SELECT name FROM groups WHERE name=? AND group_year=?',
+                    (group_name, group_year)
+                ).fetchone()
+                if not group_row:
+                    flash('Группа не найдена в выбранной папке')
+                    return redirect(add_group_url())
+
+                if group_action == 'hide':
+                    conn.execute(
+                        'UPDATE groups SET is_hidden=1 WHERE name=? AND group_year=?',
+                        (group_name, group_year)
+                    )
+                    flash(f'Группа {group_name} скрыта')
+                elif group_action == 'show':
+                    conn.execute(
+                        'UPDATE groups SET is_hidden=0 WHERE name=? AND group_year=?',
+                        (group_name, group_year)
+                    )
+                    flash(f'Группа {group_name} снова отображается')
+                elif group_action == 'delete':
+                    student_count = get_group_student_count(conn, group_name)
+                    if student_count:
+                        flash(f'Нельзя удалить группу {group_name}: в ней есть студенты ({student_count}). Можно скрыть группу.')
+                    else:
+                        conn.execute(
+                            'DELETE FROM groups WHERE name=? AND group_year=?',
+                            (group_name, group_year)
+                        )
+                        flash(f'Группа {group_name} удалена')
+            return redirect(add_group_url())
+
         groups_file = request.files.get('groups_file')
         if groups_file and groups_file.filename:
             filename = secure_filename(groups_file.filename) or 'groups_upload.csv'
             if not filename.lower().endswith('.csv'):
                 flash('Загрузите файл групп в формате CSV')
-                return redirect(url_for('add_group'))
+                return redirect(add_group_url())
 
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             groups_file.save(filepath)
             try:
-                result = process_groups_csv(filepath)
+                result = process_groups_csv(filepath, group_year)
             except Exception as exc:
                 flash(f'Ошибка загрузки групп: {exc}')
-                return redirect(url_for('add_group'))
+                return redirect(add_group_url())
 
             if result['created']:
                 flash(f'Добавлено групп: {len(result["created"])}')
@@ -1814,22 +2027,28 @@ def add_group():
                 flash(f'Ошибки в CSV: {errors}{suffix}')
             if not result['created'] and not result['errors']:
                 flash('Новые группы не добавлены')
-            return redirect(url_for('add_group'))
+            return redirect(add_group_url())
 
         source_group = normalize_group_name(request.form.get('source_group', ''))
         group_name = normalize_group_name(request.form.get('group_name', ''))
         if group_name:
             if not is_valid_group_name(group_name):
                 flash('Название группы должно быть в формате 26ФМ-11-1')
-                return redirect(url_for('add_group'))
+                return redirect(add_group_url())
+            if infer_group_year(group_name, group_year) != group_year:
+                flash(f'Для папки {group_year} название группы должно начинаться с {group_year[-2:]}')
+                return redirect(add_group_url())
             with sqlite3.connect(DB_PATH) as conn:
                 if source_group:
-                    source_exists = conn.execute('SELECT 1 FROM groups WHERE name=?', (source_group,)).fetchone()
+                    source_exists = conn.execute(
+                        'SELECT 1 FROM groups WHERE name=? AND group_year=? AND COALESCE(is_hidden, 0)=0',
+                        (source_group, group_year)
+                    ).fetchone()
                     source_count = get_group_student_count(conn, source_group) if source_exists else 0
-                    expected_group = get_next_subgroup_name(conn, source_group) if source_exists else ''
-                    if not source_exists or source_count < MAX_GROUP_STUDENTS or not is_last_subgroup(conn, source_group) or group_name != expected_group:
+                    expected_group = get_next_subgroup_name(conn, source_group, group_year) if source_exists else ''
+                    if not source_exists or source_count < MAX_GROUP_STUDENTS or not is_last_subgroup(conn, source_group, group_year) or group_name != expected_group:
                         flash('Дополнительную подгруппу можно создать только для последней заполненной группы')
-                        return redirect(url_for('add_group'))
+                        return redirect(add_group_url())
 
                 existing = {
                     row[0].casefold(): row[0]
@@ -1837,9 +2056,9 @@ def add_group():
                 }
                 if group_exists_casefold(existing, group_name):
                     flash('Такая группа уже существует')
-                    return redirect(url_for('add_group'))
+                    return redirect(add_group_url())
                 try:
-                    conn.execute('INSERT INTO groups (name) VALUES (?)', (group_name,))
+                    conn.execute('INSERT INTO groups (name, group_year) VALUES (?, ?)', (group_name, group_year))
                     if source_group:
                         flash(f'Создана дополнительная подгруппа {group_name} для {source_group}')
                     else:
@@ -1848,17 +2067,28 @@ def add_group():
                     flash('Такая группа уже существует')
         else:
             flash('Название группы не может быть пустым')
-        return redirect(url_for('add_group'))
+        return redirect(add_group_url())
     # Список всех групп для отображения
     with sqlite3.connect(DB_PATH) as conn:
-        groups = get_groups_with_counts(conn)
-    return render_template('add_group.html', groups=groups)
+        groups = get_groups_with_counts(conn, group_year, include_hidden=show_hidden)
+    visible_groups = [group for group in groups if not group['is_hidden']]
+    group_years = get_group_years(group_year, include_base=True)
+    return render_template(
+        'add_group.html',
+        groups=groups,
+        visible_groups=visible_groups,
+        group_year=group_year,
+        group_years=group_years,
+        group_year_code=group_year[-2:],
+        show_hidden=show_hidden,
+    )
 
 @app.route('/groups_template/download')
 @login_required
 @role_required('admin')
 def download_groups_template():
-    output = io.BytesIO(GROUPS_TEMPLATE_CSV.encode('utf-8-sig'))
+    group_year = normalize_group_year(request.args.get('group_year'), get_active_campaign_year())
+    output = io.BytesIO(build_groups_template_csv(group_year).encode('utf-8-sig'))
     output.seek(0)
     return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
 

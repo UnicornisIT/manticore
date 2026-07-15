@@ -50,7 +50,8 @@
     </style>
     {% endblock %}
     {% block content %}
-    <h1>Список абитуриентов и логинов: {{ active_campaign_year }}</h1>
+    <h1>Список абитуриентов и логинов</h1>
+    {% include "_campaign_switcher.html" %}
     <div class="abiturients-actions">
         {% if session.get('role') in ['admin', 'assistant'] %}
             <a href="{{ url_for('abiturients_to_students') }}" class="btn" style="background:#16a34a;">Миграция абитуриентов</a>
