@@ -1,7 +1,8 @@
 {% extends "base.html" %}
     {% block title %}Дублирующиеся ФИО абитуриентов{% endblock %}
     {% block content %}
-        <h1>Дублирующиеся ФИО абитуриентов: {{ active_campaign_year }}</h1>
+        <h1>Дублирующиеся ФИО абитуриентов</h1>
+        {% include "_campaign_switcher.html" %}
         <form method="post" style="margin-bottom:18px;">
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
             <button type="submit" name="action" value="reject_all" class="btn btn-danger" onclick="return confirm('Отклонить все дублирующиеся записи?');">Отклонить все</button>

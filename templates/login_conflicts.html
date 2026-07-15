@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Конфликты логинов абитуриентов{% endblock %}
 {% block content %}
-    <h1>Конфликты логинов абитуриентов: {{ active_campaign_year }}</h1>
+    <h1>Конфликты логинов абитуриентов</h1>
+    {% include "_campaign_switcher.html" %}
     <div style="background:#eef6ff; border:1px solid #b3d7ff; padding:16px; margin:16px 0; border-radius:8px; color:#0c3f7f;">
         В этом разделе отображаются абитуриенты с проблемными логинами: как неуникальные, так и те, для которых не удалось разобрать договор и сформировать корректный префикс (error000). Вы можете отредактировать запись и присвоить корректный логин.
     </div>
