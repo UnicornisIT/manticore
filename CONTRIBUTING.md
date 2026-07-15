@@ -1,11 +1,11 @@
-# Contributing to logins_moodle
+# Contributing to manticore
 
 Thank you for your interest in contributing! Here are some guidelines to help you get started.
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/logins_moodle.git`
+2. Clone your fork: `git clone https://github.com/your-username/manticore.git`
 3. Create a virtual environment: `python -m venv .venv`
 4. Activate it: `.\.venv\Scripts\Activate.ps1` (Windows) or `source .venv/bin/activate` (Linux)
 5. Install dependencies: `pip install -r requirements.txt`
