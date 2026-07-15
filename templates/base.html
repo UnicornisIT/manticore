@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}Логины абитуриентов{% endblock %}</title>
+    <title>{% block title %}manticore{% endblock %}</title>
     <style>
         body {
             margin: 0;
@@ -71,6 +71,23 @@
         ul li a:hover, ul li a.active {
             background: #e0e7ff;
         }
+        ul li a.nav-brand {
+            position: relative;
+            color: #111827;
+            font-size: 17px;
+            font-weight: 800;
+            line-height: 1;
+        }
+        ul li a.nav-brand::after {
+            content: "";
+            position: absolute;
+            right: 14px;
+            bottom: 3px;
+            left: 14px;
+            height: 3px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #0f766e, #f59e0b, #dc2626);
+        }
         table {
             width: 100%;
             min-width: 900px;
@@ -106,14 +123,6 @@
         }
         .btn-danger:hover {
             background: #b91c1c;
-        }
-        .logo-container {
-            text-align: center;
-            margin-bottom: 24px;
-        }
-        .logo-img {
-            max-width: 180px;
-            margin-bottom: 10px;
         }
         .file-input-wrapper {
             margin-bottom: 18px;
@@ -221,7 +230,7 @@
     <div class="container">
         {% if session.get('user') %}
         <ul>
-            <li><a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active"{% endif %}>Главная</a></li>
+            <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
             <li><a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a></li>
             <li><a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a></li>
             <li><a href="{{ url_for('students_list') }}" {% if request.endpoint == 'students' %}class="active"{% endif %}>Список студентов</a></li>

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR=${1:-/srv/logins_moodle_v3.5}
-SERVICE_NAME=logins_moodle
+APP_DIR=${1:-/srv/manticore}
+SERVICE_NAME=manticore
 VENV_DIR="$APP_DIR/.venv"
 
 if [[ "$EUID" -ne 0 ]]; then

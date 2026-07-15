@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR=${1:-/srv/logins_moodle_v3.5}
+APP_DIR=${1:-/srv/manticore}
 DOMAIN=${2:-example.com}
-SERVICE_NAME=logins_moodle
+SERVICE_NAME=manticore
 VENV_DIR="$APP_DIR/.venv"
 NGINX_AVAILABLE="/etc/nginx/sites-available/$SERVICE_NAME"
 NGINX_ENABLED="/etc/nginx/sites-enabled/$SERVICE_NAME"
@@ -48,7 +48,7 @@ chmod -R 750 "$APP_DIR/uploads"
 
 cat > "$SERVICE_FILE" <<'EOF'
 [Unit]
-Description=Flask app logins_moodle
+Description=manticore Flask app
 After=network.target
 
 [Service]

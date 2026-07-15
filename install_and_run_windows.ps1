@@ -206,7 +206,7 @@ catch {
     $lanIp = $null
 }
 
-Write-Step "Starting Logins Moodle"
+Write-Step "Starting manticore"
 Write-Host "This computer: http://127.0.0.1:5000" -ForegroundColor Green
 if ($lanIp) {
     Write-Host "Local network: http://${lanIp}:5000" -ForegroundColor Green

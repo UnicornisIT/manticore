@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Главная страница{% endblock %}
+{% block title %}manticore{% endblock %}
 {% block head %}
 <style>
     body.home-page .container {
@@ -16,12 +16,29 @@
         min-height: 0;
         padding: 24px 0 42px 0;
     }
-    .home-content h1 {
+    .home-content .brand-wordmark {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 88px;
         margin: 0;
+        padding: 8px 20px 14px;
+        color: #111827;
+        font-size: 58px;
+        font-weight: 800;
+        line-height: 1;
         text-align: center;
     }
-    .home-content .logo-container {
-        margin: 0;
+    .home-content .brand-wordmark::after {
+        content: "";
+        position: absolute;
+        right: 20px;
+        bottom: 0;
+        left: 20px;
+        height: 6px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #0f766e, #f59e0b, #dc2626);
     }
     .home-content p {
         margin: 0;
@@ -81,9 +98,9 @@
             padding-top: 12px;
             gap: 14px;
         }
-        .home-content .logo-img {
-            width: 180px !important;
-            height: 120px !important;
+        .home-content .brand-wordmark {
+            min-height: 66px;
+            font-size: 44px;
         }
         .home-summary {
             padding: 16px 18px;
@@ -110,6 +127,10 @@
         }
     }
     @media (max-width: 560px) {
+        .home-content .brand-wordmark {
+            min-height: 60px;
+            font-size: 40px;
+        }
         .home-features {
             grid-template-columns: 1fr;
         }
@@ -121,15 +142,12 @@
 {% endblock %}
 {% block content %}
 <div class="home-content">
-    <h1>Главная страница</h1>
-    <div class="logo-container">
-        <img src="/static/logo.png" alt="Логотип" class="logo-img" style="width:300px; height:200px; object-fit:contain;">
-    </div>
+    <h1 class="brand-wordmark">manticore</h1>
     <p>
         Для работы с файлами перейдите на страницу <a href="{{ url_for('file_work') }}" class="btn">Работа с файлами</a>
     </p>
     <section class="home-summary" aria-label="Описание сервиса">
-        <h2>Сервис подготовки логинов Moodle</h2>
+        <h2>manticore для подготовки логинов Moodle</h2>
         <p class="home-summary-text">
             <span>Система помогает приемной комиссии вести абитуриентов и студентов,</span>
             <span>формировать уникальные логины, контролировать дубли</span>

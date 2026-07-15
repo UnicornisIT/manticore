@@ -1,6 +1,6 @@
-# logins_moodle
+# manticore
 
-`logins_moodle` — Flask-приложение для подготовки логинов абитуриентов и студентов Moodle.
+`manticore` — Flask-приложение для подготовки логинов абитуриентов и студентов Moodle.
 
 Приложение помогает:
 
@@ -325,7 +325,7 @@ http://192.168.30.25:5000
 Откройте PowerShell от администратора и выполните:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Logins Moodle Flask 5000" -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow
+New-NetFirewallRule -DisplayName "manticore Flask 5000" -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow
 ```
 
 Также проверьте:
@@ -755,7 +755,7 @@ DB_FILENAME=baze.db
 В проекте есть шаблоны для Linux:
 
 ```text
-deploy/logins_moodle.service
+deploy/manticore.service
 deploy/nginx.conf
 deploy.sh
 update.sh
@@ -765,20 +765,20 @@ update.sh
 
 ```bash
 chmod +x deploy.sh update.sh
-sudo ./deploy.sh /srv/logins_moodle example.com
+sudo ./deploy.sh /srv/manticore example.com
 ```
 
 Пример обновления:
 
 ```bash
-sudo bash update.sh /srv/logins_moodle
+sudo bash update.sh /srv/manticore
 ```
 
 Проверка службы:
 
 ```bash
-sudo systemctl status logins_moodle
-sudo journalctl -u logins_moodle -f
+sudo systemctl status manticore
+sudo journalctl -u manticore -f
 ```
 
 Проверка Nginx:
