@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/images/manticore-logo.png" alt="manticore" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/manticore-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/manticore-logo.png">
+    <img src="docs/images/manticore-logo.png" alt="manticore" width="900">
+  </picture>
 </p>
 
 # manticore
