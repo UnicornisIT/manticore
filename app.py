@@ -20,7 +20,7 @@ except ImportError:
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -510,13 +510,23 @@ def init_db():
 
 init_db()
 
-# Initialize default admin user (CHANGE PASSWORD AFTER FIRST LOGIN!)
-_default_admin_password = os.environ.get('ADMIN_DEFAULT_PASSWORD', 'admin123')
+# Initialize default admin user from local environment only.
+_default_admin_password = os.environ.get('ADMIN_DEFAULT_PASSWORD')
 with sqlite3.connect(DB_PATH) as conn:
-    conn.execute(
-        "INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
-        ("admin", hash_user_password(_default_admin_password), "admin", 1)
-    )
+    admin_exists = conn.execute(
+        "SELECT 1 FROM users WHERE username=?",
+        ("admin",)
+    ).fetchone()
+    if not admin_exists:
+        if not _default_admin_password:
+            raise RuntimeError(
+                "ADMIN_DEFAULT_PASSWORD is not set. Copy .env.example to .env "
+                "and set a strong local admin password before first launch."
+            )
+        conn.execute(
+            "INSERT INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
+            ("admin", hash_user_password(_default_admin_password), "admin", 1)
+        )
 
 def get_campaign_years():
     years = set(BASE_CAMPAIGN_YEARS)
@@ -2093,4 +2103,7 @@ def download_groups_template():
     return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app_host = os.environ.get("APP_HOST", "127.0.0.1")
+    app_port = int(os.environ.get("APP_PORT", "5000"))
+    app_debug = os.environ.get("APP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    app.run(host=app_host, port=app_port, debug=app_debug)

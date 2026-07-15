@@ -185,15 +185,20 @@ if (-not (Test-Path -LiteralPath "uploads")) {
 if (-not (Test-Path -LiteralPath ".env")) {
     $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".ToCharArray()
     $secret = -join (1..48 | ForEach-Object { $chars | Get-Random })
+    $adminPassword = -join (1..20 | ForEach-Object { $chars | Get-Random })
     @(
         "SECRET_KEY=$secret",
-        "ADMIN_DEFAULT_PASSWORD=123",
+        "ADMIN_DEFAULT_PASSWORD=$adminPassword",
         "UPLOAD_FOLDER=uploads",
         "DB_FILENAME=baze.db",
         "DEFAULT_CAMPAIGN_YEAR=2026",
         "LEGACY_CAMPAIGN_YEAR=2025",
-        "FLASK_ENV=production"
+        "FLASK_ENV=production",
+        "APP_HOST=0.0.0.0",
+        "APP_PORT=5000",
+        "APP_DEBUG=false"
     ) | Set-Content -Path ".env" -Encoding UTF8
+    Write-Host "Generated local admin password and saved it in .env." -ForegroundColor Yellow
 }
 
 $lanIp = $null
