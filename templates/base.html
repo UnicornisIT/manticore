@@ -10,7 +10,8 @@
             background: #f8fafc;
             font-family: 'Segoe UI', Arial, sans-serif;
         }
-        body.home-page {
+        body.home-page,
+        body.login-page-body {
             height: 100vh;
             overflow: hidden;
         }
@@ -24,18 +25,53 @@
             min-height: 90vh;
             overflow-x: auto;
         }
-        body.home-page .container {
+        body.home-page .container,
+        body.login-page-body .container {
             box-sizing: border-box;
-            height: calc(100vh - var(--home-footer-height, 56px));
+            height: calc(100vh - var(--main-footer-height, 56px));
             min-height: 0;
             overflow-y: auto;
         }
-        body.home-page #main-footer {
+        body.home-page #main-footer,
+        body.login-page-body #main-footer {
             position: fixed;
             left: 0;
             bottom: 0;
             width: 100%;
             z-index: 100;
+        }
+        #main-footer {
+            width: 100%;
+            background: #e5e7eb;
+            color: #2d3a4b;
+            text-align: center;
+            padding: 16px 0;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            box-sizing: border-box;
+        }
+        .footer-inner {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 0 16px;
+            box-sizing: border-box;
+        }
+        .footer-link {
+            color: #2d3a4b;
+            text-decoration: none;
+            margin: 0 8px;
+            font-weight: 600;
+        }
+        .footer-user {
+            display: inline-block;
+            margin-top: 6px;
+            font-size: 13px;
+        }
+        .footer-version {
+            display: inline-block;
+            margin-top: 6px;
+            color: #64748b;
+            font-size: 13px;
         }
         h1 {
             color: #2563eb;
@@ -87,6 +123,60 @@
             height: 3px;
             border-radius: 999px;
             background: linear-gradient(90deg, #0f766e, #f59e0b, #dc2626);
+        }
+        .main-nav {
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: nowrap;
+            width: 100%;
+            margin: 0 0 14px 0;
+            overflow: visible;
+        }
+        .main-nav li {
+            flex: 0 0 auto;
+        }
+        .main-nav li a {
+            padding: 7px 10px;
+            font-size: 15px;
+            line-height: 1.2;
+        }
+        .main-nav li a.nav-brand {
+            padding: 6px 9px;
+            font-size: 16px;
+        }
+        .main-nav li a.nav-brand::after {
+            right: 9px;
+            left: 9px;
+        }
+        .nav-icon-link {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            padding: 0 !important;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .nav-icon {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
         }
         table {
             width: 100%;
@@ -205,6 +295,28 @@
             background: #dcfce7;
             border-color: #bbf7d0;
         }
+        .flash-message.error {
+            color: #991b1b;
+            background: #fee2e2;
+            border-color: #fecaca;
+        }
+        .flash-message.info {
+            color: #1e3a8a;
+            background: #dbeafe;
+            border-color: #bfdbfe;
+        }
+        @media (max-width: 1100px) {
+            .main-nav {
+                justify-content: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                overflow-x: visible;
+            }
+            .main-nav li a {
+                font-size: 14px;
+                padding: 7px 9px;
+            }
+        }
         @media (max-width: 900px) {
             .container {
                 padding: 8px;
@@ -218,61 +330,101 @@
             }
         }
         @media (max-width: 600px) {
-            .container { padding: 4px; }
+            .container { padding: 8px 6px; }
             table, th, td { font-size: 12px; min-width: 320px; }
             h1 { font-size: 1.1em; }
-            ul { flex-direction: column; align-items: center; }
+            ul:not(.main-nav) { flex-direction: column; align-items: center; }
+            .main-nav {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 6px;
+                white-space: normal;
+            }
+            .main-nav li {
+                min-width: 0;
+            }
+            .main-nav li a {
+                width: 100%;
+                min-height: 34px;
+                box-sizing: border-box;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                font-size: 13px;
+                padding: 7px 8px;
+            }
+            .main-nav li a.nav-brand {
+                font-size: 16px;
+            }
+            .main-nav .nav-icon-link {
+                width: 100%;
+                min-width: 0;
+            }
             form { padding: 12px; }
         }
     </style>
     {% block head %}{% endblock %}
 </head>
-<body class="{% if request.endpoint == 'index' %}home-page{% endif %}">
+<body class="{% if request.endpoint == 'index' %}home-page{% elif request.endpoint == 'login' %}login-page-body{% endif %}">
     <div class="container">
         {% if session.get('user') %}
-        <ul>
+        <ul class="main-nav">
             <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
             <li><a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a></li>
             <li><a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a></li>
             <li><a href="{{ url_for('students_list') }}" {% if request.endpoint == 'students' %}class="active"{% endif %}>Список студентов</a></li>
             <li><a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Дублирующиеся записи</a></li>
             <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
+            {% if session.get('role') == 'admin' %}
+            <li>
+                <a href="{{ url_for('admin_panel') }}" class="nav-icon-link{% if request.endpoint in ['admin_panel', 'approve_users', 'add_user', 'edit_user'] %} active{% endif %}" aria-label="Панель администратора" title="Панель администратора">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path>
+                        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.04a2 2 0 1 1-3.92 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.04a2 2 0 1 1 0-3.92L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.04a2 2 0 1 1 3.92 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.18.37.4.7.6 1l.04.04a2 2 0 1 1 0 3.92L20 14a1.7 1.7 0 0 0-.6 1Z"></path>
+                    </svg>
+                    <span class="sr-only">Панель администратора</span>
+                </a>
+            </li>
+            {% endif %}
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>
         {% endif %}
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            <div class="flash-messages">
-              {% for category, message in messages %}
-                <div class="flash-message {{ category }}">{{ message }}</div>
-              {% endfor %}
-            </div>
-          {% endif %}
-        {% endwith %}
+        {% if request.endpoint != 'login' %}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                <div class="flash-messages">
+                  {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            {% endwith %}
+        {% endif %}
         {% block content %}{% endblock %}
     </div>
-    {% if request.endpoint == 'index' %}
-    <footer id="main-footer" style="width:100%; background:#e5e7eb; color:#2d3a4b; text-align:center; padding:16px 0; font-size:14px; letter-spacing:0.5px;">
-        <div style="max-width:1500px; margin:0 auto;">
+    {% if request.endpoint in ['index', 'login'] %}
+    <footer id="main-footer">
+        <div class="footer-inner">
             <div>
                 Разработано UnicornisIT • 
-                <a href="https://github.com/UnicornisIT" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="GitHub репозиторий">GitHub</a> • 
-                <a href="https://t.me/unicornis_pulse" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="Telegram канал">Telegram</a> • 
-                <a href="mailto:dev-eva@outlook.com" style="color:#2d3a4b; text-decoration:none; margin:0 8px;" title="Email">Email</a><br>
-                <span style="font-size:13px; margin-top:6px; display:inline-block;">Вы вошли под пользователем: <span style="font-weight:600;">{{ session.get('user') }}</span></span>
+                <a href="https://github.com/UnicornisIT" class="footer-link" title="GitHub репозиторий">GitHub</a> • 
+                <a href="https://t.me/unicornis_pulse" class="footer-link" title="Telegram канал">Telegram</a> • 
+                <a href="mailto:dev-eva@outlook.com" class="footer-link" title="Email">Email</a>
+                {% if session.get('user') %}
+                    <br>
+                    <span class="footer-user">Вы вошли под пользователем: <span style="font-weight:600;">{{ session.get('user') }}</span></span>
+                {% endif %}
+                <br>
+                <span class="footer-version">manticore v{{ app_version }}</span>
             </div>
-            {% if session.get('role') == 'admin' %}
-                <div style="margin-top:14px;">
-                    <a href="{{ url_for('admin_panel') }}" class="btn" style="margin:0 auto; display:inline-block;">Панель администратора</a>
-                </div>
-            {% endif %}
         </div>
     </footer>
     <script>
     function syncHomeFooterHeight() {
         const footer = document.getElementById('main-footer');
         if (footer) {
-            document.documentElement.style.setProperty('--home-footer-height', `${footer.offsetHeight}px`);
+            document.documentElement.style.setProperty('--main-footer-height', `${footer.offsetHeight}px`);
         }
     }
     window.addEventListener('load', syncHomeFooterHeight);
