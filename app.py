@@ -1,6 +1,7 @@
 import os
 import re
 import csv
+import secrets
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -10,6 +11,7 @@ import io
 import hmac
 from functools import wraps
 from datetime import date
+from time import time
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -21,11 +23,17 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax'),
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '').lower() in {'1', 'true', 'yes', 'on'},
+)
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
+APP_VERSION = os.environ.get('APP_VERSION', '1.0.3')
 
 _campaign_year_re = re.compile(r'^20\d{2}$')
 _dogovor_year_re = re.compile(r'20\d{2}')
@@ -399,6 +407,74 @@ def ensure_group_year_column(conn):
 
 PASSWORD_HASH_PREFIXES = ('scrypt:', 'pbkdf2:', 'argon2:')
 MIN_PASSWORD_LENGTH = 8
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
+LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '600'))
+_login_attempts = {}
+
+@app.context_processor
+def inject_app_version():
+    return {'app_version': APP_VERSION}
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    if request.endpoint != 'static' and response.mimetype == 'text/html':
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+def get_login_csrf_token():
+    token = session.get('login_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['login_csrf_token'] = token
+    return token
+
+def refresh_login_csrf_token():
+    session['login_csrf_token'] = secrets.token_urlsafe(32)
+    return session['login_csrf_token']
+
+def validate_login_csrf_token():
+    expected = session.get('login_csrf_token')
+    actual = request.form.get('csrf_token') or ''
+    return bool(expected) and hmac.compare_digest(expected, actual)
+
+def get_client_ip():
+    forwarded_for = request.headers.get('X-Forwarded-For', '')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
+def get_login_attempt_key(username):
+    return (get_client_ip(), str(username or '').strip().lower())
+
+def get_recent_login_attempts(key):
+    now = time()
+    attempts = [attempted_at for attempted_at in _login_attempts.get(key, []) if now - attempted_at < LOGIN_WINDOW_SECONDS]
+    if attempts:
+        _login_attempts[key] = attempts
+    else:
+        _login_attempts.pop(key, None)
+    return attempts
+
+def get_login_lockout(username):
+    key = get_login_attempt_key(username)
+    attempts = get_recent_login_attempts(key)
+    if len(attempts) < LOGIN_MAX_ATTEMPTS:
+        return 0
+    return max(1, int(LOGIN_WINDOW_SECONDS - (time() - attempts[0])))
+
+def record_login_failure(username):
+    key = get_login_attempt_key(username)
+    attempts = get_recent_login_attempts(key)
+    attempts.append(time())
+    _login_attempts[key] = attempts
+
+def clear_login_failures(username):
+    _login_attempts.pop(get_login_attempt_key(username), None)
 
 def is_password_hash(value):
     return str(value or '').startswith(PASSWORD_HASH_PREFIXES)
@@ -1469,9 +1545,20 @@ def manual_create():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    session.pop('user', None)
+    session.pop('role', None)
+    username = ''
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
+        if not validate_login_csrf_token():
+            flash('Сессия формы устарела. Попробуйте ещё раз.', 'error')
+            return render_template('login.html', login_csrf_token=refresh_login_csrf_token(), username=username)
+        lockout_seconds = get_login_lockout(username)
+        if lockout_seconds:
+            lockout_minutes = max(1, (lockout_seconds + 59) // 60)
+            flash(f'Слишком много попыток входа. Попробуйте через {lockout_minutes} мин.', 'error')
+            return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
                 'SELECT id, password, role, approved FROM users WHERE username=?',
@@ -1482,18 +1569,22 @@ def login():
             if password_ok and not is_password_hash(user[1]):
                 conn.execute('UPDATE users SET password=? WHERE id=?', (hash_user_password(password), user[0]))
             if password_ok and user[3] == 1:
+                clear_login_failures(username)
+                session.clear()
                 session['user'] = username
                 session['role'] = user[2]
                 return redirect(url_for('index'))
             elif password_ok and user[3] == 0:
-                flash('Ожидайте одобрения администратора')
+                flash('Ожидайте одобрения администратора.', 'error')
             else:
-                flash('Неверный логин или пароль')
-    return render_template('login.html')
+                record_login_failure(username)
+                flash('Неверный логин или пароль.', 'error')
+    return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
 
 @app.route('/logout')
 def logout():
-    session.pop('user', None)
+    session.clear()
+    flash('Вы вышли из системы.', 'success')
     return redirect(url_for('login'))
 
 @app.route('/edit_abiturient/<login>', methods=['GET', 'POST'])
