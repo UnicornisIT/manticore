@@ -31,3 +31,10 @@ If you discover a security vulnerability, please email the maintainers instead o
 ## Dependency Updates
 
 Run `pip install --upgrade -r requirements.txt` regularly to get security updates.
+
+The repository includes a `pip-audit` GitHub Actions workflow for pull requests and pushes to the main branch. For a local check, run:
+
+```bash
+python -m pip install pip-audit
+pip-audit -r requirements-prod.txt
+```

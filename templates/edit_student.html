@@ -3,6 +3,7 @@
 {% block content %}
 <h2 style="margin-bottom: 24px;">Редактировать студента</h2>
 <form method="post" style="max-width: 480px; margin: 0 auto; background: #f3f6fa; padding: 28px 32px 22px 32px; border-radius: 12px; box-shadow: 0 2px 8px #e5e7eb;">
+    {% include "_csrf_field.html" %}
     <div style="margin-bottom: 18px;">
         <label style="font-weight: 500; color: #374151;">Логин:</label>
         <div style="padding: 8px 12px; background: #e5e7eb; border-radius: 6px; color: #2563eb; font-size: 1.1em;">{{ student[0] }}</div>

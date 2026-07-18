@@ -130,6 +130,7 @@
                 <td>
                     {% if session.get('role') == 'admin' %}
                         <form method="post" action="{{ url_for('toggle_abiturient_paid') }}" style="display:inline; margin-right: 8px;">
+                            {% include "_csrf_field.html" %}
                             <input type="hidden" name="id" value="{{ a['id'] }}">
                             <input type="hidden" name="spec" value="{{ request.args.get('spec', '') }}">
                             <input type="hidden" name="base" value="{{ request.args.get('base', '') }}">
@@ -144,6 +145,7 @@
                             </label>
                         </form>
                         <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
+                            {% include "_csrf_field.html" %}
                             <input type="hidden" name="id" value="{{ a['id'] }}">
                             <input type="hidden" name="login" value="{{ a['login'] }}">
                             <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">

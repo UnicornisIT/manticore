@@ -8,6 +8,7 @@
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; border-bottom:1px solid #e5e7eb; padding-bottom:10px;">
                 <span style="font-size:16px; font-weight:500;">{{ user[1] }} <span style="color:#2563eb;">({{ user[2] }})</span></span>
                 <form method="post" style="display:inline;">
+                    {% include "_csrf_field.html" %}
                     <input type="hidden" name="user_id" value="{{ user[0] }}">
                     <button name="action" value="approve" class="btn" style="margin-right:8px;">Одобрить</button>
                     <button name="action" value="reject" class="btn btn-danger">Отклонить</button>

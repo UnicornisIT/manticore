@@ -88,6 +88,7 @@
             <td>
                 <a href="{{ url_for('edit_student', username=s['username']) }}">Редактировать</a>
                 <form method="post" action="{{ url_for('delete_student') }}" style="display:inline;" onsubmit="return confirm('Удалить студента?');">
+                    {% include "_csrf_field.html" %}
                     <input type="hidden" name="username" value="{{ s['username'] }}">
                     <button type="submit">Удалить</button>
                 </form>

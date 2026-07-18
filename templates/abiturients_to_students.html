@@ -119,6 +119,7 @@
     {% endif %}
 
     <form method="post" target="_blank" rel="noopener">
+        {% include "_csrf_field.html" %}
     <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
     <input type="hidden" name="group_year" value="{{ group_year }}">
     <div class="migration-controls">

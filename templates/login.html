@@ -124,7 +124,7 @@
     <form method="post" class="login-card" data-login-form>
         <img src="{{ url_for('static', filename='images/manticore-logo.png') }}" alt="manticore" class="login-logo">
         <h2>Вход</h2>
-        <input type="hidden" name="csrf_token" value="{{ login_csrf_token }}">
+        {% include "_csrf_field.html" %}
         <div class="login-field">
             <label for="username">Логин:</label>
             <input type="text" id="username" name="username" value="{{ username|default('', true) }}" required autocomplete="username">

@@ -94,11 +94,12 @@
     <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>Excel</b> и содержать столбцы: <b>ФИО, Договор</b>.</p>
     <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон для абитуриентов</a></p>
     <form method="post" enctype="multipart/form-data" class="upload-form">
+        {% include "_csrf_field.html" %}
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <div class="upload-row">
             <label for="file">Загрузить файл абитуриентов (Excel):</label>
             <span class="file-picker">
-                <input type="file" name="file" id="file" accept=".xlsx,.xls" required data-file-name-target="file_name">
+                <input type="file" name="file" id="file" accept=".xlsx,.xls,.csv" required data-file-name-target="file_name">
                 <label for="file" class="file-picker-button">Выберите файл</label>
                 <span id="file_name" class="file-picker-name">Файл не выбран</span>
             </span>
@@ -114,10 +115,11 @@
     <p>Для загрузки списка студентов используйте отдельную форму ниже. Файл должен быть в формате <b>CSV</b> и содержать столбцы: <b>username, password, email, firstname, lastname, cohort1</b>.</p>
     <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary upload-template-link">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        {% include "_csrf_field.html" %}
         <div class="upload-row">
             <label for="students_file">Загрузить файл студентов (CSV):</label>
             <span class="file-picker">
-                <input type="file" name="file" id="students_file" accept=".csv" required data-file-name-target="students_file_name">
+                <input type="file" name="file" id="students_file" accept=".xlsx,.xls,.csv" required data-file-name-target="students_file_name">
                 <label for="students_file" class="file-picker-button">Выберите файл</label>
                 <span id="students_file_name" class="file-picker-name">Файл не выбран</span>
             </span>
