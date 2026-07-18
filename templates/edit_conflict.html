@@ -11,6 +11,7 @@
         </div>
 
         <form method="post" style="border:1px solid #ddd; padding:20px; border-radius:8px; background:#f9f9f9;">
+            {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ conflict[6] }}">
             <label for="login" style="font-weight:500; display:block; margin-bottom:8px;">Новый логин:</label>
             <input type="text" id="login" name="login" required value="{{ conflict[3] }}" 

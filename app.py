@@ -2,10 +2,12 @@ import os
 import re
 import csv
 import secrets
+import tempfile
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
+from urllib.parse import urlparse
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
 import sqlite3
 import io
 import hmac
@@ -21,19 +23,127 @@ except ImportError:
 # Load environment variables from .env file
 load_dotenv()
 
+TRUTHY_ENV_VALUES = {'1', 'true', 'yes', 'on'}
+
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in TRUTHY_ENV_VALUES
+
+def env_int(name, default, minimum=None):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    return value
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+MAX_UPLOAD_SIZE_MB = env_int('MAX_UPLOAD_SIZE_MB', 16, minimum=1)
+MAX_UPLOAD_BYTES = env_int('MAX_CONTENT_LENGTH', MAX_UPLOAD_SIZE_MB * 1024 * 1024, minimum=1024)
 app.config.update(
+    MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax'),
-    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '').lower() in {'1', 'true', 'yes', 'on'},
+    SESSION_COOKIE_SECURE=env_bool('SESSION_COOKIE_SECURE', False),
 )
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
-APP_VERSION = os.environ.get('APP_VERSION', '1.0.3')
+APP_VERSION = os.environ.get('APP_VERSION', '1.0.4')
+ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
+HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
+HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
+HSTS_PRELOAD = env_bool('HSTS_PRELOAD', False)
+ABITURIENT_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+STUDENTS_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+GROUPS_UPLOAD_EXTENSIONS = {'csv'}
+
+class UploadValidationError(ValueError):
+    pass
+
+def format_upload_size(size_bytes):
+    size_mb = size_bytes / (1024 * 1024)
+    if size_mb >= 1:
+        return f'{size_mb:.0f} МБ'
+    return f'{max(1, size_bytes // 1024)} КБ'
+
+def allowed_extensions_text(allowed_extensions):
+    return ', '.join(f'.{extension}' for extension in sorted(allowed_extensions))
+
+def get_upload_extension(file_storage):
+    filename = file_storage.filename if file_storage else ''
+    return os.path.splitext(filename or '')[1].lstrip('.').lower()
+
+def validate_uploaded_file(file_storage, allowed_extensions):
+    if not file_storage or not file_storage.filename:
+        raise UploadValidationError('Выберите файл для загрузки.')
+
+    extension = get_upload_extension(file_storage)
+    if extension not in allowed_extensions:
+        raise UploadValidationError(
+            f'Неверный тип файла. Разрешены: {allowed_extensions_text(allowed_extensions)}.'
+        )
+    return extension
+
+def make_temp_upload_path(extension, prefix='upload_'):
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    fd, path = tempfile.mkstemp(
+        prefix=prefix,
+        suffix=f'.{extension}',
+        dir=app.config['UPLOAD_FOLDER']
+    )
+    os.close(fd)
+    return path
+
+def save_upload_to_temp(file_storage, allowed_extensions):
+    extension = validate_uploaded_file(file_storage, allowed_extensions)
+    temp_path = make_temp_upload_path(extension)
+    file_storage.save(temp_path)
+    return temp_path
+
+def cleanup_temp_files(*paths):
+    for path in paths:
+        if not path:
+            continue
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            app.logger.warning('Could not remove temporary file: %s', path)
+
+def send_temp_download(file_path, download_name, mimetype):
+    with open(file_path, 'rb') as file_obj:
+        output = io.BytesIO(file_obj.read())
+    output.seek(0)
+    cleanup_temp_files(file_path)
+    return send_file(output, as_attachment=True, download_name=download_name, mimetype=mimetype)
+
+def read_csv_dataframe(file_path):
+    last_error = None
+    for encoding in ('utf-8-sig', 'cp1251', 'utf-8'):
+        try:
+            return pd.read_csv(file_path, sep=None, engine='python', encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+    if last_error:
+        raise ValueError('Не удалось прочитать CSV в кодировке UTF-8 или Windows-1251')
+    raise ValueError('Не удалось прочитать CSV-файл')
+
+def read_tabular_upload(file_path):
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension == '.csv':
+        return read_csv_dataframe(file_path)
+    if extension == '.xls':
+        return pd.read_excel(file_path)
+    return pd.read_excel(file_path, engine="openpyxl")
 
 _campaign_year_re = re.compile(r'^20\d{2}$')
 _dogovor_year_re = re.compile(r'20\d{2}')
@@ -409,38 +519,89 @@ PASSWORD_HASH_PREFIXES = ('scrypt:', 'pbkdf2:', 'argon2:')
 MIN_PASSWORD_LENGTH = 8
 LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
 LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '600'))
-_login_attempts = {}
+CSRF_SESSION_KEY = 'csrf_token'
+CSRF_FORM_FIELD = 'csrf_token'
 
 @app.context_processor
-def inject_app_version():
-    return {'app_version': APP_VERSION}
+def inject_template_globals():
+    return {
+        'app_version': APP_VERSION,
+        'csrf_token': get_csrf_token,
+    }
+
+def request_uses_https():
+    forwarded_proto = request.headers.get('X-Forwarded-Proto', '')
+    forwarded_proto = forwarded_proto.split(',')[0].strip().lower()
+    return request.is_secure or forwarded_proto == 'https'
+
+def build_hsts_header():
+    parts = [f'max-age={HSTS_MAX_AGE}']
+    if HSTS_INCLUDE_SUBDOMAINS:
+        parts.append('includeSubDomains')
+    if HSTS_PRELOAD:
+        parts.append('preload')
+    return '; '.join(parts)
 
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
     response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    if ENABLE_HSTS and request_uses_https():
+        response.headers.setdefault('Strict-Transport-Security', build_hsts_header())
     if request.endpoint != 'static' and response.mimetype == 'text/html':
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     return response
 
-def get_login_csrf_token():
-    token = session.get('login_csrf_token')
+@app.errorhandler(RequestEntityTooLarge)
+def handle_upload_too_large(error):
+    flash(f'Файл слишком большой. Максимальный размер: {format_upload_size(MAX_UPLOAD_BYTES)}.', 'error')
+    return redirect(get_safe_referrer(default_endpoint='file_work'), code=303)
+
+def get_safe_referrer(default_endpoint='index'):
+    referrer = request.referrer
+    if referrer:
+        parsed = urlparse(referrer)
+        if not parsed.netloc or parsed.netloc == request.host:
+            return referrer
+    return url_for(default_endpoint if 'user' in session else 'login')
+
+def get_csrf_token():
+    token = session.get(CSRF_SESSION_KEY)
     if not token:
         token = secrets.token_urlsafe(32)
-        session['login_csrf_token'] = token
+        session[CSRF_SESSION_KEY] = token
     return token
 
+def refresh_csrf_token():
+    session[CSRF_SESSION_KEY] = secrets.token_urlsafe(32)
+    return session[CSRF_SESSION_KEY]
+
+def validate_csrf_token():
+    expected = session.get(CSRF_SESSION_KEY)
+    actual = request.form.get(CSRF_FORM_FIELD) or request.headers.get('X-CSRF-Token') or ''
+    return bool(expected) and hmac.compare_digest(expected, actual)
+
+def get_login_csrf_token():
+    return get_csrf_token()
+
 def refresh_login_csrf_token():
-    session['login_csrf_token'] = secrets.token_urlsafe(32)
-    return session['login_csrf_token']
+    return refresh_csrf_token()
 
 def validate_login_csrf_token():
-    expected = session.get('login_csrf_token')
-    actual = request.form.get('csrf_token') or ''
-    return bool(expected) and hmac.compare_digest(expected, actual)
+    return validate_csrf_token()
+
+@app.before_request
+def protect_post_requests_with_csrf():
+    if request.method != 'POST':
+        return None
+    if validate_csrf_token():
+        return None
+    refresh_csrf_token()
+    flash('Сессия формы устарела. Попробуйте ещё раз.', 'error')
+    return redirect(get_safe_referrer(default_endpoint='index'), code=303)
 
 def get_client_ip():
     forwarded_for = request.headers.get('X-Forwarded-For', '')
@@ -451,14 +612,28 @@ def get_client_ip():
 def get_login_attempt_key(username):
     return (get_client_ip(), str(username or '').strip().lower())
 
+def prune_login_attempts(conn, now=None):
+    now = now or time()
+    conn.execute(
+        'DELETE FROM login_attempts WHERE attempted_at < ?',
+        (now - LOGIN_WINDOW_SECONDS,)
+    )
+
 def get_recent_login_attempts(key):
     now = time()
-    attempts = [attempted_at for attempted_at in _login_attempts.get(key, []) if now - attempted_at < LOGIN_WINDOW_SECONDS]
-    if attempts:
-        _login_attempts[key] = attempts
-    else:
-        _login_attempts.pop(key, None)
-    return attempts
+    ip_address, username = key
+    with sqlite3.connect(DB_PATH) as conn:
+        prune_login_attempts(conn, now)
+        cur = conn.execute(
+            '''
+            SELECT attempted_at
+            FROM login_attempts
+            WHERE ip_address=? AND username=? AND attempted_at >= ?
+            ORDER BY attempted_at ASC
+            ''',
+            (ip_address, username, now - LOGIN_WINDOW_SECONDS)
+        )
+        return [row[0] for row in cur.fetchall()]
 
 def get_login_lockout(username):
     key = get_login_attempt_key(username)
@@ -468,13 +643,23 @@ def get_login_lockout(username):
     return max(1, int(LOGIN_WINDOW_SECONDS - (time() - attempts[0])))
 
 def record_login_failure(username):
+    now = time()
     key = get_login_attempt_key(username)
-    attempts = get_recent_login_attempts(key)
-    attempts.append(time())
-    _login_attempts[key] = attempts
+    ip_address, normalized_username = key
+    with sqlite3.connect(DB_PATH) as conn:
+        prune_login_attempts(conn, now)
+        conn.execute(
+            'INSERT INTO login_attempts (ip_address, username, attempted_at) VALUES (?, ?, ?)',
+            (ip_address, normalized_username, now)
+        )
 
 def clear_login_failures(username):
-    _login_attempts.pop(get_login_attempt_key(username), None)
+    ip_address, normalized_username = get_login_attempt_key(username)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            'DELETE FROM login_attempts WHERE ip_address=? AND username=?',
+            (ip_address, normalized_username)
+        )
 
 def is_password_hash(value):
     return str(value or '').startswith(PASSWORD_HASH_PREFIXES)
@@ -542,6 +727,14 @@ def init_db():
                 approved INTEGER DEFAULT 0
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT NOT NULL,
+                username TEXT NOT NULL,
+                attempted_at REAL NOT NULL
+            )
+        ''')
         migrate_user_passwords(conn)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS students (
@@ -583,6 +776,7 @@ def init_db():
         conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_login_attempts_key_time ON login_attempts (ip_address, username, attempted_at)')
 
 init_db()
 
@@ -766,7 +960,7 @@ def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
 
 def process_excel(file_path, campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
-    df = pd.read_excel(file_path, engine="openpyxl")
+    df = read_tabular_upload(file_path)
     fio_split = df["ФИО"].str.split(' ', n=2, expand=True)
     df["Фамилия"] = fio_split[0]
     df["Имя_Отчество"] = fio_split[1] + fio_split[2].apply(lambda x: f' {x}' if pd.notnull(x) else '')
@@ -817,16 +1011,12 @@ def process_excel(file_path, campaign_year=None):
             dubl_login = next_numbered_login('dubl', dubl_logins)
             save_pending_duplicate(row["ФИО"], row["Договор"], dubl_login, row["Фамилия"], row["Имя_Отчество"], campaign_year)
 
-    output_path = os.path.join(app.config['UPLOAD_FOLDER'], "abiturients_with_logins.xlsx")
+    output_path = make_temp_upload_path('xlsx', prefix='result_')
     df[["campaign_year", "ФИО", "Договор", "login", "Фамилия", "Имя_Отчество", "is_duplicate"]].to_excel(output_path, index=False)
     return output_path
 
 def process_students_excel(file_path):
-    import pandas as pd
-    if file_path.lower().endswith('.csv'):
-        df = pd.read_csv(file_path, sep=';')
-    else:
-        df = pd.read_excel(file_path, engine="openpyxl")
+    df = read_tabular_upload(file_path)
     required_cols = {"username", "password", "email", "firstname", "lastname", "cohort1"}
     if not required_cols.issubset(df.columns):
         raise ValueError("В файле отсутствуют необходимые столбцы")
@@ -1145,17 +1335,32 @@ def approve_users():
         pending_users = cur.fetchall()
     return render_template('approve_users.html', pending_users=pending_users)
 
+EXCEL_MIMETYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+def build_abiturients_upload_response(file_storage, campaign_year):
+    upload_path = None
+    result_path = None
+    try:
+        upload_path = save_upload_to_temp(file_storage, ABITURIENT_UPLOAD_EXTENSIONS)
+        result_path = process_excel(upload_path, campaign_year)
+        return send_temp_download(result_path, 'abiturients_with_logins.xlsx', EXCEL_MIMETYPE)
+    except UploadValidationError as exc:
+        flash(str(exc), 'error')
+    except Exception as exc:
+        flash(f'Ошибка обработки файла: {exc}', 'error')
+    finally:
+        cleanup_temp_files(upload_path, result_path)
+    return None
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
     campaign_year = get_active_campaign_year()
     if request.method == 'POST':
-        file = request.files['file']
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        result_path = process_excel(filepath, campaign_year)
-        return send_file(result_path, as_attachment=True)
+        response = build_abiturients_upload_response(request.files.get('file'), campaign_year)
+        if response:
+            return response
+        return redirect(url_for('file_work'), code=303)
     return render_template('index.html')
 
 @app.route('/file_work', methods=['GET', 'POST'])
@@ -1163,12 +1368,10 @@ def index():
 def file_work():
     campaign_year = get_active_campaign_year()
     if request.method == 'POST':
-        file = request.files['file']
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        result_path = process_excel(filepath, campaign_year)
-        return send_file(result_path, as_attachment=True)
+        response = build_abiturients_upload_response(request.files.get('file'), campaign_year)
+        if response:
+            return response
+        return redirect(url_for('file_work'), code=303)
     return render_template('file_work.html', campaign_year=campaign_year)
 
 @app.route('/abiturients')
@@ -1749,15 +1952,19 @@ def clear_abiturients():
 def students_upload():
     message = None
     if request.method == 'POST':
-        file = request.files['file']
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        filepath = None
         try:
+            filepath = save_upload_to_temp(request.files.get('file'), STUDENTS_UPLOAD_EXTENSIONS)
             process_students_excel(filepath)
             message = "Студенты успешно добавлены!"
+            flash(message, 'success')
+        except UploadValidationError as e:
+            message = str(e)
+            flash(message, 'error')
         except Exception as e:
             message = f"Ошибка: {e}"
+        finally:
+            cleanup_temp_files(filepath)
     return render_template('students_upload.html', message=message)
 
 @app.route('/students')
@@ -2105,18 +2312,20 @@ def add_group():
 
         groups_file = request.files.get('groups_file')
         if groups_file and groups_file.filename:
-            filename = secure_filename(groups_file.filename) or 'groups_upload.csv'
-            if not filename.lower().endswith('.csv'):
+            filepath = None
+            if get_upload_extension(groups_file) not in GROUPS_UPLOAD_EXTENSIONS:
                 flash('Загрузите файл групп в формате CSV')
                 return redirect(add_group_url())
 
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            groups_file.save(filepath)
+            filepath = save_upload_to_temp(groups_file, GROUPS_UPLOAD_EXTENSIONS)
             try:
                 result = process_groups_csv(filepath, group_year)
             except Exception as exc:
                 flash(f'Ошибка загрузки групп: {exc}')
                 return redirect(add_group_url())
+
+            finally:
+                cleanup_temp_files(filepath)
 
             if result['created']:
                 flash(f'Добавлено групп: {len(result["created"])}')

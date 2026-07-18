@@ -3,6 +3,7 @@
 {% block content %}
 <h2 style="text-align:center; margin-top:32px;">Добавить пользователя</h2>
 <form method="post" style="max-width:400px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
+    {% include "_csrf_field.html" %}
     <label style="font-weight:500; margin-bottom:8px;">Логин:</label>
     <input type="text" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label style="font-weight:500; margin-bottom:8px;">Пароль:</label>

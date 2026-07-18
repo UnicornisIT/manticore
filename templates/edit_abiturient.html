@@ -23,6 +23,7 @@
 {% block content %}
 <h1>Редактирование абитуриента</h1>
 <form method="post" style="max-width:400px;">
+    {% include "_csrf_field.html" %}
     <div><b>Кампания:</b> {{ abiturient[7] }}</div>
     <div><b>Договор:</b> {{ abiturient[1] }}</div>
     <div><b>Логин:</b> {{ abiturient[2] }}</div>

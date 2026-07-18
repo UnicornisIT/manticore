@@ -4,6 +4,7 @@
 {% block content %}
 <h2>Загрузка студентов</h2>
 <form method="post" enctype="multipart/form-data">
+    {% include "_csrf_field.html" %}
     <input type="file" name="file" required>
     <button type="submit" class="btn btn-success">Загрузить</button>
 </form>

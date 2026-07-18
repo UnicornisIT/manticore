@@ -1,4 +1,5 @@
 <form method="post" action="{{ url_for('set_campaign') }}" class="page-campaign-switcher">
+    {% include "_csrf_field.html" %}
     <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
     <label for="page_campaign_year">Приемная кампания:</label>
     <select name="campaign_year" id="page_campaign_year" onchange="this.form.submit()">

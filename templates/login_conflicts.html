@@ -30,6 +30,7 @@
             <td style="white-space: nowrap;">
                 <a href="{{ url_for('edit_conflict', conflict_id=c[0], campaign_year=c[6]) }}" class="btn" style="padding:6px 12px; font-size:0.9em;">Редактировать</a>
                 <form method="post" action="{{ url_for('delete_conflict', conflict_id=c[0]) }}" style="display:inline;" onsubmit="return confirm('Удалить запись?');">
+                    {% include "_csrf_field.html" %}
                     <input type="hidden" name="campaign_year" value="{{ c[6] }}">
                     <button type="submit" class="btn btn-danger" style="padding:6px 12px; font-size:0.9em;">Удалить</button>
                 </form>

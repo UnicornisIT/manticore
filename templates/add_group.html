@@ -226,6 +226,7 @@
 
         <div class="groups-layout">
             <form method="post" class="groups-tool">
+                {% include "_csrf_field.html" %}
                 <h3>Добавить</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
@@ -240,6 +241,7 @@
             </form>
 
             <form method="post" class="groups-tool">
+                {% include "_csrf_field.html" %}
                 <h3>Подгруппа</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 <input type="hidden" name="group_action" value="force_subgroup">
@@ -259,6 +261,7 @@
             </form>
 
             <form method="post" enctype="multipart/form-data" class="groups-tool">
+                {% include "_csrf_field.html" %}
                 <h3>CSV</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
@@ -301,6 +304,7 @@
                         <td class="groups-table-actions">
                             {% if group.can_create_next %}
                             <form method="post">
+                                {% include "_csrf_field.html" %}
                                 <input type="hidden" name="group_year" value="{{ group_year }}">
                                 <input type="hidden" name="group_name" value="{{ group.next_name }}">
                                 <input type="hidden" name="source_group" value="{{ group.name }}">
@@ -314,6 +318,7 @@
                             {% endif %}
                             {% if group.is_hidden %}
                             <form method="post">
+                                {% include "_csrf_field.html" %}
                                 <input type="hidden" name="group_year" value="{{ group_year }}">
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="show">
@@ -322,6 +327,7 @@
                             </form>
                             {% else %}
                             <form method="post">
+                                {% include "_csrf_field.html" %}
                                 <input type="hidden" name="group_year" value="{{ group_year }}">
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="hide">
@@ -330,6 +336,7 @@
                             </form>
                             {% endif %}
                             <form method="post" onsubmit="return confirm('Удалить группу {{ group.name }}?');">
+                                {% include "_csrf_field.html" %}
                                 <input type="hidden" name="group_year" value="{{ group_year }}">
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="delete">
