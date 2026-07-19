@@ -65,11 +65,16 @@ ABITURIENT_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 STUDENTS_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 GROUPS_UPLOAD_EXTENSIONS = {'csv'}
 PENDING_ABITURIENTS_IMPORT_PREFIX = 'pending_abiturients_'
+PENDING_STUDENTS_IMPORT_PREFIX = 'pending_students_'
 DB_BACKUP_PREFIX = 'baze_backup_'
 ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
 ABITURIENT_RESULT_COLUMNS = [
     'campaign_year', 'ФИО', 'Договор', 'login', 'Фамилия',
     'Имя_Отчество', 'import_action', 'import_status'
+]
+STUDENT_PREVIEW_COLUMNS = [
+    '_row_number', 'username', 'email', 'firstname', 'lastname', 'cohort1',
+    'source_dogovor', 'source_campaign_year', 'import_action', 'import_status'
 ]
 UPLOAD_REPORT_LIMIT = 40
 STUDENT_UPLOAD_REQUIRED_COLUMNS = ['username', 'password', 'email', 'firstname', 'lastname', 'cohort1']
@@ -1957,7 +1962,11 @@ def summarize_abiturients_import(df, campaign_year):
 def dataframe_preview_rows(df):
     preview_df = df.copy()
     preview_df = preview_df.where(pd.notnull(preview_df), '')
-    return preview_df[ABITURIENT_RESULT_COLUMNS].to_dict(orient='records')
+    rows = preview_df[ABITURIENT_RESULT_COLUMNS].to_dict(orient='records')
+    warning_values = preview_df['has_warning'].tolist() if 'has_warning' in preview_df else [False] * len(rows)
+    for row, has_warning in zip(rows, warning_values):
+        row['has_warning'] = bool(has_warning)
+    return rows
 
 def upload_report_item(row, field, message):
     return {
@@ -2204,7 +2213,16 @@ def process_excel(file_path, campaign_year=None):
     output_path, _summary = apply_abiturients_import(file_path, campaign_year)
     return output_path
 
-def process_students_excel(file_path):
+def summarize_students_import(df):
+    action_counts = df['import_action'].value_counts().to_dict() if not df.empty else {}
+    return {
+        'total': int(len(df)),
+        'ready_count': int(action_counts.get('create', 0)),
+        'duplicate_count': int(action_counts.get('duplicate', 0)),
+        'skipped_count': int(action_counts.get('skip', 0)),
+    }
+
+def build_students_import_plan(file_path):
     df = read_tabular_upload(file_path)
     df.columns = [str(column).strip() for column in df.columns]
     missing_columns = [column for column in STUDENT_UPLOAD_REQUIRED_COLUMNS if column not in df.columns]
@@ -2214,57 +2232,127 @@ def process_students_excel(file_path):
     if df.empty:
         raise ValueError('Файл студентов не содержит строк для загрузки')
 
-    inserted_count = 0
-    duplicate_count = 0
-    errors = []
+    df = df.copy()
+    df['_row_number'] = range(2, len(df) + 2)
+    for column in STUDENT_UPLOAD_REQUIRED_COLUMNS:
+        df[column] = df[column].apply(clean_upload_text)
+    for column in ('source_dogovor', 'source_fio'):
+        if column not in df.columns:
+            df[column] = ''
+        df[column] = df[column].apply(clean_upload_text)
+    df['source_campaign_year'] = df['source_dogovor'].apply(
+        lambda value: infer_campaign_year(value, DEFAULT_CAMPAIGN_YEAR) if value else ''
+    )
+
     with sqlite3.connect(DB_PATH) as conn:
-        for row_number, (_, row) in enumerate(df.iterrows(), start=2):
-            values = {
-                column: clean_upload_text(row.get(column, ''))
-                for column in STUDENT_UPLOAD_REQUIRED_COLUMNS
-            }
-            missing_values = [
-                STUDENT_UPLOAD_FIELD_LABELS[column]
-                for column, value in values.items()
-                if not value
-            ]
-            if missing_values:
-                errors.append(upload_report_item(
-                    row_number,
-                    'Обязательные поля',
-                    f"Не заполнено: {', '.join(missing_values)}. Строка пропущена."
-                ))
-                continue
+        existing_usernames = {
+            clean_upload_text(row[0])
+            for row in conn.execute("SELECT username FROM students WHERE username IS NOT NULL AND username<>''")
+        }
 
-            if not is_valid_email(values['email']):
-                errors.append(upload_report_item(
-                    row_number,
-                    'Email',
-                    f"Почта выглядит некорректно: {values['email']}. Строка пропущена."
-                ))
-                continue
+    planned_usernames = set()
+    actions = []
+    statuses = []
+    errors = []
 
-            username = values["username"]
-            source_dogovor = clean_upload_text(row.get('source_dogovor', ''))
-            source_fio = clean_upload_text(row.get('source_fio', ''))
-            source_campaign_year = infer_campaign_year(source_dogovor, DEFAULT_CAMPAIGN_YEAR) if source_dogovor else ''
-            cur = conn.execute('SELECT 1 FROM students WHERE username=?', (username,))
-            if cur.fetchone():
-                conn.execute(
-                    '''INSERT INTO students_duplicates (username, password, email, firstname, lastname, cohort1)
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (
-                        values["username"], values["password"], values["email"],
-                        values["firstname"], values["lastname"], values["cohort1"]
-                    )
-                )
-                errors.append(upload_report_item(
-                    row_number,
-                    'Логин',
-                    f"Логин {username} уже есть у студента. Строка перенесена в дубли студентов."
-                ))
-                duplicate_count += 1
-            else:
+    for _, row in df.iterrows():
+        row_number = int(row['_row_number'])
+        missing_values = [
+            STUDENT_UPLOAD_FIELD_LABELS[column]
+            for column in STUDENT_UPLOAD_REQUIRED_COLUMNS
+            if not row[column]
+        ]
+        if missing_values:
+            actions.append('skip')
+            statuses.append(f"Не заполнено: {', '.join(missing_values)}")
+            errors.append(upload_report_item(
+                row_number,
+                'Обязательные поля',
+                f"Не заполнено: {', '.join(missing_values)}. Строка будет пропущена."
+            ))
+            continue
+
+        if not is_valid_email(row['email']):
+            actions.append('skip')
+            statuses.append('Некорректная почта')
+            errors.append(upload_report_item(
+                row_number,
+                'Email',
+                f"Почта выглядит некорректно: {row['email']}. Строка будет пропущена."
+            ))
+            continue
+
+        username = row['username']
+        if username in existing_usernames:
+            actions.append('duplicate')
+            statuses.append('Логин уже есть у студента')
+            errors.append(upload_report_item(
+                row_number,
+                'Логин',
+                f"Логин {username} уже есть у студента. Строка будет перенесена в дубли студентов."
+            ))
+            continue
+
+        if username in planned_usernames:
+            actions.append('duplicate')
+            statuses.append('Логин повторяется в файле')
+            errors.append(upload_report_item(
+                row_number,
+                'Логин',
+                f"Логин {username} повторяется в загруженном файле. Повторная строка будет перенесена в дубли студентов."
+            ))
+            continue
+
+        planned_usernames.add(username)
+        actions.append('create')
+        statuses.append('Будет добавлен')
+
+    df['import_action'] = actions
+    df['import_status'] = statuses
+
+    summary = summarize_students_import(df)
+    summary['errors'] = errors
+    return df, summary
+
+def student_preview_rows(df):
+    preview_df = df.copy()
+    preview_df = preview_df.where(pd.notnull(preview_df), '')
+    rows = preview_df[STUDENT_PREVIEW_COLUMNS].to_dict(orient='records')
+    for row in rows:
+        action = row.get('import_action')
+        if action == 'create':
+            row['action_label'] = 'Будет добавлен'
+            row['badge_class'] = 'status-success'
+        elif action == 'duplicate':
+            row['action_label'] = 'В дубли'
+            row['badge_class'] = 'status-warning'
+        else:
+            row['action_label'] = 'Пропущен'
+            row['badge_class'] = 'status-danger'
+    return rows
+
+def build_students_preview_report(summary):
+    report_items = summary.get('errors') or []
+    if not report_items:
+        return None
+    return build_upload_report(
+        'Отчет по проверке студентов',
+        summary['total'],
+        report_items,
+        [
+            f"К добавлению: {summary['ready_count']}",
+            f"В дубли студентов: {summary['duplicate_count']}",
+            f"Будет пропущено: {summary['skipped_count']}",
+        ]
+    )
+
+def apply_students_import(file_path):
+    df, summary = build_students_import_plan(file_path)
+    backup_path = create_database_backup('before_students_import')
+    with sqlite3.connect(DB_PATH) as conn:
+        for _, row in df.iterrows():
+            action = row['import_action']
+            if action == 'create':
                 conn.execute(
                     '''
                     INSERT INTO students
@@ -2272,18 +2360,43 @@ def process_students_excel(file_path):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
                     (
-                        values["username"], values["password"], values["email"],
-                        values["firstname"], values["lastname"], values["cohort1"],
-                        source_campaign_year, source_dogovor, source_fio
+                        row["username"], row["password"], row["email"],
+                        row["firstname"], row["lastname"], row["cohort1"],
+                        row["source_campaign_year"], row["source_dogovor"], row["source_fio"]
                     )
                 )
-                inserted_count += 1
+            elif action == 'duplicate':
+                conn.execute(
+                    '''INSERT INTO students_duplicates (username, password, email, firstname, lastname, cohort1)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (
+                        row["username"], row["password"], row["email"],
+                        row["firstname"], row["lastname"], row["cohort1"]
+                    )
+                )
+
+        log_action(
+            'students_import',
+            'students',
+            '',
+            (
+                f"rows={summary['total']}; inserted={summary['ready_count']}; "
+                f"duplicates={summary['duplicate_count']}; skipped={summary['skipped_count']}; "
+                f"backup={os.path.basename(backup_path) if backup_path else ''}"
+            ),
+            conn
+        )
+
     return {
-        'total': int(len(df)),
-        'inserted_count': inserted_count,
-        'duplicate_count': duplicate_count,
-        'errors': errors,
+        'total': summary['total'],
+        'inserted_count': summary['ready_count'],
+        'duplicate_count': summary['duplicate_count'],
+        'skipped_count': summary['skipped_count'],
+        'errors': summary.get('errors') or [],
     }
+
+def process_students_excel(file_path):
+    return apply_students_import(file_path)
 
 def normalize_specialty(value):
     value = re.sub(r'\s+', '', str(value or ''))
@@ -2592,6 +2705,16 @@ def get_pending_abiturients_import_path(token):
     import_path = os.path.abspath(os.path.join(upload_root, token))
     if os.path.commonpath([upload_root, import_path]) != upload_root or not os.path.exists(import_path):
         raise UploadValidationError('Временный файл импорта не найден. Загрузите файл ещё раз.')
+    return import_path
+
+def get_pending_students_import_path(token):
+    token = os.path.basename(str(token or ''))
+    if not token.startswith(PENDING_STUDENTS_IMPORT_PREFIX):
+        raise UploadValidationError('Временный файл загрузки студентов не найден. Загрузите файл ещё раз.')
+    upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    import_path = os.path.abspath(os.path.join(upload_root, token))
+    if os.path.commonpath([upload_root, import_path]) != upload_root or not os.path.exists(import_path):
+        raise UploadValidationError('Временный файл загрузки студентов не найден. Загрузите файл ещё раз.')
     return import_path
 
 def build_abiturients_upload_response(file_storage, campaign_year):
@@ -3601,44 +3724,58 @@ def clear_abiturients():
 def students_upload():
     message = None
     if request.method == 'POST':
+        students_import_action = request.form.get('students_import_action', 'preview')
+        if students_import_action == 'confirm':
+            filepath = None
+            try:
+                filepath = get_pending_students_import_path(request.form.get('pending_students_import'))
+                summary = apply_students_import(filepath)
+                flash(
+                    (
+                        f"Загрузка студентов завершена: добавлено {summary['inserted_count']}, "
+                        f"дублей {summary['duplicate_count']}, пропущено {summary['skipped_count']}."
+                    ),
+                    'success' if not summary.get('errors') else 'info'
+                )
+            except (UploadValidationError, ValueError) as e:
+                flash(str(e), 'error')
+            except Exception as e:
+                flash(f"Ошибка: {e}", 'error')
+            finally:
+                cleanup_temp_files(filepath)
+            return redirect(url_for('file_work'), code=303)
+
+        if students_import_action == 'cancel':
+            try:
+                cleanup_temp_files(get_pending_students_import_path(request.form.get('pending_students_import')))
+                flash('Предпросмотр загрузки студентов отменён.', 'info')
+            except UploadValidationError:
+                pass
+            return redirect(url_for('file_work'), code=303)
+
         filepath = None
         try:
-            filepath = save_upload_to_temp(request.files.get('file'), STUDENTS_UPLOAD_EXTENSIONS)
-            backup_path = create_database_backup('before_students_import')
-            summary = process_students_excel(filepath)
-            report_items = summary.get('errors') or []
-            if report_items:
-                session['students_upload_report'] = build_upload_report(
-                    'Отчет по загрузке студентов',
-                    summary['total'],
-                    report_items,
-                    [
-                        f"Обработано строк: {summary['total']}",
-                        f"Добавлено студентов: {summary['inserted_count']}",
-                        f"В дублях студентов: {summary['duplicate_count']}",
-                    ]
-                )
-            message = (
-                f"Студенты обработаны: добавлено {summary['inserted_count']}, "
-                f"дублей {summary['duplicate_count']}, замечаний {len(report_items)}."
+            filepath = save_upload_to_temp(
+                request.files.get('file'),
+                STUDENTS_UPLOAD_EXTENSIONS,
+                prefix=PENDING_STUDENTS_IMPORT_PREFIX
             )
-            log_action(
-                'students_import',
-                'students',
-                '',
-                (
-                    f"rows={summary['total']}; inserted={summary['inserted_count']}; "
-                    f"duplicates={summary['duplicate_count']}; backup={os.path.basename(backup_path) if backup_path else ''}"
-                )
+            plan_df, summary = build_students_import_plan(filepath)
+            return render_template(
+                'file_work.html',
+                campaign_year=get_active_campaign_year(),
+                students_preview=summary,
+                students_preview_rows=student_preview_rows(plan_df),
+                students_report=build_students_preview_report(summary),
+                pending_students_import_token=os.path.basename(filepath)
             )
-            flash(message, 'success' if not report_items else 'info')
         except (UploadValidationError, ValueError) as e:
             message = str(e)
             flash(message, 'error')
+            cleanup_temp_files(filepath)
         except Exception as e:
             message = f"Ошибка: {e}"
             flash(message, 'error')
-        finally:
             cleanup_temp_files(filepath)
         return redirect(url_for('file_work'), code=303)
     return render_template('students_upload.html', message=message)

@@ -109,6 +109,57 @@
             min-width: 112px;
             padding: 0 18px;
         }
+        .abiturients-table {
+            min-width: 1380px;
+        }
+        .abiturients-table th,
+        .abiturients-table td {
+            vertical-align: middle;
+        }
+        .abiturients-table .fio-cell {
+            min-width: 190px;
+            max-width: 240px;
+            white-space: normal;
+            word-break: normal;
+            overflow-wrap: break-word;
+        }
+        .abiturients-table .name-part-cell {
+            min-width: 120px;
+        }
+        .abiturients-table .name-detail-cell {
+            min-width: 180px;
+            white-space: normal;
+        }
+        .abiturients-table .action-cell {
+            min-width: 320px;
+            white-space: nowrap;
+        }
+        .abiturients-table .action-cell form {
+            display: inline-flex !important;
+            align-items: center;
+        }
+        .abiturients-table .action-cell .btn {
+            min-width: auto;
+            margin: 0 3px;
+            padding: 7px 12px;
+        }
+        .paid-toggle {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0 4px 0 0;
+            color: #374151;
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .paid-toggle.is-paid {
+            color: #166534;
+        }
+        .paid-toggle.is-unpaid {
+            color: #92400e;
+        }
         @media (max-width: 640px) {
             .bulk-toolbar,
             .bulk-select-shell,
@@ -187,7 +238,7 @@
     </form>
     {% endif %}
     <div style="overflow-x:auto;">
-        <table>
+        <table class="abiturients-table">
             <tr>
                 {% set dir = 'asc' if order_dir == 'desc' else 'desc' %}
                 {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
@@ -208,21 +259,21 @@
                 {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
                 <td><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form"></td>
                 {% endif %}
-                <td style="max-width:220px; word-break:break-word; white-space:pre-line; overflow-wrap:break-word;">{{ a['fio'] }}</td>
+                <td class="fio-cell">{{ a['fio'] }}</td>
                 <td>{{ a['campaign_year'] }}</td>
                 <td>{{ a['dogovor'] }}</td>
                 <td>{{ a['login'] }}</td>
                 <td class="email-status-cell">
                     {% if a['email'] %}
-                        <span class="email-status has-email" title="Почта добавлена">@</span>
+                        <span class="email-status has-email" title="{{ a['email'] }}">@</span>
                     {% else %}
                         <span class="email-status no-email" title="Почта не добавлена">@</span>
                     {% endif %}
                 </td>
-                <td>{{ a['fam'] }}</td>
-                <td>{{ a['imotch'] }}</td>
+                <td class="name-part-cell">{{ a['fam'] }}</td>
+                <td class="name-detail-cell">{{ a['imotch'] }}</td>
                 <td>{{ a['created_at'] }}</td>
-                <td>
+                <td class="action-cell">
                     {% if session.get('role') == 'admin' %}
                         <form method="post" action="{{ url_for('toggle_abiturient_paid') }}" style="display:inline; margin-right: 8px;">
                             {% include "_csrf_field.html" %}
@@ -236,9 +287,9 @@
                             <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                             <input type="hidden" name="order_by" value="{{ order_by }}">
                             <input type="hidden" name="order_dir" value="{{ order_dir }}">
-                            <label style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin:0;">
+                            <label class="paid-toggle {{ 'is-paid' if a['paid'] else 'is-unpaid' }}">
                                 <input type="checkbox" name="paid" value="1" {% if a['paid'] %}checked{% endif %} onchange="this.form.submit()">
-                                Оплачено
+                                {{ 'Оплачено' if a['paid'] else 'Не оплачено' }}
                             </label>
                         </form>
                         <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
