@@ -555,21 +555,49 @@ class ManticoreAppTests(unittest.TestCase):
                 'csrf_token': csrf_token,
                 'file': (upload, 'students.xlsx'),
             },
-            content_type='multipart/form-data',
-            follow_redirects=True
+            content_type='multipart/form-data'
         )
         body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Отчет по загрузке студентов', body)
+        self.assertIn('Предпросмотр загрузки студентов', body)
+        self.assertIn('Отчет по проверке студентов', body)
         self.assertIn('Строка 2', body)
         self.assertIn('Не заполнено: Логин', body)
         self.assertIn('Строка 3', body)
         self.assertIn('Почта выглядит некорректно', body)
         self.assertIn('Строка 4', body)
-        self.assertIn('перенесена в дубли студентов', body)
-        self.assertIn('Добавлено студентов: 1', body)
+        self.assertIn('будет перенесена в дубли студентов', body)
+        self.assertIn('К добавлению: 1', body)
+        self.assertIn('Подтвердить загрузку студентов', body)
+        self.assertIn('status-badge status-success', body)
+        self.assertIn('status-badge status-warning', body)
 
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            new_count = conn.execute('SELECT COUNT(*) FROM students WHERE username=?', ('student_new',)).fetchone()[0]
+            duplicate_count = conn.execute(
+                'SELECT COUNT(*) FROM students_duplicates WHERE username=?',
+                ('student_existing',)
+            ).fetchone()[0]
+        self.assertEqual(new_count, 0)
+        self.assertEqual(duplicate_count, 0)
+
+        pending_match = re.search(r'name="pending_students_import" value="([^"]+)"', body)
+        self.assertIsNotNone(pending_match)
+        confirm_csrf = self.csrf_from_response(response)
+        confirm_response = client.post(
+            '/students_upload',
+            data={
+                'csrf_token': confirm_csrf,
+                'students_import_action': 'confirm',
+                'pending_students_import': pending_match.group(1),
+            },
+            follow_redirects=True
+        )
+        confirm_body = confirm_response.get_data(as_text=True)
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertIn('Загрузка студентов завершена', confirm_body)
         with sqlite3.connect(manticore.DB_PATH) as conn:
             new_count = conn.execute('SELECT COUNT(*) FROM students WHERE username=?', ('student_new',)).fetchone()[0]
             bad_count = conn.execute('SELECT COUNT(*) FROM students WHERE username=?', ('student_bad_mail',)).fetchone()[0]
@@ -580,6 +608,11 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(new_count, 1)
         self.assertEqual(bad_count, 0)
         self.assertEqual(duplicate_count, 1)
+
+        students_response = client.get('/students_list')
+        students_body = students_response.get_data(as_text=True)
+        self.assertIn('status-badge status-success', students_body)
+        self.assertIn('Есть почта', students_body)
 
     def test_campaign_archive_page_toggles_status(self):
         client = manticore.app.test_client()

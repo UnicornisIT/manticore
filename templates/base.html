@@ -313,9 +313,13 @@
             cursor: pointer;
             transition: background 0.2s;
             margin: 2px 0;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             min-width: 100px;
             box-sizing: border-box;
+            line-height: 1.2;
+            text-align: center;
         }
         .btn-danger {
             background: #ef4444;
@@ -386,6 +390,43 @@
         }
         .email-status-cell {
             text-align: center;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 26px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .status-success {
+            color: #166534;
+            background: #dcfce7;
+            border: 1px solid #86efac;
+        }
+        .status-warning {
+            color: #92400e;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+        }
+        .status-danger {
+            color: #991b1b;
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+        }
+        .status-info {
+            color: #1e3a8a;
+            background: #dbeafe;
+            border: 1px solid #bfdbfe;
+        }
+        .status-muted {
+            color: #475569;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
         }
         .flash-messages {
             max-width: 980px;
