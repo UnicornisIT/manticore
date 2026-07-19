@@ -3,8 +3,9 @@ import re
 import csv
 import secrets
 import tempfile
+import shutil
 import pandas as pd
-from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context, jsonify
 from urllib.parse import urlparse
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -12,7 +13,7 @@ import sqlite3
 import io
 import hmac
 from functools import wraps
-from datetime import date
+from datetime import date, datetime
 from time import time
 try:
     from dotenv import load_dotenv
@@ -63,6 +64,31 @@ HSTS_PRELOAD = env_bool('HSTS_PRELOAD', False)
 ABITURIENT_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 STUDENTS_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 GROUPS_UPLOAD_EXTENSIONS = {'csv'}
+PENDING_ABITURIENTS_IMPORT_PREFIX = 'pending_abiturients_'
+DB_BACKUP_PREFIX = 'baze_backup_'
+ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
+ABITURIENT_RESULT_COLUMNS = [
+    'campaign_year', 'ФИО', 'Договор', 'login', 'Фамилия',
+    'Имя_Отчество', 'import_action', 'import_status'
+]
+UPLOAD_REPORT_LIMIT = 40
+STUDENT_UPLOAD_REQUIRED_COLUMNS = ['username', 'password', 'email', 'firstname', 'lastname', 'cohort1']
+STUDENT_UPLOAD_FIELD_LABELS = {
+    'username': 'Логин',
+    'password': 'Пароль',
+    'email': 'Email',
+    'firstname': 'Имя',
+    'lastname': 'Фамилия',
+    'cohort1': 'Академическая группа',
+}
+ROLE_LABELS = {
+    'admin': 'Администратор',
+    'manager': 'Куратор',
+    'operator': 'Оператор',
+    'assistant': 'Ассистент',
+    'viewer': 'Только просмотр',
+}
+ARCHIVED_CAMPAIGN_MESSAGE = 'Кампания архивирована. Изменения в ней недоступны.'
 
 class UploadValidationError(ValueError):
     pass
@@ -101,9 +127,9 @@ def make_temp_upload_path(extension, prefix='upload_'):
     os.close(fd)
     return path
 
-def save_upload_to_temp(file_storage, allowed_extensions):
+def save_upload_to_temp(file_storage, allowed_extensions, prefix='upload_'):
     extension = validate_uploaded_file(file_storage, allowed_extensions)
-    temp_path = make_temp_upload_path(extension)
+    temp_path = make_temp_upload_path(extension, prefix=prefix)
     file_storage.save(temp_path)
     return temp_path
 
@@ -147,6 +173,11 @@ def read_tabular_upload(file_path):
 
 _campaign_year_re = re.compile(r'^20\d{2}$')
 _dogovor_year_re = re.compile(r'20\d{2}')
+_email_re = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+def is_valid_email(value):
+    value = str(value or '').strip()
+    return not value or bool(_email_re.fullmatch(value))
 
 def clean_campaign_year(value, fallback):
     value = str(value or '').strip()
@@ -527,6 +558,8 @@ def inject_template_globals():
     return {
         'app_version': APP_VERSION,
         'csrf_token': get_csrf_token,
+        'role_labels': ROLE_LABELS,
+        'is_campaign_archived': is_campaign_archived,
     }
 
 def request_uses_https():
@@ -608,6 +641,884 @@ def get_client_ip():
     if forwarded_for:
         return forwarded_for.split(',')[0].strip()
     return request.remote_addr or 'unknown'
+
+def sanitize_backup_reason(reason):
+    safe_reason = re.sub(r'[^a-zA-Z0-9_-]+', '_', str(reason or 'manual')).strip('_')
+    return safe_reason[:60] or 'manual'
+
+def create_database_backup(reason='manual'):
+    if not os.path.exists(DB_PATH):
+        return None
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    safe_reason = sanitize_backup_reason(reason)
+    backup_name = f'{DB_BACKUP_PREFIX}{safe_reason}_{timestamp}.db'
+    backup_path = os.path.join(app.config['UPLOAD_FOLDER'], backup_name)
+    shutil.copy2(DB_PATH, backup_path)
+    return backup_path
+
+def list_database_backups():
+    upload_folder = app.config['UPLOAD_FOLDER']
+    if not os.path.isdir(upload_folder):
+        return []
+    backups = []
+    for name in os.listdir(upload_folder):
+        if not name.startswith(DB_BACKUP_PREFIX) or not name.endswith('.db'):
+            continue
+        path = os.path.join(upload_folder, name)
+        if not os.path.isfile(path):
+            continue
+        stat = os.stat(path)
+        backups.append({
+            'name': name,
+            'size': stat.st_size,
+            'size_text': format_upload_size(stat.st_size),
+            'created_at': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    return sorted(backups, key=lambda item: item['created_at'], reverse=True)
+
+def get_backup_path(backup_name):
+    backup_name = os.path.basename(str(backup_name or ''))
+    if not backup_name.startswith(DB_BACKUP_PREFIX) or not backup_name.endswith('.db'):
+        raise ValueError('Некорректное имя резервной копии')
+    upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    backup_path = os.path.abspath(os.path.join(upload_root, backup_name))
+    if os.path.commonpath([upload_root, backup_path]) != upload_root:
+        raise ValueError('Некорректный путь резервной копии')
+    if not os.path.exists(backup_path):
+        raise FileNotFoundError('Резервная копия не найдена')
+    return backup_path
+
+def create_audit_log_table(conn):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            action TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            details TEXT,
+            ip_address TEXT,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        )
+    ''')
+
+def create_campaign_settings_table(conn):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS campaign_settings (
+            campaign_year TEXT PRIMARY KEY,
+            is_archived INTEGER DEFAULT 0,
+            archived_at TEXT,
+            archived_by TEXT
+        )
+    ''')
+
+def log_action(action, entity_type='', entity_id='', details='', conn=None):
+    username = session.get('user', '') if has_request_context() else ''
+    ip_address = get_client_ip() if has_request_context() else ''
+    should_close = conn is None
+    if should_close:
+        conn = sqlite3.connect(DB_PATH)
+    try:
+        create_audit_log_table(conn)
+        conn.execute(
+            '''
+            INSERT INTO audit_logs (username, action, entity_type, entity_id, details, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''',
+            (username, action, entity_type, str(entity_id or ''), str(details or ''), ip_address)
+        )
+        if should_close:
+            conn.commit()
+    finally:
+        if should_close:
+            conn.close()
+
+def get_audit_logs(limit=200):
+    limit = max(1, min(int(limit or 200), 1000))
+    with sqlite3.connect(DB_PATH) as conn:
+        create_audit_log_table(conn)
+        cur = conn.execute(
+            '''
+            SELECT username, action, entity_type, entity_id, details, ip_address, created_at
+            FROM audit_logs
+            ORDER BY id DESC
+            LIMIT ?
+            ''',
+            (limit,)
+        )
+        columns = [desc[0] for desc in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+def is_campaign_archived(campaign_year):
+    campaign_year = normalize_campaign_year(campaign_year, DEFAULT_CAMPAIGN_YEAR)
+    with sqlite3.connect(DB_PATH) as conn:
+        create_campaign_settings_table(conn)
+        row = conn.execute(
+            'SELECT is_archived FROM campaign_settings WHERE campaign_year=?',
+            (campaign_year,)
+        ).fetchone()
+    return bool(row and row[0])
+
+def ensure_campaign_open(campaign_year):
+    if is_campaign_archived(campaign_year):
+        flash(ARCHIVED_CAMPAIGN_MESSAGE, 'error')
+        return False
+    return True
+
+def get_campaign_settings():
+    years = get_campaign_years()
+    with sqlite3.connect(DB_PATH) as conn:
+        create_campaign_settings_table(conn)
+        rows = {
+            row[0]: {
+                'is_archived': bool(row[1]),
+                'archived_at': row[2],
+                'archived_by': row[3],
+            }
+            for row in conn.execute(
+                'SELECT campaign_year, is_archived, archived_at, archived_by FROM campaign_settings'
+            )
+        }
+    settings = []
+    for year in sorted(years, reverse=True):
+        values = rows.get(year, {})
+        settings.append({
+            'campaign_year': year,
+            'is_archived': bool(values.get('is_archived')),
+            'archived_at': values.get('archived_at') or '',
+            'archived_by': values.get('archived_by') or '',
+        })
+    return settings
+
+def get_dashboard_data(campaign_year):
+    campaign_year = normalize_campaign_year(campaign_year, DEFAULT_CAMPAIGN_YEAR)
+    with sqlite3.connect(DB_PATH) as conn:
+        create_campaign_settings_table(conn)
+        ab_total = conn.execute('SELECT COUNT(*) FROM abiturients WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
+        no_email = conn.execute(
+            "SELECT COUNT(*) FROM abiturients WHERE campaign_year=? AND (email IS NULL OR email='')",
+            (campaign_year,)
+        ).fetchone()[0]
+        unpaid = conn.execute(
+            'SELECT COUNT(*) FROM abiturients WHERE campaign_year=? AND COALESCE(paid, 0)=0',
+            (campaign_year,)
+        ).fetchone()[0]
+        ready = conn.execute(
+            "SELECT COUNT(*) FROM abiturients WHERE campaign_year=? AND email IS NOT NULL AND email<>'' AND COALESCE(paid, 0)=1",
+            (campaign_year,)
+        ).fetchone()[0]
+        duplicates = conn.execute('SELECT COUNT(*) FROM pending_duplicates WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
+        conflicts = conn.execute('SELECT COUNT(*) FROM login_conflicts WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
+        students_total = conn.execute(
+            'SELECT COUNT(*) FROM students WHERE source_campaign_year=?',
+            (campaign_year,)
+        ).fetchone()[0]
+        students_without_campaign = conn.execute(
+            "SELECT COUNT(*) FROM students WHERE source_campaign_year IS NULL OR source_campaign_year=''"
+        ).fetchone()[0]
+        students_without_dogovor = conn.execute(
+            "SELECT COUNT(*) FROM students WHERE source_campaign_year=? AND (source_dogovor IS NULL OR source_dogovor='')",
+            (campaign_year,)
+        ).fetchone()[0]
+        groups = get_groups_with_counts(conn, campaign_year)
+
+    full_groups = [group for group in groups if group['is_full']]
+    almost_full_groups = [
+        group for group in groups
+        if not group['is_full'] and group['capacity'] - group['count'] <= 3
+    ]
+    alerts = []
+    if is_campaign_archived(campaign_year):
+        alerts.append(('Архив', ARCHIVED_CAMPAIGN_MESSAGE))
+    if conflicts:
+        alerts.append(('Конфликты', f'Конфликтов логинов: {conflicts}'))
+    if duplicates:
+        alerts.append(('Дубли', f'Записей в дублях: {duplicates}'))
+    if no_email:
+        alerts.append(('Почта', f'Без почты: {no_email}'))
+    if unpaid:
+        alerts.append(('Оплата', f'Не оплачены: {unpaid}'))
+    if full_groups:
+        alerts.append(('Группы', f'Заполненных групп: {len(full_groups)}'))
+    if students_without_dogovor:
+        alerts.append(('Договоры', f'Студентов без договора: {students_without_dogovor}'))
+    if students_without_campaign:
+        alerts.append(('Студенты', f'Студентов без привязки к кампании: {students_without_campaign}'))
+
+    data_quality = get_data_quality_report(campaign_year)
+    task_counts = {
+        'no_email': no_email,
+        'unpaid': unpaid,
+        'duplicates': duplicates,
+        'conflicts': conflicts,
+        'students_without_dogovor': students_without_dogovor,
+        'other_data_quality': max(
+            0,
+            data_quality['total_issues'] - no_email - unpaid - duplicates - conflicts - students_without_dogovor
+        ),
+    }
+
+    return {
+        'campaign_year': campaign_year,
+        'is_archived': is_campaign_archived(campaign_year),
+        'abiturients_total': ab_total,
+        'no_email': no_email,
+        'unpaid': unpaid,
+        'ready': ready,
+        'duplicates': duplicates,
+        'conflicts': conflicts,
+        'students_total': students_total,
+        'students_without_dogovor': students_without_dogovor,
+        'students_without_campaign': students_without_campaign,
+        'groups': groups,
+        'full_groups': full_groups,
+        'almost_full_groups': almost_full_groups,
+        'alerts': alerts,
+        'tasks': build_dashboard_tasks(task_counts),
+    }
+
+def make_data_check(check_id, title, count, description, action_url='', action_label='Открыть', samples=None, tone='warning'):
+    return {
+        'id': check_id,
+        'title': title,
+        'count': int(count or 0),
+        'description': description,
+        'action_url': action_url,
+        'action_label': action_label,
+        'samples': samples or [],
+        'tone': tone if count else 'success',
+    }
+
+def make_sample(title, detail='', url=''):
+    return {
+        'title': title or 'Без названия',
+        'detail': detail or '',
+        'url': url,
+    }
+
+def abiturient_sample(row):
+    abiturient_id, fio, dogovor, login, email = row[:5]
+    detail_parts = [part for part in (dogovor, login, email) if part]
+    return make_sample(fio or login or f'Запись {abiturient_id}', ' · '.join(detail_parts), url_for('person_card', kind='abiturient', record_id=abiturient_id))
+
+def student_sample(row):
+    username, email, firstname, lastname, cohort1, source_dogovor = row[:6]
+    fio = ' '.join(part for part in (lastname, firstname) if part).strip() or username
+    detail_parts = [part for part in (username, cohort1, source_dogovor, email) if part]
+    return make_sample(fio, ' · '.join(detail_parts), url_for('person_card', kind='student', record_id=username))
+
+def duplicate_group_samples(groups, title_index=1, detail_index=2, limit=5):
+    samples = []
+    for grouped_rows in groups[:limit]:
+        first = grouped_rows[0]
+        title = first[detail_index] or first[title_index] or 'Повтор'
+        names = ', '.join((row[title_index] or row[3] or 'без имени') for row in grouped_rows[:3])
+        if len(grouped_rows) > 3:
+            names += '...'
+        samples.append(make_sample(title, f'{len(grouped_rows)} записи: {names}'))
+    return samples
+
+def collect_duplicate_groups(rows, key_index):
+    grouped = {}
+    for row in rows:
+        key = normalize_dogovor_key(row[key_index]) if key_index in {2, 5} else normalize_fio_key(row[key_index])
+        if key:
+            grouped.setdefault(key, []).append(row)
+    return [items for items in grouped.values() if len(items) > 1]
+
+def get_invalid_abiturient_email_rows(rows):
+    return [row for row in rows if row[4] and not is_valid_email(row[4])]
+
+def get_invalid_student_email_rows(rows):
+    return [row for row in rows if row[1] and not is_valid_email(row[1])]
+
+def get_data_quality_report(campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    sample_limit = 5
+    with sqlite3.connect(DB_PATH) as conn:
+        ab_rows = conn.execute(
+            '''
+            SELECT id, fio, dogovor, login, email, paid
+            FROM abiturients
+            WHERE campaign_year=?
+            ORDER BY fio
+            ''',
+            (campaign_year,)
+        ).fetchall()
+        pending_duplicates = conn.execute(
+            'SELECT id, fio, dogovor, login, fam, imotch, campaign_year FROM pending_duplicates WHERE campaign_year=? ORDER BY fio',
+            (campaign_year,)
+        ).fetchall()
+        login_conflict_rows = conn.execute(
+            'SELECT id, fio, dogovor, login, fam, imotch, campaign_year, conflict_time FROM login_conflicts WHERE campaign_year=? ORDER BY conflict_time DESC',
+            (campaign_year,)
+        ).fetchall()
+        student_rows = conn.execute(
+            '''
+            SELECT username, email, firstname, lastname, cohort1, source_dogovor, source_campaign_year
+            FROM students
+            WHERE source_campaign_year=? OR source_campaign_year IS NULL OR source_campaign_year=''
+            ORDER BY lastname, firstname, username
+            ''',
+            (campaign_year,)
+        ).fetchall()
+
+    ab_without_email = [row for row in ab_rows if not str(row[4] or '').strip()]
+    ab_unpaid = [row for row in ab_rows if not is_paid_person_value(row[5])]
+    ab_without_dogovor = [row for row in ab_rows if not normalize_dogovor_key(row[2])]
+    ab_invalid_email = get_invalid_abiturient_email_rows(ab_rows)
+    ab_duplicate_dogovors = collect_duplicate_groups(ab_rows, 2)
+    ab_same_fio = collect_duplicate_groups(ab_rows, 1)
+
+    current_students = [row for row in student_rows if row[6] == campaign_year]
+    students_without_group = [row for row in current_students if not str(row[4] or '').strip()]
+    students_without_dogovor = [row for row in current_students if not normalize_dogovor_key(row[5])]
+    students_without_campaign = [row for row in student_rows if not str(row[6] or '').strip()]
+    students_invalid_email = get_invalid_student_email_rows(current_students)
+    student_duplicate_dogovors = collect_duplicate_groups(current_students, 5)
+
+    sections = [
+        {
+            'title': 'Абитуриенты',
+            'checks': [
+                make_data_check('abiturients-without-email', 'Без почты', len(ab_without_email), 'Не получится восстановить доступ и выполнить миграцию без почты.', url_for('abiturients', has_email='0'), 'Открыть список', [abiturient_sample(row) for row in ab_without_email[:sample_limit]]),
+                make_data_check('abiturients-unpaid', 'Не оплачены', len(ab_unpaid), 'Эти записи не готовы к миграции, пока оплата не отмечена.', url_for('abiturients', has_paid='0'), 'Открыть список', [abiturient_sample(row) for row in ab_unpaid[:sample_limit]]),
+                make_data_check('abiturients-invalid-email', 'Некорректная почта', len(ab_invalid_email), 'Почта заполнена, но похожа на ошибочную.', url_for('abiturients'), 'Открыть абитуриентов', [abiturient_sample(row) for row in ab_invalid_email[:sample_limit]]),
+                make_data_check('abiturients-without-dogovor', 'Без договора', len(ab_without_dogovor), 'Без договора сложно отличать тёзок и проверять повторы.', url_for('abiturients'), 'Открыть абитуриентов', [abiturient_sample(row) for row in ab_without_dogovor[:sample_limit]]),
+                make_data_check('abiturients-duplicate-dogovor', 'Повторяющиеся договоры', sum(len(group) for group in ab_duplicate_dogovors), 'Один договор найден в нескольких записях абитуриентов.', url_for('abiturients'), 'Открыть абитуриентов', duplicate_group_samples(ab_duplicate_dogovors)),
+                make_data_check('abiturients-same-fio', 'Одинаковое ФИО', sum(len(group) for group in ab_same_fio), 'Это могут быть дубли или тёзки. Лучше сверить договоры.', url_for('abiturients'), 'Открыть абитуриентов', duplicate_group_samples(ab_same_fio, title_index=1, detail_index=1)),
+            ],
+        },
+        {
+            'title': 'Студенты',
+            'checks': [
+                make_data_check('students-without-group', 'Без академической группы', len(students_without_group), 'Студент есть в базе, но не привязан к группе.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_group[:sample_limit]]),
+                make_data_check('students-without-dogovor', 'Без договора при поступлении', len(students_without_dogovor), 'Без договора сложнее проверить, от какого абитуриента появился студент.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_dogovor[:sample_limit]]),
+                make_data_check('students-without-campaign', 'Без кампании поступления', len(students_without_campaign), 'У студента не указан год кампании, поэтому он выпадает из отчетов по кампании.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_campaign[:sample_limit]]),
+                make_data_check('students-invalid-email', 'Некорректная почта', len(students_invalid_email), 'Почта студента заполнена, но похожа на ошибочную.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_invalid_email[:sample_limit]]),
+                make_data_check('students-duplicate-dogovor', 'Повторяющиеся договоры', sum(len(group) for group in student_duplicate_dogovors), 'Один договор при поступлении найден у нескольких студентов.', url_for('students_list'), 'Открыть студентов', duplicate_group_samples(student_duplicate_dogovors, title_index=3, detail_index=5)),
+            ],
+        },
+        {
+            'title': 'Миграция и конфликты',
+            'checks': [
+                make_data_check('pending-duplicates', 'Дублирующие записи абитуриентов', len(pending_duplicates), 'Эти записи ждут решения: подтвердить или отклонить.', url_for('duplicates_abiturients'), 'Разобрать дубли', [make_sample(row[1], f'{row[2]} · {row[3]}', url_for('person_card', kind='duplicate', record_id=row[0])) for row in pending_duplicates[:sample_limit]]),
+                make_data_check('login-conflicts', 'Конфликты логинов', len(login_conflict_rows), 'Система не смогла безопасно назначить логин.', url_for('login_conflicts'), 'Разобрать конфликты', [make_sample(row[1], f'{row[2]} · {row[3]}', url_for('person_card', kind='conflict', record_id=row[0])) for row in login_conflict_rows[:sample_limit]]),
+            ],
+        },
+    ]
+    total_issues = sum(check['count'] for section in sections for check in section['checks'])
+    return {
+        'campaign_year': campaign_year,
+        'sections': sections,
+        'total_issues': total_issues,
+    }
+
+def build_dashboard_tasks(counts):
+    tasks = [
+        {
+            'title': 'Абитуриенты без почты',
+            'count': counts.get('no_email', 0),
+            'description': 'Нужно добавить почту перед миграцией.',
+            'url': url_for('abiturients', has_email='0'),
+            'label': 'Открыть',
+        },
+        {
+            'title': 'Не оплачены',
+            'count': counts.get('unpaid', 0),
+            'description': 'Эти абитуриенты пока не готовы к миграции.',
+            'url': url_for('abiturients', has_paid='0'),
+            'label': 'Открыть',
+        },
+        {
+            'title': 'Дубли',
+            'count': counts.get('duplicates', 0),
+            'description': 'Нужно подтвердить или отклонить записи.',
+            'url': url_for('duplicates_abiturients'),
+            'label': 'Разобрать',
+        },
+        {
+            'title': 'Конфликты логинов',
+            'count': counts.get('conflicts', 0),
+            'description': 'Нужно назначить корректный логин.',
+            'url': url_for('login_conflicts'),
+            'label': 'Разобрать',
+        },
+        {
+            'title': 'Студенты без договора',
+            'count': counts.get('students_without_dogovor', 0),
+            'description': 'Лучше проверить договор, чтобы отличать тёзок.',
+            'url': url_for('data_checks') + '#students-without-dogovor',
+            'label': 'Проверить',
+        },
+        {
+            'title': 'Другие замечания',
+            'count': counts.get('other_data_quality', 0),
+            'description': 'Есть дополнительные ошибки или подозрительные записи.',
+            'url': url_for('data_checks'),
+            'label': 'Проверить',
+        },
+    ]
+    active_tasks = [task for task in tasks if task['count']]
+    if active_tasks:
+        return active_tasks
+    return [{
+        'title': 'Критичных задач нет',
+        'count': 0,
+        'description': 'По текущей кампании явных проблем не найдено.',
+        'url': url_for('data_checks'),
+        'label': 'Посмотреть проверку',
+    }]
+
+def like_pattern(value):
+    return f"%{str(value or '').strip()}%"
+
+def global_search_records(query, campaign_year=None, limit=80):
+    query = str(query or '').strip()
+    if not query:
+        return []
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    pattern = like_pattern(query)
+    results = []
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            '''
+            SELECT id, fio, dogovor, login, email, campaign_year
+            FROM abiturients
+            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ? OR email LIKE ?)
+            ORDER BY fio
+            LIMIT ?
+            ''',
+            (campaign_year, pattern, pattern, pattern, pattern, limit)
+        )
+        for row in cur.fetchall():
+            results.append({
+                'kind': 'abiturient',
+                'id': row[0],
+                'title': row[1],
+                'subtitle': f'{row[3]} · {row[2]}',
+                'status': 'Абитуриент',
+            })
+
+        cur = conn.execute(
+            '''
+            SELECT username, email, firstname, lastname, cohort1, source_dogovor
+            FROM students
+            WHERE username LIKE ? OR email LIKE ? OR firstname LIKE ? OR lastname LIKE ? OR cohort1 LIKE ? OR source_dogovor LIKE ?
+            ORDER BY lastname, firstname
+            LIMIT ?
+            ''',
+            (pattern, pattern, pattern, pattern, pattern, pattern, limit)
+        )
+        for row in cur.fetchall():
+            fio = ' '.join(part for part in (row[3], row[2]) if part).strip() or row[0]
+            results.append({
+                'kind': 'student',
+                'id': row[0],
+                'title': fio,
+                'subtitle': f'{row[0]} · {row[4] or "-"} · {row[5] or "без договора"}',
+                'status': 'Студент',
+            })
+
+        cur = conn.execute(
+            '''
+            SELECT id, fio, dogovor, login
+            FROM pending_duplicates
+            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ?)
+            ORDER BY fio
+            LIMIT ?
+            ''',
+            (campaign_year, pattern, pattern, pattern, limit)
+        )
+        for row in cur.fetchall():
+            results.append({
+                'kind': 'duplicate',
+                'id': row[0],
+                'title': row[1],
+                'subtitle': f'{row[3]} · {row[2]}',
+                'status': 'Дубль',
+            })
+
+        cur = conn.execute(
+            '''
+            SELECT id, fio, dogovor, login
+            FROM login_conflicts
+            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ?)
+            ORDER BY conflict_time DESC
+            LIMIT ?
+            ''',
+            (campaign_year, pattern, pattern, pattern, limit)
+        )
+        for row in cur.fetchall():
+            results.append({
+                'kind': 'conflict',
+                'id': row[0],
+                'title': row[1],
+                'subtitle': f'{row[3]} · {row[2]}',
+                'status': 'Конфликт',
+            })
+    return results[:limit]
+
+def get_person_record(kind, record_id):
+    kind = str(kind or '').strip()
+    with sqlite3.connect(DB_PATH) as conn:
+        if kind == 'abiturient':
+            cur = conn.execute('SELECT * FROM abiturients WHERE id=?', (record_id,))
+        elif kind == 'student':
+            cur = conn.execute('SELECT * FROM students WHERE username=?', (record_id,))
+        elif kind == 'duplicate':
+            cur = conn.execute('SELECT * FROM pending_duplicates WHERE id=?', (record_id,))
+        elif kind == 'conflict':
+            cur = conn.execute('SELECT * FROM login_conflicts WHERE id=?', (record_id,))
+        else:
+            return None
+        row = cur.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cur.description]
+    return {
+        'kind': kind,
+        'id': record_id,
+        'fields': dict(zip(columns, row)),
+    }
+
+PERSON_KIND_LABELS = {
+    'abiturient': 'Абитуриент',
+    'student': 'Студент',
+    'duplicate': 'Дублирующая запись',
+    'conflict': 'Конфликт логина',
+}
+
+PERSON_KIND_TITLES = {
+    'abiturient': 'Карточка абитуриента',
+    'student': 'Карточка студента',
+    'duplicate': 'Карточка возможного дубля',
+    'conflict': 'Карточка конфликта логина',
+}
+
+PERSON_FIELD_LABELS = {
+    'id': 'Номер записи',
+    'fio': 'ФИО',
+    'dogovor': 'Номер договора',
+    'login': 'Логин Moodle',
+    'username': 'Логин Moodle',
+    'password': 'Пароль Moodle',
+    'campaign_year': 'Приемная кампания',
+    'source_campaign_year': 'Кампания поступления',
+    'fam': 'Фамилия',
+    'imotch': 'Имя и отчество',
+    'firstname': 'Имя',
+    'lastname': 'Фамилия',
+    'email': 'Электронная почта',
+    'paid': 'Оплата договора',
+    'comment': 'Комментарий',
+    'created_at': 'Дата добавления',
+    'conflict_time': 'Дата конфликта',
+    'cohort1': 'Академическая группа',
+    'source_dogovor': 'Договор при поступлении',
+    'source_fio': 'ФИО при поступлении',
+}
+
+PERSON_FIELD_HELP = {
+    'id': 'Внутренний номер записи для точного поиска и поддержки.',
+    'fio': 'Полное имя человека в текущей записи.',
+    'dogovor': 'Номер договора, по нему удобнее всего отличать тезок.',
+    'login': 'Учетная запись, с которой человек входит в Moodle.',
+    'username': 'Учетная запись, с которой человек входит в Moodle.',
+    'password': 'Пароль к учетной записи Moodle.',
+    'campaign_year': 'Год приемной кампании, к которой относится запись.',
+    'source_campaign_year': 'Год приемной кампании, из которой пришел студент.',
+    'fam': 'Фамилия отдельно, используется при формировании логина и списков.',
+    'imotch': 'Имя и отчество отдельно, используется при формировании логина и списков.',
+    'firstname': 'Имя студента в Moodle.',
+    'lastname': 'Фамилия студента в Moodle.',
+    'email': 'Почта для связи и восстановления доступа.',
+    'paid': 'Показывает, отмечена ли оплата договора.',
+    'comment': 'Заметка сотрудника по этой записи.',
+    'created_at': 'Когда запись была добавлена в систему.',
+    'conflict_time': 'Когда система обнаружила конфликт логина.',
+    'cohort1': 'Группа, к которой сейчас привязан студент.',
+    'source_dogovor': 'Договор, по которому студент был найден при миграции.',
+    'source_fio': 'ФИО из исходной записи абитуриента.',
+}
+
+PERSON_SECTION_FIELDS = {
+    'abiturient': [
+        ('Основные данные', ['fio', 'dogovor', 'campaign_year', 'paid']),
+        ('Контакты и доступ', ['login', 'email']),
+        ('ФИО по частям', ['fam', 'imotch']),
+        ('Дополнительно', ['comment', 'created_at', 'id']),
+    ],
+    'student': [
+        ('Основные данные', ['lastname', 'firstname', 'source_fio', 'cohort1']),
+        ('Контакты и доступ', ['username', 'password', 'email']),
+        ('Данные при поступлении', ['source_dogovor', 'source_campaign_year']),
+        ('Служебная информация', ['id']),
+    ],
+    'duplicate': [
+        ('Основные данные', ['fio', 'dogovor', 'campaign_year']),
+        ('Контакты и доступ', ['login']),
+        ('ФИО по частям', ['fam', 'imotch']),
+        ('Служебная информация', ['id']),
+    ],
+    'conflict': [
+        ('Основные данные', ['fio', 'dogovor', 'campaign_year']),
+        ('Контакты и доступ', ['login']),
+        ('ФИО по частям', ['fam', 'imotch']),
+        ('Служебная информация', ['conflict_time', 'id']),
+    ],
+}
+
+PERSON_SUMMARY_FIELDS = {
+    'abiturient': ['fio', 'dogovor', 'login', 'paid'],
+    'student': ['source_fio', 'cohort1', 'username', 'source_dogovor'],
+    'duplicate': ['fio', 'dogovor', 'login'],
+    'conflict': ['fio', 'dogovor', 'login'],
+}
+
+def is_blank_person_value(value):
+    return value is None or str(value).strip() in {'', '-'}
+
+def is_paid_person_value(value):
+    return str(value).strip().casefold() in {'1', 'true', 'yes', 'да', 'оплачен', 'оплачено', 'paid'}
+
+def humanize_person_field_name(key):
+    return str(key or '').replace('_', ' ').strip().capitalize() or 'Поле'
+
+def format_person_field_value(key, value):
+    if key == 'paid':
+        return 'Договор оплачен' if is_paid_person_value(value) else 'Договор не оплачен'
+    if key == 'password' and value == '******':
+        return 'Скрыт для безопасности'
+    if key == 'email' and is_blank_person_value(value):
+        return 'Почта не указана'
+    if key == 'comment' and is_blank_person_value(value):
+        return 'Комментария нет'
+    if is_blank_person_value(value):
+        return 'Не указано'
+    return str(value)
+
+def get_person_field_state(key, value):
+    if key == 'paid':
+        return 'success' if is_paid_person_value(value) else 'warning'
+    if is_blank_person_value(value):
+        return 'muted'
+    if key == 'email':
+        return 'success'
+    return ''
+
+def build_person_card_item(key, value):
+    return {
+        'key': key,
+        'label': PERSON_FIELD_LABELS.get(key, humanize_person_field_name(key)),
+        'help': PERSON_FIELD_HELP.get(key, 'Дополнительная информация по записи.'),
+        'value': format_person_field_value(key, value),
+        'state': get_person_field_state(key, value),
+    }
+
+def get_student_display_name(fields):
+    source_fio = fields.get('source_fio')
+    if not is_blank_person_value(source_fio):
+        return str(source_fio)
+    fio = ' '.join(part for part in (fields.get('lastname'), fields.get('firstname')) if not is_blank_person_value(part)).strip()
+    return fio or fields.get('username') or 'Студент'
+
+def get_person_display_name(kind, fields):
+    if kind == 'student':
+        return get_student_display_name(fields)
+    return fields.get('fio') or fields.get('login') or fields.get('username') or PERSON_KIND_LABELS.get(kind, 'Запись')
+
+def build_person_card_view(record):
+    kind = record.get('kind')
+    fields = record.get('fields') or {}
+    seen = set()
+    sections = []
+
+    for section_title, keys in PERSON_SECTION_FIELDS.get(kind, [('Данные записи', list(fields.keys()))]):
+        items = []
+        for key in keys:
+            if key in fields:
+                seen.add(key)
+                items.append(build_person_card_item(key, fields.get(key)))
+        if items:
+            sections.append({'title': section_title, 'items': items})
+
+    remaining_items = [
+        build_person_card_item(key, value)
+        for key, value in fields.items()
+        if key not in seen
+    ]
+    if remaining_items:
+        sections.append({'title': 'Дополнительные поля', 'items': remaining_items})
+
+    summary = [
+        {
+            'label': 'Тип записи',
+            'value': PERSON_KIND_LABELS.get(kind, 'Запись'),
+            'state': 'info',
+        }
+    ]
+    for key in PERSON_SUMMARY_FIELDS.get(kind, []):
+        if key in fields:
+            item = build_person_card_item(key, fields.get(key))
+            summary.append({
+                'label': item['label'],
+                'value': item['value'],
+                'state': item['state'],
+            })
+
+    return {
+        'title': PERSON_KIND_TITLES.get(kind, 'Карточка записи'),
+        'subtitle': get_person_display_name(kind, fields),
+        'summary': summary,
+        'sections': sections,
+    }
+
+def parse_paid_value(value):
+    value = str(value or '').strip().casefold()
+    if value in {'1', 'true', 'yes', 'да', 'оплачен', 'оплачено', 'paid'}:
+        return 1
+    if value in {'0', 'false', 'no', 'нет', 'не оплачен', 'не оплачено', 'unpaid'}:
+        return 0
+    return None
+
+def find_row_value_casefold(row, aliases):
+    normalized = {str(key).strip().casefold(): key for key in row.index}
+    for alias in aliases:
+        key = normalized.get(alias.casefold())
+        if key is not None:
+            return row.get(key)
+    return None
+
+def process_abiturients_updates(file_path, campaign_year=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    df = read_tabular_upload(file_path)
+    df.columns = [str(column).strip() for column in df.columns]
+    if not any(column.casefold() in {'договор', 'dogovor', 'source_dogovor'} for column in df.columns):
+        raise ValueError('В файле обновлений нужен столбец Договор')
+
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            'SELECT id, dogovor FROM abiturients WHERE campaign_year=?',
+            (campaign_year,)
+        ).fetchall()
+        dogovor_to_id = {
+            normalize_dogovor_key(dogovor): abiturient_id
+            for abiturient_id, dogovor in rows
+            if normalize_dogovor_key(dogovor)
+        }
+
+    updated_email = 0
+    updated_paid = 0
+    not_found = []
+    not_found_rows = []
+    errors = []
+    backup_path = create_database_backup('before_abiturients_updates')
+    with sqlite3.connect(DB_PATH) as conn:
+        for row_number, (_, row) in enumerate(df.iterrows(), start=2):
+            dogovor = find_row_value_casefold(row, {'Договор', 'dogovor', 'source_dogovor'})
+            dogovor_key = normalize_dogovor_key(clean_upload_text(dogovor))
+            if not dogovor_key:
+                errors.append({
+                    'row': row_number,
+                    'field': 'Договор',
+                    'message': 'Не указан номер договора. Строка пропущена.',
+                })
+                continue
+            abiturient_id = dogovor_to_id.get(dogovor_key)
+            if not abiturient_id:
+                dogovor_text = clean_upload_text(dogovor)
+                not_found.append(dogovor_text)
+                not_found_rows.append({
+                    'row': row_number,
+                    'field': 'Договор',
+                    'message': f'Договор не найден в кампании {campaign_year}: {dogovor_text}',
+                })
+                continue
+
+            email = clean_upload_text(find_row_value_casefold(row, {'Email', 'email', 'Почта', 'почта'}))
+            if email and not is_valid_email(email):
+                errors.append({
+                    'row': row_number,
+                    'field': 'Email',
+                    'message': f'Почта выглядит некорректно: {email}',
+                })
+                email = ''
+            paid_raw = find_row_value_casefold(row, {'paid', 'Оплата', 'оплата', 'Оплачен', 'оплачен'})
+            paid_text = clean_upload_text(paid_raw)
+            paid_value = parse_paid_value(paid_raw)
+            if paid_text and paid_value is None:
+                errors.append({
+                    'row': row_number,
+                    'field': 'Оплата',
+                    'message': f'Не удалось распознать значение оплаты: {paid_text}. Используйте да/нет, 1/0, оплачен/не оплачен.',
+                })
+            if email:
+                conn.execute('UPDATE abiturients SET email=? WHERE id=?', (email, abiturient_id))
+                updated_email += 1
+            if paid_value is not None:
+                conn.execute('UPDATE abiturients SET paid=? WHERE id=?', (paid_value, abiturient_id))
+                updated_paid += 1
+
+        log_action(
+            'abiturients_updates_import',
+            'campaign',
+            campaign_year,
+            (
+                f"rows={len(df)}; email={updated_email}; paid={updated_paid}; "
+                f"not_found={len(not_found)}; errors={len(errors)}; "
+                f"backup={os.path.basename(backup_path) if backup_path else ''}"
+            ),
+            conn
+        )
+    return {
+        'total': int(len(df)),
+        'updated_email': updated_email,
+        'updated_paid': updated_paid,
+        'not_found': not_found,
+        'not_found_rows': not_found_rows,
+        'errors': errors,
+    }
+
+def build_abiturients_updates_template():
+    output = io.BytesIO()
+    template_df = pd.DataFrame(columns=['Договор', 'Email', 'Оплата'])
+    help_df = pd.DataFrame([
+        {
+            'Поле': 'Договор',
+            'Что указать': 'Номер договора абитуриента. Это обязательное поле, по нему система ищет запись.',
+            'Пример': '2026-СД-0001-11И',
+        },
+        {
+            'Поле': 'Email',
+            'Что указать': 'Новая электронная почта. Можно оставить пустым, если почту обновлять не нужно.',
+            'Пример': 'student@example.ru',
+        },
+        {
+            'Поле': 'Оплата',
+            'Что указать': 'Статус оплаты договора. Подойдут значения: да/нет, 1/0, оплачен/не оплачен.',
+            'Пример': 'да',
+        },
+    ])
+    example_df = pd.DataFrame([
+        {
+            'Договор': '2026-СД-0001-11И',
+            'Email': 'student@example.ru',
+            'Оплата': 'да',
+        },
+        {
+            'Договор': '2026-ЛД-0002-9И',
+            'Email': '',
+            'Оплата': 'нет',
+        },
+    ])
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        template_df.to_excel(writer, sheet_name='Шаблон', index=False)
+        help_df.to_excel(writer, sheet_name='Подсказка', index=False)
+        example_df.to_excel(writer, sheet_name='Пример', index=False)
+    output.seek(0)
+    return output
 
 def get_login_attempt_key(username):
     return (get_client_ip(), str(username or '').strip().lower())
@@ -773,6 +1684,8 @@ def init_db():
         ensure_campaign_column(conn, 'pending_duplicates')
         ensure_campaign_column(conn, 'login_conflicts')
         ensure_students_origin_columns(conn)
+        create_audit_log_table(conn)
+        create_campaign_settings_table(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
@@ -958,87 +1871,419 @@ def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
         )
         conn.commit()
 
-def process_excel(file_path, campaign_year=None):
+def clean_upload_text(value):
+    if pd.isna(value):
+        return ''
+    return str(value).strip()
+
+def normalize_fio_key(value):
+    return ' '.join(str(value or '').split()).casefold()
+
+def normalize_dogovor_key(value):
+    normalized = normalize_dogovor_text(value)
+    return normalized if normalized else ''
+
+def get_existing_person_keys(campaign_year):
+    keys = set()
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            '''
+            SELECT fio FROM abiturients
+            WHERE campaign_year=? AND fio IS NOT NULL AND fio <> ''
+            ''',
+            (campaign_year,)
+        )
+        keys.update(normalize_fio_key(row[0]) for row in cur.fetchall() if normalize_fio_key(row[0]))
+
+        cur = conn.execute(
+            '''
+            SELECT source_fio, lastname, firstname FROM students
+            WHERE source_campaign_year=?
+            ''',
+            (campaign_year,)
+        )
+        for source_fio, lastname, firstname in cur.fetchall():
+            fio_key = normalize_fio_key(source_fio)
+            if not fio_key:
+                fio_key = normalize_fio_key(' '.join(part for part in (lastname, firstname) if part))
+            if fio_key:
+                keys.add(fio_key)
+    return keys
+
+def get_existing_dogovor_keys(campaign_year):
+    dogovor_keys = {
+        'abiturients': set(),
+        'pending_duplicates': set(),
+        'students': set(),
+        'login_conflicts': set(),
+    }
+    with sqlite3.connect(DB_PATH) as conn:
+        sources = (
+            ('abiturients', 'SELECT dogovor FROM abiturients WHERE campaign_year=?'),
+            ('pending_duplicates', 'SELECT dogovor FROM pending_duplicates WHERE campaign_year=?'),
+            ('login_conflicts', 'SELECT dogovor FROM login_conflicts WHERE campaign_year=?'),
+        )
+        for source_name, query in sources:
+            cur = conn.execute(query, (campaign_year,))
+            dogovor_keys[source_name].update(
+                key for key in (normalize_dogovor_key(row[0]) for row in cur.fetchall()) if key
+            )
+
+        cur = conn.execute(
+            '''
+            SELECT source_dogovor FROM students
+            WHERE source_campaign_year=? AND source_dogovor IS NOT NULL AND source_dogovor <> ''
+            ''',
+            (campaign_year,)
+        )
+        dogovor_keys['students'].update(
+            key for key in (normalize_dogovor_key(row[0]) for row in cur.fetchall()) if key
+        )
+    return dogovor_keys
+
+def summarize_abiturients_import(df, campaign_year):
+    action_counts = df['import_action'].value_counts().to_dict() if not df.empty else {}
+    status_counts = df['import_status'].value_counts().to_dict() if not df.empty else {}
+    return {
+        'campaign_year': campaign_year,
+        'total': int(len(df)),
+        'ready_count': int(action_counts.get('create', 0)),
+        'duplicate_count': int(action_counts.get('duplicate', 0)),
+        'conflict_count': int(action_counts.get('conflict', 0)),
+        'warning_count': int(df['has_warning'].sum()) if 'has_warning' in df else 0,
+        'status_counts': status_counts,
+    }
+
+def dataframe_preview_rows(df):
+    preview_df = df.copy()
+    preview_df = preview_df.where(pd.notnull(preview_df), '')
+    return preview_df[ABITURIENT_RESULT_COLUMNS].to_dict(orient='records')
+
+def upload_report_item(row, field, message):
+    return {
+        'row': row,
+        'field': field,
+        'message': message,
+    }
+
+def build_upload_report(title, total, items, summary=None, limit=UPLOAD_REPORT_LIMIT):
+    report_items = list(items or [])
+    return {
+        'title': title,
+        'total': int(total or 0),
+        'summary': list(summary or []),
+        'issue_count': len(report_items),
+        'items': report_items[:limit],
+        'hidden_count': max(0, len(report_items) - limit),
+    }
+
+ABITURIENT_PREVIEW_REPORT_MESSAGES = {
+    'Пустое ФИО': 'Не заполнено ФИО. Строка попадет в конфликты, пока ФИО не исправят.',
+    'Ошибка договора': 'Не удалось разобрать номер договора. Проверьте год, специальность и базу 9/11.',
+    'Договор уже есть у абитуриента': 'Такой договор уже есть в списке абитуриентов. Строка попадет в конфликты.',
+    'Договор уже есть у студента': 'Такой договор уже есть у студента. Строка попадет в конфликты, чтобы не создать повтор.',
+    'Договор уже ожидает проверки в дублях': 'Такой договор уже находится в дублях. Строка попадет на ручную проверку.',
+    'Договор уже есть в конфликтах': 'Такой договор уже есть в конфликтах. Сначала разберите существующий конфликт.',
+    'Договор повторяется в файле импорта': 'Такой договор повторяется внутри загруженного файла. Повторная строка попадет в конфликты.',
+    'Возможный тёзка, договор другой; будет добавлен': 'ФИО уже встречается в системе, но договор другой. Это может быть тёзка, проверьте перед подтверждением.',
+}
+
+def build_abiturients_preview_report(df, summary):
+    items = []
+    for _, row in df.iterrows():
+        status = clean_upload_text(row.get('import_status', ''))
+        action = clean_upload_text(row.get('import_action', ''))
+        has_warning = bool(row.get('has_warning', False))
+        if action == 'create' and not has_warning:
+            continue
+        field = 'ФИО' if status == 'Пустое ФИО' or 'тёз' in status else 'Договор'
+        message = ABITURIENT_PREVIEW_REPORT_MESSAGES.get(status, status)
+        items.append(upload_report_item(int(row.get('_row_number', 0)), field, message))
+
+    if not items:
+        return None
+    return build_upload_report(
+        'Отчет по проверке абитуриентов',
+        summary['total'],
+        items,
+        [
+            f"К добавлению: {summary['ready_count']}",
+            f"В дубли: {summary['duplicate_count']}",
+            f"В конфликты: {summary['conflict_count']}",
+            f"Возможных тёзок: {summary['warning_count']}",
+        ]
+    )
+
+def build_abiturients_import_plan(file_path, campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     df = read_tabular_upload(file_path)
-    fio_split = df["ФИО"].str.split(' ', n=2, expand=True)
-    df["Фамилия"] = fio_split[0]
-    df["Имя_Отчество"] = fio_split[1] + fio_split[2].apply(lambda x: f' {x}' if pd.notnull(x) else '')
+    df.columns = [str(column).strip() for column in df.columns]
+    missing_columns = sorted(ABITURIENT_REQUIRED_COLUMNS - set(df.columns))
+    if missing_columns:
+        raise ValueError(f"В файле отсутствуют обязательные столбцы: {', '.join(missing_columns)}")
+    if df.empty:
+        raise ValueError('Файл не содержит строк для импорта')
 
-    df["login_prefix"] = df["Договор"].apply(parse_dogovor)
+    df = df.copy()
+    df['_row_number'] = range(2, len(df) + 2)
+    df['ФИО'] = df['ФИО'].apply(clean_upload_text)
+    df['Договор'] = df['Договор'].apply(clean_upload_text)
+
+    fio_split = df['ФИО'].str.split(' ', n=2, expand=True)
+    for column_index in range(3):
+        if column_index not in fio_split.columns:
+            fio_split[column_index] = ''
+    df['Фамилия'] = fio_split[0].fillna('').astype(str).str.strip()
+    second_name = fio_split[1].fillna('').astype(str).str.strip()
+    third_name = fio_split[2].fillna('').astype(str).str.strip()
+    df['Имя_Отчество'] = (second_name + ' ' + third_name).str.strip()
+    df['login_prefix'] = df['Договор'].apply(parse_dogovor)
+    df['campaign_year'] = campaign_year
+
+    used_logins = get_used_logins(campaign_year)
+    used_duplicate_logins = set(get_prefixed_logins('pending_duplicates', 'dubl', campaign_year))
+    known_person_keys = get_existing_person_keys(campaign_year)
+    existing_dogovor_keys = get_existing_dogovor_keys(campaign_year)
+    planned_dogovor_keys = set()
 
     logins = []
-    used_logins = get_used_logins(campaign_year)
-    error_count = 1
+    actions = []
+    statuses = []
+    is_duplicate_values = []
+    has_warning_values = []
 
-    for idx, row in df.iterrows():
-        prefix = row["login_prefix"]
-        if prefix == "error":
-            login = f"error{error_count:03d}"
-            while login in used_logins:
-                error_count += 1
-                login = f"error{error_count:03d}"
-            logins.append(login)
+    for _, row in df.iterrows():
+        fio = row['ФИО']
+        fam = row['Фамилия']
+        fio_key = normalize_fio_key(fio)
+        dogovor_key = normalize_dogovor_key(row['Договор'])
+        prefix = row['login_prefix']
+
+        if not fio or not fam:
+            login = next_numbered_login('error', used_logins)
             used_logins.add(login)
-            error_count += 1
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Пустое ФИО')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
             continue
+
+        if prefix == 'error':
+            login = next_numbered_login('error', used_logins)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Ошибка договора')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
+            continue
+
+        if dogovor_key in existing_dogovor_keys['abiturients']:
+            login = next_numbered_login('error', used_logins)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Договор уже есть у абитуриента')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
+            continue
+
+        if dogovor_key in existing_dogovor_keys['students']:
+            login = next_numbered_login('error', used_logins)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Договор уже есть у студента')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
+            continue
+
+        if dogovor_key in existing_dogovor_keys['pending_duplicates']:
+            login = next_numbered_login('dubl', used_duplicate_logins)
+            used_duplicate_logins.add(login)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('duplicate')
+            statuses.append('Договор уже ожидает проверки в дублях')
+            is_duplicate_values.append(True)
+            has_warning_values.append(False)
+            continue
+
+        if dogovor_key in existing_dogovor_keys['login_conflicts']:
+            login = next_numbered_login('error', used_logins)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Договор уже есть в конфликтах')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
+            continue
+
+        if dogovor_key in planned_dogovor_keys:
+            login = next_numbered_login('error', used_logins)
+            used_logins.add(login)
+            logins.append(login)
+            actions.append('conflict')
+            statuses.append('Договор повторяется в файле импорта')
+            is_duplicate_values.append(False)
+            has_warning_values.append(False)
+            continue
+
         number = 1
         while True:
-            login = f"{prefix}{number:03d}"
+            login = f'{prefix}{number:03d}'
             if login not in used_logins:
-                logins.append(login)
-                used_logins.add(login)
                 break
             number += 1
-    df["login"] = logins
-    df["campaign_year"] = campaign_year
 
-    df["is_duplicate"] = df["Фамилия"].apply(lambda fam: bool(is_fio_duplicate(fam, campaign_year)))
+        used_logins.add(login)
+        planned_dogovor_keys.add(dogovor_key)
+        is_possible_namesake = fio_key in known_person_keys
+        known_person_keys.add(fio_key)
+        logins.append(login)
+        actions.append('create')
+        statuses.append('Возможный тёзка, договор другой; будет добавлен' if is_possible_namesake else 'Будет добавлен')
+        is_duplicate_values.append(False)
+        has_warning_values.append(is_possible_namesake)
 
-    for idx, row in df.iterrows():
-        if row["login_prefix"] == "error":
-            save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
-            continue
+    df['login'] = logins
+    df['import_action'] = actions
+    df['import_status'] = statuses
+    df['is_duplicate'] = is_duplicate_values
+    df['has_warning'] = has_warning_values
 
-        if not row["is_duplicate"]:
-            try:
-                save_abiturient(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
-            except sqlite3.IntegrityError:
-                save_login_conflict(row["ФИО"], row["Договор"], row["login"], row["Фамилия"], row["Имя_Отчество"], campaign_year)
-                continue
-        else:
-            dubl_logins = get_prefixed_logins('pending_duplicates', 'dubl', campaign_year)
-            dubl_login = next_numbered_login('dubl', dubl_logins)
-            save_pending_duplicate(row["ФИО"], row["Договор"], dubl_login, row["Фамилия"], row["Имя_Отчество"], campaign_year)
+    return df, summarize_abiturients_import(df, campaign_year)
 
+def create_abiturients_result_file(df):
     output_path = make_temp_upload_path('xlsx', prefix='result_')
-    df[["campaign_year", "ФИО", "Договор", "login", "Фамилия", "Имя_Отчество", "is_duplicate"]].to_excel(output_path, index=False)
+    result_df = df[ABITURIENT_RESULT_COLUMNS].copy()
+    result_df.to_excel(output_path, index=False)
+    return output_path
+
+def apply_abiturients_import(file_path, campaign_year=None):
+    df, summary = build_abiturients_import_plan(file_path, campaign_year)
+    backup_path = create_database_backup('before_abiturients_import')
+    with sqlite3.connect(DB_PATH) as conn:
+        for _, row in df.iterrows():
+            action = row['import_action']
+            values = (
+                row['ФИО'], row['Договор'], row['login'], row['campaign_year'],
+                row['Фамилия'], row['Имя_Отчество']
+            )
+            if action == 'create':
+                conn.execute(
+                    'INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+                    values
+                )
+            elif action == 'duplicate':
+                conn.execute(
+                    'INSERT INTO pending_duplicates (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+                    values
+                )
+            else:
+                conn.execute(
+                    'INSERT INTO login_conflicts (fio, dogovor, login, campaign_year, fam, imotch) VALUES (?, ?, ?, ?, ?, ?)',
+                    values
+                )
+        log_action(
+            'abiturients_import',
+            'campaign',
+            summary['campaign_year'],
+            (
+                f"rows={summary['total']}; create={summary['ready_count']}; "
+                f"duplicates={summary['duplicate_count']}; conflicts={summary['conflict_count']}; "
+                f"backup={os.path.basename(backup_path) if backup_path else ''}"
+            ),
+            conn
+        )
+
+    return create_abiturients_result_file(df), summary
+
+def process_excel(file_path, campaign_year=None):
+    output_path, _summary = apply_abiturients_import(file_path, campaign_year)
     return output_path
 
 def process_students_excel(file_path):
     df = read_tabular_upload(file_path)
-    required_cols = {"username", "password", "email", "firstname", "lastname", "cohort1"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError("В файле отсутствуют необходимые столбцы")
+    df.columns = [str(column).strip() for column in df.columns]
+    missing_columns = [column for column in STUDENT_UPLOAD_REQUIRED_COLUMNS if column not in df.columns]
+    if missing_columns:
+        readable_columns = ', '.join(STUDENT_UPLOAD_FIELD_LABELS.get(column, column) for column in missing_columns)
+        raise ValueError(f"В файле студентов не хватает столбцов: {readable_columns}")
+    if df.empty:
+        raise ValueError('Файл студентов не содержит строк для загрузки')
+
+    inserted_count = 0
+    duplicate_count = 0
+    errors = []
     with sqlite3.connect(DB_PATH) as conn:
-        for _, row in df.iterrows():
-            username = row["username"]
+        for row_number, (_, row) in enumerate(df.iterrows(), start=2):
+            values = {
+                column: clean_upload_text(row.get(column, ''))
+                for column in STUDENT_UPLOAD_REQUIRED_COLUMNS
+            }
+            missing_values = [
+                STUDENT_UPLOAD_FIELD_LABELS[column]
+                for column, value in values.items()
+                if not value
+            ]
+            if missing_values:
+                errors.append(upload_report_item(
+                    row_number,
+                    'Обязательные поля',
+                    f"Не заполнено: {', '.join(missing_values)}. Строка пропущена."
+                ))
+                continue
+
+            if not is_valid_email(values['email']):
+                errors.append(upload_report_item(
+                    row_number,
+                    'Email',
+                    f"Почта выглядит некорректно: {values['email']}. Строка пропущена."
+                ))
+                continue
+
+            username = values["username"]
+            source_dogovor = clean_upload_text(row.get('source_dogovor', ''))
+            source_fio = clean_upload_text(row.get('source_fio', ''))
+            source_campaign_year = infer_campaign_year(source_dogovor, DEFAULT_CAMPAIGN_YEAR) if source_dogovor else ''
             cur = conn.execute('SELECT 1 FROM students WHERE username=?', (username,))
             if cur.fetchone():
-                # Дубликат — добавляем в students_duplicates
                 conn.execute(
                     '''INSERT INTO students_duplicates (username, password, email, firstname, lastname, cohort1)
                        VALUES (?, ?, ?, ?, ?, ?)''',
-                    (row["username"], row["password"], row["email"], row["firstname"], row["lastname"], row["cohort1"])
+                    (
+                        values["username"], values["password"], values["email"],
+                        values["firstname"], values["lastname"], values["cohort1"]
+                    )
                 )
+                errors.append(upload_report_item(
+                    row_number,
+                    'Логин',
+                    f"Логин {username} уже есть у студента. Строка перенесена в дубли студентов."
+                ))
+                duplicate_count += 1
             else:
-                # Нет дубля — добавляем в students
                 conn.execute(
-                    '''INSERT INTO students (username, password, email, firstname, lastname, cohort1)
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (row["username"], row["password"], row["email"], row["firstname"], row["lastname"], row["cohort1"])
+                    '''
+                    INSERT INTO students
+                        (username, password, email, firstname, lastname, cohort1, source_campaign_year, source_dogovor, source_fio)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (
+                        values["username"], values["password"], values["email"],
+                        values["firstname"], values["lastname"], values["cohort1"],
+                        source_campaign_year, source_dogovor, source_fio
+                    )
                 )
-    return True
+                inserted_count += 1
+    return {
+        'total': int(len(df)),
+        'inserted_count': inserted_count,
+        'duplicate_count': duplicate_count,
+        'errors': errors,
+    }
 
 def normalize_specialty(value):
     value = re.sub(r'\s+', '', str(value or ''))
@@ -1329,20 +2574,40 @@ def approve_users():
             action = request.form.get('action')
             if action == 'approve':
                 conn.execute('UPDATE users SET approved=1 WHERE id=?', (user_id,))
+                log_action('user_approved', 'user', user_id, conn=conn)
             elif action == 'reject':
                 conn.execute('DELETE FROM users WHERE id=?', (user_id,))
+                log_action('user_rejected', 'user', user_id, conn=conn)
         cur = conn.execute('SELECT id, username, role FROM users WHERE approved=0')
         pending_users = cur.fetchall()
     return render_template('approve_users.html', pending_users=pending_users)
 
 EXCEL_MIMETYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
+def get_pending_abiturients_import_path(token):
+    token = os.path.basename(str(token or ''))
+    if not token.startswith(PENDING_ABITURIENTS_IMPORT_PREFIX):
+        raise UploadValidationError('Временный файл импорта не найден. Загрузите файл ещё раз.')
+    upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    import_path = os.path.abspath(os.path.join(upload_root, token))
+    if os.path.commonpath([upload_root, import_path]) != upload_root or not os.path.exists(import_path):
+        raise UploadValidationError('Временный файл импорта не найден. Загрузите файл ещё раз.')
+    return import_path
+
 def build_abiturients_upload_response(file_storage, campaign_year):
     upload_path = None
     result_path = None
     try:
         upload_path = save_upload_to_temp(file_storage, ABITURIENT_UPLOAD_EXTENSIONS)
-        result_path = process_excel(upload_path, campaign_year)
+        result_path, summary = apply_abiturients_import(upload_path, campaign_year)
+        flash(
+            (
+                f"Импорт завершён: добавлено {summary['ready_count']}, "
+                f"дублей {summary['duplicate_count']}, конфликтов {summary['conflict_count']}, "
+                f"возможных тёзок {summary['warning_count']}."
+            ),
+            'success'
+        )
         return send_temp_download(result_path, 'abiturients_with_logins.xlsx', EXCEL_MIMETYPE)
     except UploadValidationError as exc:
         flash(str(exc), 'error')
@@ -1357,22 +2622,179 @@ def build_abiturients_upload_response(file_storage, campaign_year):
 def index():
     campaign_year = get_active_campaign_year()
     if request.method == 'POST':
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('index'), code=303)
         response = build_abiturients_upload_response(request.files.get('file'), campaign_year)
         if response:
             return response
         return redirect(url_for('file_work'), code=303)
-    return render_template('index.html')
+    dashboard = get_dashboard_data(campaign_year)
+    return render_template('index.html', dashboard=dashboard)
+
+@app.route('/search')
+@login_required
+def search():
+    campaign_year = get_active_campaign_year()
+    query = request.args.get('q', '').strip()
+    results = global_search_records(query, campaign_year) if query else []
+    return render_template('search.html', query=query, results=results, campaign_year=campaign_year)
+
+@app.route('/search_overlay')
+@login_required
+def search_overlay():
+    campaign_year = get_active_campaign_year()
+    query = request.args.get('q', '').strip()
+    results = global_search_records(query, campaign_year) if query else []
+    return jsonify({
+        'query': query,
+        'total': len(results),
+        'results': results,
+    })
+
+@app.route('/data_checks')
+@login_required
+def data_checks():
+    campaign_year = get_active_campaign_year()
+    report = get_data_quality_report(campaign_year)
+    return render_template('data_checks.html', report=report)
+
+@app.route('/person/<kind>/<path:record_id>')
+@login_required
+def person_card(kind, record_id):
+    record = get_person_record(kind, record_id)
+    if not record:
+        flash('Запись не найдена', 'error')
+        return redirect(url_for('search'))
+    if record['kind'] == 'student' and session.get('role') != 'admin':
+        record['fields']['password'] = '******'
+    return render_template('person_card.html', record=record, card_view=build_person_card_view(record))
 
 @app.route('/file_work', methods=['GET', 'POST'])
 @login_required
 def file_work():
     campaign_year = get_active_campaign_year()
+    updates_report = None
+    students_report = None
+    if request.method == 'GET':
+        updates_report = session.pop('abiturients_updates_report', None)
+        students_report = session.pop('students_upload_report', None)
     if request.method == 'POST':
-        response = build_abiturients_upload_response(request.files.get('file'), campaign_year)
-        if response:
-            return response
+        import_action = request.form.get('import_action', 'preview')
+        if import_action == 'confirm':
+            if not ensure_campaign_open(campaign_year):
+                return redirect(url_for('file_work'), code=303)
+            pending_path = None
+            result_path = None
+            try:
+                pending_path = get_pending_abiturients_import_path(request.form.get('pending_import'))
+                result_path, summary = apply_abiturients_import(pending_path, campaign_year)
+                flash(
+                    (
+                        f"Импорт завершён: добавлено {summary['ready_count']}, "
+                        f"дублей {summary['duplicate_count']}, конфликтов {summary['conflict_count']}, "
+                        f"возможных тёзок {summary['warning_count']}."
+                    ),
+                    'success'
+                )
+                return send_temp_download(result_path, 'abiturients_with_logins.xlsx', EXCEL_MIMETYPE)
+            except (UploadValidationError, ValueError) as exc:
+                flash(str(exc), 'error')
+            except Exception as exc:
+                flash(f'Ошибка обработки файла: {exc}', 'error')
+            finally:
+                cleanup_temp_files(pending_path, result_path)
+            return redirect(url_for('file_work'), code=303)
+
+        if import_action == 'cancel':
+            try:
+                cleanup_temp_files(get_pending_abiturients_import_path(request.form.get('pending_import')))
+                flash('Предпросмотр импорта отменён.', 'info')
+            except UploadValidationError:
+                pass
+            return redirect(url_for('file_work'), code=303)
+
+        upload_path = None
+        try:
+            if not ensure_campaign_open(campaign_year):
+                return redirect(url_for('file_work'), code=303)
+            upload_path = save_upload_to_temp(
+                request.files.get('file'),
+                ABITURIENT_UPLOAD_EXTENSIONS,
+                prefix=PENDING_ABITURIENTS_IMPORT_PREFIX
+            )
+            plan_df, preview_summary = build_abiturients_import_plan(upload_path, campaign_year)
+            return render_template(
+                'file_work.html',
+                campaign_year=campaign_year,
+                abiturients_preview=preview_summary,
+                abiturients_preview_rows=dataframe_preview_rows(plan_df),
+                abiturients_report=build_abiturients_preview_report(plan_df, preview_summary),
+                updates_report=updates_report,
+                students_report=students_report,
+                pending_import_token=os.path.basename(upload_path)
+            )
+        except UploadValidationError as exc:
+            flash(str(exc), 'error')
+        except Exception as exc:
+            cleanup_temp_files(upload_path)
+            flash(f'Ошибка обработки файла: {exc}', 'error')
         return redirect(url_for('file_work'), code=303)
-    return render_template('file_work.html', campaign_year=campaign_year)
+    return render_template(
+        'file_work.html',
+        campaign_year=campaign_year,
+        updates_report=updates_report,
+        students_report=students_report
+    )
+
+@app.route('/abiturients_updates_upload', methods=['POST'])
+@login_required
+def abiturients_updates_upload():
+    if session.get('role') not in {'admin', 'assistant', 'operator'}:
+        flash('Недостаточно прав', 'error')
+        return redirect(url_for('file_work'), code=303)
+    campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('file_work'), code=303)
+    filepath = None
+    try:
+        filepath = save_upload_to_temp(request.files.get('updates_file'), ABITURIENT_UPLOAD_EXTENSIONS)
+        summary = process_abiturients_updates(filepath, campaign_year)
+        report_items = (summary.get('errors') or []) + (summary.get('not_found_rows') or [])
+        if report_items:
+            session['abiturients_updates_report'] = build_upload_report(
+                'Отчет по файлу обновлений',
+                summary['total'],
+                report_items,
+                [
+                    f"Обработано строк: {summary['total']}",
+                    f"Обновлено почт: {summary['updated_email']}",
+                    f"Обновлено статусов оплаты: {summary['updated_paid']}",
+                ]
+            )
+        flash(
+            (
+                f"Обновления применены: почт {summary['updated_email']}, "
+                f"статусов оплаты {summary['updated_paid']}, замечаний {len(report_items)}."
+            ),
+            'success' if not report_items else 'info'
+        )
+    except UploadValidationError as exc:
+        flash(str(exc), 'error')
+    except Exception as exc:
+        flash(f'Ошибка обновления данных: {exc}', 'error')
+    finally:
+        cleanup_temp_files(filepath)
+    return redirect(url_for('file_work'), code=303)
+
+@app.route('/abiturients_updates_template/download')
+@login_required
+def download_abiturients_updates_template():
+    return send_file(
+        build_abiturients_updates_template(),
+        as_attachment=True,
+        download_name='abiturients_updates_template.xlsx',
+        mimetype=EXCEL_MIMETYPE
+    )
 
 @app.route('/abiturients')
 @login_required
@@ -1386,13 +2808,14 @@ def abiturients():
     is_i = request.args.get('is_i')
     has_email = request.args.get('has_email')
     has_paid = request.args.get('has_paid')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email, has_paid)
+    q = request.args.get('q', '').strip()
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email, has_paid, q)
     specs = list(spec_codes.keys())
     bases = list(base_codes.keys())
     years = get_campaign_years()
     return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
-def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None, has_paid=None):
+def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None, has_paid=None, q=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email', 'paid'}
     if order_by not in valid_columns:
@@ -1424,6 +2847,10 @@ def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base
         query += " AND paid = 1"
     elif has_paid == '0':
         query += " AND paid = 0"
+    q = str(q or '').strip()
+    if q:
+        query += " AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ? OR email LIKE ?)"
+        params.extend([f"%{q}%"] * 4)
     query += f" ORDER BY {order_by} {order_dir.upper()}"
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(query, params)
@@ -1509,12 +2936,72 @@ def role_required(*roles):
             with sqlite3.connect(DB_PATH) as conn:
                 cur = conn.execute('SELECT role, approved FROM users WHERE username=?', (session['user'],))
                 user = cur.fetchone()
-                if not user or user[0] not in allowed_roles or user[1] != 1:
+                role = user[0] if user else ''
+                role_allowed = role in allowed_roles or role == 'admin'
+                if 'assistant' in allowed_roles and role in {'manager', 'operator'}:
+                    role_allowed = True
+                if not user or not role_allowed or user[1] != 1:
                     flash('Недостаточно прав')
                     return redirect(url_for('index'))
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+@app.route('/abiturients/bulk', methods=['POST'])
+@login_required
+@role_required('admin', 'assistant', 'operator')
+def bulk_abiturients():
+    campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('abiturients'), code=303)
+    action = request.form.get('bulk_action', '').strip()
+    if action not in {'mark_paid', 'mark_unpaid', 'delete', 'export'}:
+        flash('Неизвестное массовое действие.', 'error')
+        return redirect(url_for('abiturients'), code=303)
+    if action == 'delete' and session.get('role') != 'admin':
+        flash('Удаление доступно только администратору.', 'error')
+        return redirect(url_for('abiturients'), code=303)
+    selected_ids = [item for item in request.form.getlist('abiturient_ids') if str(item).isdigit()]
+    if not selected_ids:
+        flash('Выберите хотя бы одну запись.', 'error')
+        return redirect(url_for('abiturients'), code=303)
+
+    placeholders = ','.join('?' for _ in selected_ids)
+    params = selected_ids + [campaign_year]
+    if action == 'export':
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.execute(
+                f'SELECT * FROM abiturients WHERE id IN ({placeholders}) AND campaign_year=? ORDER BY fio',
+                params
+            )
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
+        df = pd.DataFrame([dict(zip(columns, row)) for row in rows])
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+        log_action('abiturients_bulk_exported', 'campaign', campaign_year, f"rows={len(rows)}")
+        return send_file(output, as_attachment=True, download_name='selected_abiturients.xlsx', mimetype=EXCEL_MIMETYPE)
+
+    backup_path = create_database_backup('before_bulk_abiturients')
+    with sqlite3.connect(DB_PATH) as conn:
+        if action == 'mark_paid':
+            conn.execute(f'UPDATE abiturients SET paid=1 WHERE id IN ({placeholders}) AND campaign_year=?', params)
+            flash(f'Отмечено оплаченных: {len(selected_ids)}', 'success')
+        elif action == 'mark_unpaid':
+            conn.execute(f'UPDATE abiturients SET paid=0 WHERE id IN ({placeholders}) AND campaign_year=?', params)
+            flash(f'Снята отметка оплаты: {len(selected_ids)}', 'success')
+        elif action == 'delete':
+            conn.execute(f'DELETE FROM abiturients WHERE id IN ({placeholders}) AND campaign_year=?', params)
+            flash(f'Удалено записей: {len(selected_ids)}', 'success')
+        log_action(
+            'abiturients_bulk_action',
+            'campaign',
+            campaign_year,
+            f"action={action}; rows={len(selected_ids)}; backup={os.path.basename(backup_path) if backup_path else ''}",
+            conn
+        )
+    return redirect(url_for('abiturients'), code=303)
 
 @app.route('/duplicates_abiturients', methods=['GET', 'POST'])
 @login_required
@@ -1522,6 +3009,8 @@ def role_required(*roles):
 def duplicates_abiturients():
     campaign_year = get_active_campaign_year()
     if request.method == 'POST':
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('duplicates_abiturients'), code=303)
         action = request.form.get('action')
         if action == 'reject_all':
             with sqlite3.connect(DB_PATH) as conn:
@@ -1540,14 +3029,32 @@ def duplicates_abiturients():
 @role_required('admin')
 def delete_abiturient():
     campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('abiturients'), code=303)
     abiturient_id = request.form.get('id')
     login = request.form.get('login')
     if abiturient_id:
+        backup_path = create_database_backup('before_delete_abiturient')
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (abiturient_id, campaign_year))
+            log_action(
+                'abiturient_deleted',
+                'abiturient',
+                abiturient_id,
+                f"campaign_year={campaign_year}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                conn
+            )
     elif login:
+        backup_path = create_database_backup('before_delete_abiturient')
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('DELETE FROM abiturients WHERE login=? AND campaign_year=?', (login, campaign_year))
+            log_action(
+                'abiturient_deleted',
+                'abiturient',
+                login,
+                f"campaign_year={campaign_year}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                conn
+            )
     return redirect(url_for('abiturients'))
 
 @app.route('/toggle_abiturient_paid', methods=['POST'])
@@ -1555,6 +3062,8 @@ def delete_abiturient():
 @role_required('admin')
 def toggle_abiturient_paid():
     campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('abiturients'), code=303)
     abiturient_id = request.form.get('id')
     paid = 1 if request.form.get('paid') == '1' else 0
     query_params = {
@@ -1570,6 +3079,7 @@ def toggle_abiturient_paid():
     if abiturient_id:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('UPDATE abiturients SET paid=? WHERE id=? AND campaign_year=?', (paid, abiturient_id, campaign_year))
+            log_action('abiturient_paid_changed', 'abiturient', abiturient_id, f"paid={paid}; campaign_year={campaign_year}", conn)
     return redirect(url_for('abiturients', **{k: v for k, v in query_params.items() if v}))
 
 @app.route('/abiturients/download')
@@ -1583,7 +3093,10 @@ def download_abiturients():
     year = request.args.get('year')
     is_i = request.args.get('is_i')
     has_email = request.args.get('has_email')
-    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email)
+    has_paid = request.args.get('has_paid')
+    q = request.args.get('q', '').strip()
+    abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email, has_paid, q)
+    log_action('abiturients_exported', 'campaign', campaign_year, f"rows={len(abiturients)}")
     df = pd.DataFrame(abiturients)
     output = io.BytesIO()
     df.to_excel(output, index=False)
@@ -1618,11 +3131,14 @@ def login_conflicts():
 def edit_conflict(conflict_id):
     campaign_year = get_active_campaign_year()
     if request.method == 'POST':
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('login_conflicts'), code=303)
         new_login = request.form.get('login', '').strip()
         if not new_login:
             flash('Логин не может быть пустым')
             return redirect(url_for('edit_conflict', conflict_id=conflict_id))
         
+        backup_path = create_database_backup('before_resolve_login_conflict')
         with sqlite3.connect(DB_PATH) as conn:
             # Проверяем уникальность логина
             if is_login_exists(new_login, campaign_year):
@@ -1649,6 +3165,16 @@ def edit_conflict(conflict_id):
                 )
                 # Удаляем из конфликтов
                 conn.execute('DELETE FROM login_conflicts WHERE id=? AND campaign_year=?', (conflict_id, campaign_year))
+                log_action(
+                    'login_conflict_resolved',
+                    'login_conflict',
+                    conflict_id,
+                    (
+                        f"new_login={new_login}; campaign_year={row_campaign_year}; "
+                        f"backup={os.path.basename(backup_path) if backup_path else ''}"
+                    ),
+                    conn
+                )
                 conn.commit()
                 flash(f'Абитуриент успешно добавлен с логином {new_login}')
                 return redirect(url_for('login_conflicts'))
@@ -1674,8 +3200,18 @@ def edit_conflict(conflict_id):
 @role_required('admin')
 def delete_conflict(conflict_id):
     campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('login_conflicts'), code=303)
+    backup_path = create_database_backup('before_delete_login_conflict')
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('DELETE FROM login_conflicts WHERE id=? AND campaign_year=?', (conflict_id, campaign_year))
+        log_action(
+            'login_conflict_deleted',
+            'login_conflict',
+            conflict_id,
+            f"campaign_year={campaign_year}; backup={os.path.basename(backup_path) if backup_path else ''}",
+            conn
+        )
         conn.commit()
     flash('Запись удалена')
     return redirect(url_for('login_conflicts'))
@@ -1701,6 +3237,8 @@ def manual_create():
     if request.method == 'POST':
         year = normalize_campaign_year(request.form.get('year'), campaign_year)
         campaign_year = year
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('manual_create'), code=303)
         session['campaign_year'] = campaign_year
         spec = request.form.get('spec')
         base = request.form.get('base')
@@ -1742,6 +3280,8 @@ def manual_create():
                         )
                         conflict_info = cur.fetchone()
                     message = f"Конфликт логина! Запись отправлена в раздел 'Конфликты логинов'."
+        if message:
+            log_action('manual_abiturient_create', 'campaign', campaign_year, message)
         return render_template('manual_create.html', message=message, conflict_info=conflict_info, years=years, specs=specs, bases=bases, campaign_year=campaign_year)
 
     return render_template('manual_create.html', years=years, specs=specs, bases=bases, campaign_year=campaign_year)
@@ -1806,6 +3346,8 @@ def edit_abiturient(login):
         return redirect(url_for('abiturients'))
 
     if request.method == 'POST':
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('abiturients'), code=303)
         fio, fam, imotch = split_fio(request.form.get('fio', ''))
         if not fio:
             flash('ФИО не может быть пустым')
@@ -1814,6 +3356,7 @@ def edit_abiturient(login):
         paid = 1 if request.form.get('paid') == '1' else 0
         new_login = request.form.get('login', '').strip()
         comment = request.form.get('comment', '').strip()
+        backup_path = create_database_backup('before_edit_abiturient')
         if new_login != login:
             if is_login_exists(new_login, campaign_year):
                 flash('Такой логин уже существует!')
@@ -1823,11 +3366,25 @@ def edit_abiturient(login):
                     'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, login=?, comment=? WHERE login=? AND campaign_year=?',
                     (fio, fam, imotch, email, paid, new_login, comment, login, campaign_year)
                 )
+                log_action(
+                    'abiturient_updated',
+                    'abiturient',
+                    login,
+                    f"new_login={new_login}; campaign_year={campaign_year}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                    conn
+                )
         else:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
                     'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, comment=? WHERE login=? AND campaign_year=?',
                     (fio, fam, imotch, email, paid, comment, login, campaign_year)
+                )
+                log_action(
+                    'abiturient_updated',
+                    'abiturient',
+                    login,
+                    f"campaign_year={campaign_year}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                    conn
                 )
         flash('Данные обновлены')
         return redirect(url_for('abiturients'))
@@ -1861,12 +3418,88 @@ def admin_panel():
         all_users = cur.fetchall()
     return render_template('admin_panel.html', all_users=all_users)
 
+@app.route('/backups')
+@admin_required
+def backups():
+    return render_template('backups.html', backups=list_database_backups())
+
+@app.route('/backups/download/<backup_name>')
+@admin_required
+def download_backup(backup_name):
+    backup_path = get_backup_path(backup_name)
+    log_action('database_backup_download', 'backup', backup_name)
+    return send_file(backup_path, as_attachment=True, download_name=backup_name, mimetype='application/octet-stream')
+
+@app.route('/backups/restore', methods=['POST'])
+@admin_required
+def restore_backup():
+    backup_name = request.form.get('backup_name')
+    try:
+        backup_path = get_backup_path(backup_name)
+        rollback_path = create_database_backup('before_restore')
+        shutil.copy2(backup_path, DB_PATH)
+        init_db()
+        log_action(
+            'database_restore',
+            'backup',
+            backup_name,
+            f"rollback_backup={os.path.basename(rollback_path) if rollback_path else ''}"
+        )
+        flash(f'База восстановлена из резервной копии {backup_name}.', 'success')
+    except Exception as exc:
+        flash(f'Не удалось восстановить базу: {exc}', 'error')
+    return redirect(url_for('backups'))
+
+@app.route('/audit_logs')
+@admin_required
+def audit_logs():
+    return render_template('audit_logs.html', audit_logs=get_audit_logs())
+
+@app.route('/campaigns', methods=['GET', 'POST'])
+@admin_required
+def campaigns():
+    if request.method == 'POST':
+        campaign_year = normalize_campaign_year(request.form.get('campaign_year'), get_active_campaign_year())
+        is_archived = 1 if request.form.get('is_archived') == '1' else 0
+        backup_path = create_database_backup('before_campaign_archive_toggle')
+        with sqlite3.connect(DB_PATH) as conn:
+            create_campaign_settings_table(conn)
+            conn.execute(
+                '''
+                INSERT INTO campaign_settings (campaign_year, is_archived, archived_at, archived_by)
+                VALUES (?, ?, datetime('now', 'localtime'), ?)
+                ON CONFLICT(campaign_year) DO UPDATE SET
+                    is_archived=excluded.is_archived,
+                    archived_at=excluded.archived_at,
+                    archived_by=excluded.archived_by
+                ''',
+                (campaign_year, is_archived, session.get('user', ''))
+            )
+            log_action(
+                'campaign_archive_changed',
+                'campaign',
+                campaign_year,
+                f"is_archived={is_archived}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                conn
+            )
+        flash(f"Кампания {campaign_year}: {'архивирована' if is_archived else 'открыта'}.", 'success')
+        return redirect(url_for('campaigns'))
+    return render_template('campaigns.html', campaigns=get_campaign_settings())
+
 @app.route('/delete_user', methods=['POST'])
 @admin_required
 def delete_user():
     user_id = request.form.get('user_id')
+    backup_path = create_database_backup('before_delete_user')
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('DELETE FROM users WHERE id=?', (user_id,))
+        log_action(
+            'user_deleted',
+            'user',
+            user_id,
+            f"backup={os.path.basename(backup_path) if backup_path else ''}",
+            conn
+        )
     return redirect(url_for('admin_panel'))
 
 @app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
@@ -1883,6 +3516,8 @@ def edit_user(user_id):
             password = (request.form.get('password') or '').strip()
             role = request.form.get('role')
             approved = int(request.form.get('approved', 0))
+            if role not in ROLE_LABELS:
+                role = 'viewer'
             if not username:
                 flash('Логин не может быть пустым')
                 return render_template('edit_user.html', user=user)
@@ -1906,6 +3541,7 @@ def edit_user(user_id):
                     'UPDATE users SET username=?, role=?, approved=? WHERE id=?',
                     (username, role, approved, user_id)
                 )
+            log_action('user_updated', 'user', user_id, f"username={username}; role={role}; approved={approved}", conn)
             return redirect(url_for('admin_panel'))
     return render_template('edit_user.html', user=user)
 
@@ -1918,6 +3554,8 @@ def add_user():
         fio = (request.form.get('fio') or '').strip()
         position = (request.form.get('position') or '').strip()
         role = request.form.get('role')
+        if role not in ROLE_LABELS:
+            role = 'viewer'
         approved = int(request.form.get('approved', 1))
         if not username or len(password) < MIN_PASSWORD_LENGTH:
             flash(f'Логин обязателен, пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов')
@@ -1931,6 +3569,7 @@ def add_user():
                 'INSERT INTO users (username, password, fio, position, role, approved) VALUES (?, ?, ?, ?, ?, ?)',
                 (username, hash_user_password(password), fio, position, role, approved)
             )
+            log_action('user_created', 'user', username, f"role={role}; approved={approved}", conn)
         flash('Пользователь успешно добавлен!')
         return redirect(url_for('admin_panel'))
     return render_template('add_user.html')
@@ -1939,10 +3578,20 @@ def add_user():
 @admin_required
 def clear_abiturients():
     campaign_year = get_active_campaign_year()
+    if not ensure_campaign_open(campaign_year):
+        return redirect(url_for('admin_panel'), code=303)
+    backup_path = create_database_backup('before_clear_abiturients')
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('DELETE FROM abiturients WHERE campaign_year=?', (campaign_year,))
         conn.execute('DELETE FROM pending_duplicates WHERE campaign_year=?', (campaign_year,))
         conn.execute('DELETE FROM login_conflicts WHERE campaign_year=?', (campaign_year,))
+        log_action(
+            'abiturients_campaign_cleared',
+            'campaign',
+            campaign_year,
+            f"backup={os.path.basename(backup_path) if backup_path else ''}",
+            conn
+        )
     flash(f'Абитуриенты, дубли и конфликты кампании {campaign_year} успешно очищены.', 'success')
     return redirect(url_for('admin_panel'))
 
@@ -1955,16 +3604,43 @@ def students_upload():
         filepath = None
         try:
             filepath = save_upload_to_temp(request.files.get('file'), STUDENTS_UPLOAD_EXTENSIONS)
-            process_students_excel(filepath)
-            message = "Студенты успешно добавлены!"
-            flash(message, 'success')
-        except UploadValidationError as e:
+            backup_path = create_database_backup('before_students_import')
+            summary = process_students_excel(filepath)
+            report_items = summary.get('errors') or []
+            if report_items:
+                session['students_upload_report'] = build_upload_report(
+                    'Отчет по загрузке студентов',
+                    summary['total'],
+                    report_items,
+                    [
+                        f"Обработано строк: {summary['total']}",
+                        f"Добавлено студентов: {summary['inserted_count']}",
+                        f"В дублях студентов: {summary['duplicate_count']}",
+                    ]
+                )
+            message = (
+                f"Студенты обработаны: добавлено {summary['inserted_count']}, "
+                f"дублей {summary['duplicate_count']}, замечаний {len(report_items)}."
+            )
+            log_action(
+                'students_import',
+                'students',
+                '',
+                (
+                    f"rows={summary['total']}; inserted={summary['inserted_count']}; "
+                    f"duplicates={summary['duplicate_count']}; backup={os.path.basename(backup_path) if backup_path else ''}"
+                )
+            )
+            flash(message, 'success' if not report_items else 'info')
+        except (UploadValidationError, ValueError) as e:
             message = str(e)
             flash(message, 'error')
         except Exception as e:
             message = f"Ошибка: {e}"
+            flash(message, 'error')
         finally:
             cleanup_temp_files(filepath)
+        return redirect(url_for('file_work'), code=303)
     return render_template('students_upload.html', message=message)
 
 @app.route('/students')
@@ -2018,7 +3694,11 @@ def download_students():
     firstname = request.args.get('firstname')
     username = request.args.get('username')
     students = get_all_students(order_by, order_dir, cohort, lastname, firstname, username)
-    df = pd.DataFrame(students)
+    log_action('students_exported', 'students', '', f"rows={len(students)}")
+    export_students = students
+    if session.get('role') != 'admin':
+        export_students = [dict(student, password='******') for student in students]
+    df = pd.DataFrame(export_students)
     output = io.BytesIO()
     df.to_excel(output, index=False)
     output.seek(0)
@@ -2035,6 +3715,7 @@ def edit_student(username):
         flash('Студент не найден')
         return redirect(url_for('students_list'))
     if request.method == 'POST':
+        backup_path = create_database_backup('before_edit_student')
         password = request.form.get('password', '').strip()
         email = request.form.get('email', '').strip()
         firstname = request.form.get('firstname', '').strip()
@@ -2043,6 +3724,13 @@ def edit_student(username):
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('UPDATE students SET password=?, email=?, firstname=?, lastname=?, cohort1=? WHERE username=?',
                          (password, email, firstname, lastname, cohort1, username))
+            log_action(
+                'student_updated',
+                'student',
+                username,
+                f"cohort1={cohort1}; backup={os.path.basename(backup_path) if backup_path else ''}",
+                conn
+            )
         flash('Данные обновлены')
         return redirect(url_for('students_list'))
     return render_template('edit_student.html', student=student)
@@ -2068,6 +3756,11 @@ def delete_student():
                 return redirect(url_for('students_list'))
 
             username, email, firstname, lastname, source_campaign_year, source_dogovor, source_fio = student
+            if source_campaign_year and is_campaign_archived(source_campaign_year):
+                flash(ARCHIVED_CAMPAIGN_MESSAGE, 'error')
+                return redirect(url_for('students_list'))
+
+            backup_path = create_database_backup('before_delete_student')
             if source_campaign_year:
                 campaign_year = normalize_campaign_year(source_campaign_year, source_campaign_year)
                 fio = source_fio or ' '.join(part for part in [lastname, firstname] if part).strip()
@@ -2092,6 +3785,13 @@ def delete_student():
                     flash(f'Студент {username} возвращен в абитуриенты кампании {campaign_year}')
 
             conn.execute('DELETE FROM students WHERE username=?', (username,))
+            log_action(
+                'student_deleted',
+                'student',
+                username,
+                f"backup={os.path.basename(backup_path) if backup_path else ''}",
+                conn
+            )
             flash('Студент удален')
     return redirect(url_for('students_list'))
 
@@ -2124,8 +3824,11 @@ def abiturients_to_students():
             for row in cur.fetchall()
         ]
     if request.method == 'POST':
+        if not ensure_campaign_open(campaign_year):
+            return redirect(url_for('abiturients_to_students', group_year=group_year), code=303)
         cohort1 = request.form.get('cohort1', '').strip()
         ids = request.form.getlist('abiturient_ids')
+        auto_split = request.form.get('auto_split') == '1'
         if not cohort1 or not ids:
             flash('Выберите группу и хотя бы одного абитуриента')
             return redirect(url_for('abiturients_to_students', group_year=group_year))
@@ -2163,7 +3866,7 @@ def abiturients_to_students():
 
             current_count = get_group_student_count(conn, cohort1)
             free_places = MAX_GROUP_STUDENTS - current_count
-            if selected_abiturients and len(selected_abiturients) > free_places:
+            if selected_abiturients and len(selected_abiturients) > free_places and not auto_split:
                 next_group = get_next_subgroup_name(conn, cohort1, group_year)
                 flash(f'В группе {cohort1} свободно мест: {max(free_places, 0)}/{MAX_GROUP_STUDENTS}. Создайте или выберите следующую подгруппу: {next_group}')
                 if skipped_without_email:
@@ -2176,25 +3879,71 @@ def abiturients_to_students():
                     flash(f'Не перенесены, уже есть в студентах: {names}{suffix}')
                 return redirect(url_for('abiturients_to_students', group_year=group_year))
 
+            backup_path = create_database_backup('before_abiturients_migration') if selected_abiturients else None
             migrated_count = 0
             next_group_after_full = ''
-            for ab_id, username, email, firstname, lastname, fio, dogovor in selected_abiturients:
+            assignments = []
+            if auto_split:
+                remaining_abiturients = list(selected_abiturients)
+                target_group = cohort1
+                while remaining_abiturients:
+                    target_count = get_group_student_count(conn, target_group)
+                    free_in_group = MAX_GROUP_STUDENTS - target_count
+                    if free_in_group <= 0:
+                        target_group = get_next_subgroup_name(conn, target_group, group_year)
+                        conn.execute(
+                            'INSERT OR IGNORE INTO groups (name, group_year) VALUES (?, ?)',
+                            (target_group, group_year)
+                        )
+                        continue
+                    current_batch = remaining_abiturients[:free_in_group]
+                    remaining_abiturients = remaining_abiturients[free_in_group:]
+                    assignments.extend((abiturient, target_group) for abiturient in current_batch)
+                    if remaining_abiturients:
+                        next_group_name = get_next_subgroup_name(conn, target_group, group_year)
+                        conn.execute(
+                            'INSERT OR IGNORE INTO groups (name, group_year) VALUES (?, ?)',
+                            (next_group_name, group_year)
+                        )
+                        target_group = next_group_name
+            else:
+                assignments = [(abiturient, cohort1) for abiturient in selected_abiturients]
+
+            touched_groups = set()
+            for abiturient, target_group in assignments:
+                ab_id, username, email, firstname, lastname, fio, dogovor = abiturient
                 conn.execute(
                     '''
                     INSERT INTO students
                         (username, password, email, firstname, lastname, cohort1, source_campaign_year, source_dogovor, source_fio)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
-                    (username, 'cron', email, firstname, lastname, cohort1, campaign_year, dogovor, fio)
+                    (username, 'cron', email, firstname, lastname, target_group, campaign_year, dogovor, fio)
                 )
                 conn.execute('DELETE FROM abiturients WHERE id=? AND campaign_year=?', (ab_id, campaign_year))
                 migrated_count += 1
-            if current_count + migrated_count >= MAX_GROUP_STUDENTS:
+                touched_groups.add(target_group)
+            if get_group_student_count(conn, cohort1) >= MAX_GROUP_STUDENTS:
                 next_group_after_full = get_next_subgroup_name(conn, cohort1, group_year)
+            if migrated_count:
+                log_action(
+                    'abiturients_migrated_to_students',
+                    'group',
+                    cohort1,
+                    (
+                        f"campaign_year={campaign_year}; group_year={group_year}; "
+                        f"count={migrated_count}; auto_split={int(auto_split)}; "
+                        f"groups={','.join(sorted(touched_groups))}; backup={os.path.basename(backup_path) if backup_path else ''}"
+                    ),
+                    conn
+                )
 
         if migrated_count:
             flash(f'Мигрировано студентов: {migrated_count}')
-            flash(f'Группа {cohort1}: {current_count + migrated_count}/{MAX_GROUP_STUDENTS}')
+            if auto_split:
+                flash('Автораспределение по подгруппам выполнено.')
+            else:
+                flash(f'Группа {cohort1}: {current_count + migrated_count}/{MAX_GROUP_STUDENTS}')
         if next_group_after_full:
             flash(f'Группа {cohort1} заполнена. Следующая подгруппа: {next_group_after_full}')
         if skipped_without_email:
@@ -2219,6 +3968,23 @@ def abiturients_to_students():
         campaign_year=campaign_year,
         group_year=group_year,
         group_years=group_years,
+    )
+
+@app.route('/migration_wizard')
+@login_required
+@role_required('admin', 'assistant')
+def migration_wizard():
+    campaign_year = get_active_campaign_year()
+    group_year = normalize_group_year(request.args.get('group_year'), campaign_year)
+    dashboard = get_dashboard_data(campaign_year)
+    with sqlite3.connect(DB_PATH) as conn:
+        groups = get_groups_with_counts(conn, group_year)
+    return render_template(
+        'migration_wizard.html',
+        dashboard=dashboard,
+        groups=groups,
+        group_year=group_year,
+        group_years=get_group_years(group_year),
     )
 
 @app.route('/add_group', methods=['GET', 'POST'])

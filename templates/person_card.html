@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ card_view.title }}{% endblock %}
+{% block head %}
+<style>
+    .record-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 20px;
+    }
+    .record-title h1 {
+        margin-bottom: 6px;
+    }
+    .record-subtitle {
+        margin: 0;
+        color: #475569;
+        font-size: 18px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+    }
+    .card-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        margin-top: 6px;
+    }
+    .record-summary {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(150px, 1fr));
+        gap: 10px;
+        margin-bottom: 24px;
+    }
+    .record-summary-item {
+        box-sizing: border-box;
+        min-height: 88px;
+        padding: 12px 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+    .record-summary-label {
+        display: block;
+        margin-bottom: 7px;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    .record-summary-value {
+        display: block;
+        color: #111827;
+        font-size: 17px;
+        font-weight: 700;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .record-summary-value.success,
+    .record-field-value.success {
+        color: #15803d;
+    }
+    .record-summary-value.warning,
+    .record-field-value.warning {
+        color: #b45309;
+    }
+    .record-summary-value.muted,
+    .record-field-value.muted {
+        color: #64748b;
+    }
+    .record-summary-value.info {
+        color: #2563eb;
+    }
+    .record-sections {
+        display: grid;
+        gap: 18px;
+    }
+    .record-section {
+        border-top: 1px solid #e5e7eb;
+        padding-top: 18px;
+    }
+    .record-section h2 {
+        margin: 0 0 12px 0;
+        color: #1f2937;
+        font-size: 24px;
+    }
+    .record-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .record-field {
+        display: grid;
+        grid-template-columns: minmax(210px, 0.9fr) minmax(220px, 1.1fr);
+        gap: 14px;
+        align-items: start;
+        padding: 12px 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .record-field-label {
+        color: #334155;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .record-field-help {
+        display: block;
+        margin-top: 4px;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 400;
+        line-height: 1.35;
+        white-space: normal;
+    }
+    .record-field-value {
+        color: #111827;
+        font-size: 16px;
+        font-weight: 600;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    @media (max-width: 1100px) {
+        .record-header {
+            display: block;
+        }
+        .card-actions {
+            justify-content: flex-start;
+            margin-top: 16px;
+        }
+        .record-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .record-fields {
+            grid-template-columns: 1fr;
+        }
+    }
+    @media (max-width: 620px) {
+        .record-summary {
+            grid-template-columns: 1fr;
+        }
+        .record-field {
+            grid-template-columns: 1fr;
+            gap: 7px;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="record-header">
+    <div class="record-title">
+        <h1>{{ card_view.title }}</h1>
+        <p class="record-subtitle">{{ card_view.subtitle }}</p>
+    </div>
+    <div class="card-actions">
+        <a href="{{ url_for('search') }}" class="btn">Назад к поиску</a>
+        {% if session.get('role') == 'admin' %}
+        {% if record.kind == 'abiturient' and record.fields.login %}
+        <a href="{{ url_for('edit_abiturient', login=record.fields.login, campaign_year=record.fields.campaign_year) }}" class="btn">Редактировать</a>
+        {% elif record.kind == 'student' and record.fields.username %}
+        <a href="{{ url_for('edit_student', username=record.fields.username) }}" class="btn">Редактировать</a>
+        {% elif record.kind == 'conflict' and record.fields.id %}
+        <a href="{{ url_for('edit_conflict', conflict_id=record.fields.id) }}" class="btn">Разобрать конфликт</a>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<div class="record-summary">
+    {% for item in card_view.summary %}
+    <div class="record-summary-item">
+        <span class="record-summary-label">{{ item.label }}</span>
+        <span class="record-summary-value {{ item.state }}">{{ item.value }}</span>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="record-sections">
+    {% for section in card_view.sections %}
+    <section class="record-section">
+        <h2>{{ section.title }}</h2>
+        <div class="record-fields">
+            {% for item in section['items'] %}
+            <div class="record-field">
+                <div class="record-field-label">
+                    {{ item.label }}
+                    <span class="record-field-help">{{ item.help }}</span>
+                </div>
+                <div class="record-field-value {{ item.state }}">{{ item.value }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

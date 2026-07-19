@@ -13,8 +13,9 @@
     </div>
     <label>Роль:</label>
     <select name="role" style="width:100%;margin-bottom:18px;">
-        <option value="admin" {% if user[2] == 'admin' %}selected{% endif %}>Администратор</option>
-        <option value="assistant" {% if user[2] == 'assistant' %}selected{% endif %}>Ассистент</option>
+        {% for role, label in role_labels.items() %}
+        <option value="{{ role }}" {% if user[2] == role %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
     </select>
     <label>Статус:</label>
     <select name="approved" style="width:100%;margin-bottom:18px;">

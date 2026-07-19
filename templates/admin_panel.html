@@ -95,6 +95,9 @@
         <a href="{{ url_for('add_user') }}" class="btn admin-action">Добавить пользователя</a>
         <a href="{{ url_for('abiturients_to_students') }}" class="btn admin-action">Миграция абитуриентов</a>
         <a href="{{ url_for('add_group') }}" class="btn admin-action">Академические группы</a>
+        <a href="{{ url_for('campaigns') }}" class="btn admin-action">Кампании</a>
+        <a href="{{ url_for('backups') }}" class="btn admin-action">Резервные копии</a>
+        <a href="{{ url_for('audit_logs') }}" class="btn admin-action">Журнал действий</a>
         <form method="post" action="{{ url_for('clear_abiturients') }}">
             {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
@@ -115,7 +118,7 @@
             {% for user in all_users %}
             <tr style="border-bottom:1px solid #e5e7eb;">
                 <td style="padding:8px; word-break:break-word;">{{ user[1] }}</td>
-                <td style="padding:8px; word-break:break-word;">{{ user[2] }}</td>
+                <td style="padding:8px; word-break:break-word;">{{ role_labels.get(user[2], user[2]) }}</td>
                 <td style="padding:8px; word-break:break-word;">
                     {% if user[3] == 1 %}
                         <span style="color:green;">Одобрен</span>

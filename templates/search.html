@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Глобальный поиск{% endblock %}
+{% block head %}
+<style>
+    .search-form {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .search-form input {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 360px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+    }
+    @media (max-width: 560px) {
+        .search-form input {
+            min-width: 0;
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Глобальный поиск</h1>
+{% include "_campaign_switcher.html" %}
+<form action="{{ url_for('search') }}" method="get" class="search-form">
+    <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+    <input type="text" name="q" value="{{ query }}" placeholder="ФИО, договор, логин, email, группа">
+    <button type="submit" class="btn">Найти</button>
+</form>
+
+{% if query and results %}
+<table>
+    <thead>
+        <tr>
+            <th>Тип</th>
+            <th>Запись</th>
+            <th>Детали</th>
+            <th>Действие</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in results %}
+        <tr>
+            <td>{{ item.status }}</td>
+            <td>{{ item.title }}</td>
+            <td>{{ item.subtitle }}</td>
+            <td><a href="{{ url_for('person_card', kind=item.kind, record_id=item.id) }}" class="btn">Открыть</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% elif query %}
+<p>Ничего не найдено.</p>
+{% else %}
+<p>Введите ФИО, договор, логин, email или группу.</p>
+{% endif %}
+{% endblock %}

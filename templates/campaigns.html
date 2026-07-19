@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Кампании{% endblock %}
+{% block content %}
+<h1>Кампании</h1>
+<p>Архивная кампания доступна для просмотра, но импорт, редактирование, удаление, очистка и миграция в ней заблокированы.</p>
+<div style="margin-bottom:18px;">
+    <a href="{{ url_for('admin_panel') }}" class="btn">Назад</a>
+</div>
+<table>
+    <thead>
+        <tr>
+            <th>Кампания</th>
+            <th>Статус</th>
+            <th>Дата изменения</th>
+            <th>Кто изменил</th>
+            <th>Действие</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for campaign in campaigns %}
+        <tr>
+            <td>{{ campaign.campaign_year }}</td>
+            <td>{{ 'Архив' if campaign.is_archived else 'Открыта' }}</td>
+            <td>{{ campaign.archived_at or '-' }}</td>
+            <td>{{ campaign.archived_by or '-' }}</td>
+            <td>
+                <form method="post" onsubmit="return confirm('Изменить статус кампании?');">
+                    {% include "_csrf_field.html" %}
+                    <input type="hidden" name="campaign_year" value="{{ campaign.campaign_year }}">
+                    {% if campaign.is_archived %}
+                    <input type="hidden" name="is_archived" value="0">
+                    <button type="submit" class="btn">Открыть</button>
+                    {% else %}
+                    <input type="hidden" name="is_archived" value="1">
+                    <button type="submit" class="btn btn-danger">В архив</button>
+                    {% endif %}
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

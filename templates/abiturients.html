@@ -9,6 +9,7 @@
             flex-wrap: wrap;
             align-items: center;
         }
+        .abiturients-filter input,
         .abiturients-filter select,
         .abiturients-filter .btn {
             box-sizing: border-box;
@@ -16,6 +17,7 @@
             margin: 0;
             font-size: 15px;
         }
+        .abiturients-filter input,
         .abiturients-filter select {
             min-width: 145px;
             padding: 8px 10px;
@@ -23,6 +25,9 @@
             border-radius: 6px;
             background: #fff;
             color: #111827;
+        }
+        .abiturients-filter input {
+            min-width: 230px;
         }
         .abiturients-filter .btn {
             display: inline-flex;
@@ -47,6 +52,71 @@
             align-items: center;
             justify-content: center;
         }
+        .bulk-toolbar {
+            margin-bottom: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            width: max-content;
+            max-width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #f8fafc;
+        }
+        .bulk-toolbar-label {
+            color: #374151;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .bulk-select-shell {
+            position: relative;
+            display: inline-flex;
+        }
+        .bulk-toolbar select,
+        .bulk-toolbar .btn {
+            box-sizing: border-box;
+            height: 38px;
+            margin: 0;
+        }
+        .bulk-toolbar select {
+            min-width: 240px;
+            padding: 0 36px 0 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #fff;
+            color: #111827;
+            font-size: 15px;
+            appearance: none;
+        }
+        .bulk-select-shell::after {
+            content: "";
+            position: absolute;
+            right: 13px;
+            top: 50%;
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid #64748b;
+            border-bottom: 2px solid #64748b;
+            transform: translateY(-65%) rotate(45deg);
+            pointer-events: none;
+        }
+        .bulk-toolbar .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 112px;
+            padding: 0 18px;
+        }
+        @media (max-width: 640px) {
+            .bulk-toolbar,
+            .bulk-select-shell,
+            .bulk-toolbar select,
+            .bulk-toolbar .btn {
+                width: 100%;
+            }
+        }
     </style>
     {% endblock %}
     {% block content %}
@@ -59,6 +129,7 @@
         <a href="{{ url_for('login_conflicts') }}" class="btn">Конфликты логинов</a>
     </div>
     <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
+        <input type="text" name="q" placeholder="Поиск по ФИО, логину, договору, почте" value="{{ request.args.get('q', '') }}">
         <select name="spec">
             <option value="">Все специальности</option>
             {% for s in specs %}
@@ -97,10 +168,31 @@
         <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
         <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
     </form>
+    {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
+    <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar">
+        {% include "_csrf_field.html" %}
+        <span class="bulk-toolbar-label">Выбранные:</span>
+        <span class="bulk-select-shell">
+            <select name="bulk_action" required>
+                <option value="">Выберите действие</option>
+                <option value="mark_paid">Отметить оплату</option>
+                <option value="mark_unpaid">Снять оплату</option>
+                <option value="export">Скачать выбранных</option>
+                {% if session.get('role') == 'admin' %}
+                <option value="delete">Удалить выбранных</option>
+                {% endif %}
+            </select>
+        </span>
+        <button type="submit" class="btn" onclick="return confirm('Выполнить действие для выбранных записей?');">Применить</button>
+    </form>
+    {% endif %}
     <div style="overflow-x:auto;">
         <table>
             <tr>
                 {% set dir = 'asc' if order_dir == 'desc' else 'desc' %}
+                {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
+                <th style="width:42px;"><input type="checkbox" id="select_all_abiturients" title="Выбрать все"></th>
+                {% endif %}
                 <th><a href="{{ url_for('abiturients', order_by='fio', order_dir=dir) }}">ФИО</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='campaign_year', order_dir=dir) }}">Кампания</a></th>
                 <th><a href="{{ url_for('abiturients', order_by='dogovor', order_dir=dir) }}">Договор</a></th>
@@ -113,6 +205,9 @@
             </tr>
             {% for a in abiturients %}
             <tr>
+                {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
+                <td><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form"></td>
+                {% endif %}
                 <td style="max-width:220px; word-break:break-word; white-space:pre-line; overflow-wrap:break-word;">{{ a['fio'] }}</td>
                 <td>{{ a['campaign_year'] }}</td>
                 <td>{{ a['dogovor'] }}</td>
@@ -137,6 +232,8 @@
                             <input type="hidden" name="year" value="{{ request.args.get('year', '') }}">
                             <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
                             <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
+                            <input type="hidden" name="has_paid" value="{{ request.args.get('has_paid', '') }}">
+                            <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                             <input type="hidden" name="order_by" value="{{ order_by }}">
                             <input type="hidden" name="order_dir" value="{{ order_dir }}">
                             <label style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin:0;">
@@ -161,4 +258,14 @@
             {% endfor %}
         </table>
     </div>
+    <script>
+    const selectAllAbiturients = document.getElementById('select_all_abiturients');
+    if (selectAllAbiturients) {
+        selectAllAbiturients.addEventListener('change', function() {
+            document.querySelectorAll('input[name="abiturient_ids"][form="bulk_abiturients_form"]').forEach(function(input) {
+                input.checked = selectAllAbiturients.checked;
+            });
+        });
+    }
+    </script>
     {% endblock %}

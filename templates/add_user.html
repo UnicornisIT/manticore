@@ -15,8 +15,9 @@
     <input type="text" name="position" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
     <label style="font-weight:500; margin-bottom:8px;">Роль:</label>
     <select name="role" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-        <option value="admin">Администратор</option>
-        <option value="assistant">Ассистент</option>
+        {% for role, label in role_labels.items() %}
+        <option value="{{ role }}">{{ label }}</option>
+        {% endfor %}
     </select>
     <div style="display:flex; justify-content:center; gap:10px;">
         <button type="submit" class="btn" style="width:60%; text-align:center; display:block;">Добавить</button>

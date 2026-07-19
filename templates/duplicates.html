@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Дублирующиеся записи{% endblock %}
+{% block title %}Проверка дублей{% endblock %}
 {% block head %}
 <style>
     .duplicates-actions {
@@ -22,9 +22,9 @@
 </style>
 {% endblock %}
 {% block content %}
-<h1>Дублирующиеся записи</h1>
+<h1>Проверка дублей</h1>
 <div class="duplicates-actions">
-    <a href="{{ url_for('students_duplicates') }}" class="btn">Дубли студентов</a>
-    <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дубли абитуриентов</a>
+    <a href="{{ url_for('students_duplicates') }}" class="btn">Дублирующие записи студентов</a>
+    <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дублирующие записи абитуриентов</a>
 </div>
 {% endblock %}

@@ -137,6 +137,10 @@
         {% if session.get('role') == 'admin' %}
             <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
         {% endif %}
+        <label style="display:inline-flex; align-items:center; gap:8px; font-weight:500; height:36px;">
+            <input type="checkbox" name="auto_split" value="1">
+            Автораспределить по подгруппам
+        </label>
     </div>
 
     <div class="migration-table-block">

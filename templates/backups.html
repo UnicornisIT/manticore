@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Резервные копии{% endblock %}
+{% block head %}
+<style>
+    .backup-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .backup-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .backup-actions form {
+        padding: 0;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Резервные копии</h1>
+<div class="backup-toolbar">
+    <a href="{{ url_for('admin_panel') }}" class="btn">Назад</a>
+    <a href="{{ url_for('audit_logs') }}" class="btn">Журнал действий</a>
+</div>
+
+{% if backups %}
+<div style="overflow-x:auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Файл</th>
+                <th>Дата</th>
+                <th>Размер</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for backup in backups %}
+            <tr>
+                <td>{{ backup.name }}</td>
+                <td>{{ backup.created_at }}</td>
+                <td>{{ backup.size_text }}</td>
+                <td>
+                    <div class="backup-actions">
+                        <a href="{{ url_for('download_backup', backup_name=backup.name) }}" class="btn">Скачать</a>
+                        <form method="post" action="{{ url_for('restore_backup') }}" onsubmit="return confirm('Восстановить базу из этой копии? Перед восстановлением будет создана ещё одна резервная копия текущей базы.');">
+                            {% include "_csrf_field.html" %}
+                            <input type="hidden" name="backup_name" value="{{ backup.name }}">
+                            <button type="submit" class="btn btn-danger">Восстановить</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>Резервных копий пока нет.</p>
+{% endif %}
+{% endblock %}

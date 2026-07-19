@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Журнал действий{% endblock %}
+{% block head %}
+<style>
+    .audit-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .audit-details {
+        max-width: 420px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Журнал действий</h1>
+<div class="audit-toolbar">
+    <a href="{{ url_for('admin_panel') }}" class="btn">Назад</a>
+    <a href="{{ url_for('backups') }}" class="btn">Резервные копии</a>
+</div>
+
+{% if audit_logs %}
+<div style="overflow-x:auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Пользователь</th>
+                <th>Действие</th>
+                <th>Объект</th>
+                <th>Детали</th>
+                <th>IP</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in audit_logs %}
+            <tr>
+                <td>{{ log.created_at }}</td>
+                <td>{{ log.username or '-' }}</td>
+                <td>{{ log.action }}</td>
+                <td>{{ log.entity_type }} {{ log.entity_id }}</td>
+                <td class="audit-details">{{ log.details }}</td>
+                <td>{{ log.ip_address or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>Журнал пока пуст.</p>
+{% endif %}
+{% endblock %}

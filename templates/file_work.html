@@ -83,18 +83,153 @@
         align-items: center;
         justify-content: center;
     }
+    .import-preview {
+        max-width: 1100px;
+        margin-top: 22px;
+        padding: 18px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .import-preview h3 {
+        margin: 0 0 14px 0;
+        color: #1f2937;
+    }
+    .preview-stats {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+    .preview-stat {
+        min-width: 130px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid #dbeafe;
+        color: #1f2937;
+    }
+    .preview-stat strong {
+        display: block;
+        color: #2563eb;
+        font-size: 20px;
+    }
+    .preview-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+        padding: 0;
+    }
+    .preview-table-wrap {
+        overflow-x: auto;
+        border-radius: 6px;
+        background: #fff;
+    }
+    .preview-table-wrap table {
+        min-width: 920px;
+    }
+    .preview-note {
+        margin: 0 0 12px 0;
+        color: #475569;
+    }
+    .updates-report {
+        max-width: 900px;
+        margin: 16px 0 0 0;
+        padding: 14px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .updates-report h3 {
+        margin: 0 0 8px 0;
+        color: #1e3a8a;
+    }
+    .updates-report-summary {
+        margin: 0 0 12px 0;
+        color: #334155;
+    }
+    .updates-report-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+    .updates-report-list li {
+        display: grid;
+        grid-template-columns: 90px 110px 1fr;
+        gap: 10px;
+        align-items: start;
+        padding: 9px 10px;
+        border-radius: 6px;
+        background: #fff;
+    }
+    .updates-report-row,
+    .updates-report-field {
+        color: #1e40af;
+        font-weight: 800;
+    }
+    .updates-report-message {
+        color: #1f2937;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .updates-report-more {
+        margin: 10px 0 0 0;
+        color: #475569;
+    }
+    .file-hint {
+        max-width: 900px;
+        color: #475569;
+        line-height: 1.45;
+    }
+    @media (max-width: 640px) {
+        .updates-report-list li {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 {% endblock %}
 {% block content %}
+{% macro render_upload_report(report) %}
+    {% if report %}
+    <div class="updates-report">
+        <h3>{{ report.title }}</h3>
+        <p class="updates-report-summary">
+            {% if report.summary %}
+                {% for part in report.summary %}{{ part }}{% if not loop.last %}. {% else %}.{% endif %} {% endfor %}
+            {% else %}
+                Обработано строк: {{ report.total }}.
+            {% endif %}
+            Замечаний: {{ report.issue_count }}.
+        </p>
+        <ul class="updates-report-list">
+            {% for item in report['items'] %}
+            <li>
+                <span class="updates-report-row">Строка {{ item.row }}</span>
+                <span class="updates-report-field">{{ item.field }}</span>
+                <span class="updates-report-message">{{ item.message }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% if report.hidden_count %}
+        <p class="updates-report-more">Показаны первые 40 замечаний. Остальные: {{ report.hidden_count }}.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+{% endmacro %}
+
 <h1>Работа с файлами</h1>
 {% include "_campaign_switcher.html" %}
 
 <div class="upload-section">
     <h2>Загрузка абитуриентов</h2>
-    <p>Для загрузки списка абитуриентов используйте форму ниже. Файл должен быть в формате <b>Excel</b> и содержать столбцы: <b>ФИО, Договор</b>.</p>
+    <p class="file-hint">Файл абитуриентов должен содержать столбцы <b>ФИО</b> и <b>Договор</b>. Сначала будет показан предпросмотр: договоры проверяются среди абитуриентов, дублей, конфликтов и студентов.</p>
     <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон для абитуриентов</a></p>
     <form method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
+        <input type="hidden" name="import_action" value="preview">
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <div class="upload-row">
             <label for="file">Загрузить файл абитуриентов (Excel):</label>
@@ -103,16 +238,96 @@
                 <label for="file" class="file-picker-button">Выберите файл</label>
                 <span id="file_name" class="file-picker-name">Файл не выбран</span>
             </span>
-            <button type="submit" class="btn">Загрузить абитуриентов</button>
+            <button type="submit" class="btn">Проверить файл</button>
         </div>
     </form>
+    {{ render_upload_report(abiturients_report) }}
+    {% if abiturients_preview %}
+    <div class="import-preview">
+        <h3>Предпросмотр импорта абитуриентов</h3>
+        <div class="preview-stats">
+            <div class="preview-stat"><strong>{{ abiturients_preview.total }}</strong>Всего строк</div>
+            <div class="preview-stat"><strong>{{ abiturients_preview.ready_count }}</strong>Будет добавлено</div>
+            <div class="preview-stat"><strong>{{ abiturients_preview.duplicate_count }}</strong>В дублях</div>
+            <div class="preview-stat"><strong>{{ abiturients_preview.conflict_count }}</strong>Конфликты</div>
+            <div class="preview-stat"><strong>{{ abiturients_preview.warning_count }}</strong>Возможные тёзки</div>
+        </div>
+        <p class="preview-note">В таблице показаны все строки файла. Запись в базу начнётся только после подтверждения.</p>
+        <div class="preview-actions">
+            <form method="post">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="import_action" value="confirm">
+                <input type="hidden" name="pending_import" value="{{ pending_import_token }}">
+                <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+                <button type="submit" class="btn">Подтвердить импорт</button>
+            </form>
+            <form method="post">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="import_action" value="cancel">
+                <input type="hidden" name="pending_import" value="{{ pending_import_token }}">
+                <button type="submit" class="btn btn-danger">Отменить</button>
+            </form>
+        </div>
+        <div class="preview-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Кампания</th>
+                        <th>ФИО</th>
+                        <th>Договор</th>
+                        <th>Логин</th>
+                        <th>Фамилия</th>
+                        <th>Имя Отчество</th>
+                        <th>Действие</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in abiturients_preview_rows %}
+                    <tr>
+                        <td>{{ row.campaign_year }}</td>
+                        <td>{{ row['ФИО'] }}</td>
+                        <td>{{ row['Договор'] }}</td>
+                        <td>{{ row.login }}</td>
+                        <td>{{ row['Фамилия'] }}</td>
+                        <td>{{ row['Имя_Отчество'] }}</td>
+                        <td>{{ row.import_action }}</td>
+                        <td>{{ row.import_status }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+
+<div class="upload-section">
+    <h2>Обновление почты и оплаты</h2>
+    <p class="file-hint">Файл обновлений должен содержать столбец <b>Договор</b>. Дополнительно можно указать <b>Email</b> или <b>Почта</b>, а также <b>Оплата</b> или <b>paid</b>. Значения оплаты: да/нет, 1/0, оплачен/не оплачен.</p>
+    <p><a href="{{ url_for('download_abiturients_updates_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон обновлений</a></p>
+    <form action="{{ url_for('abiturients_updates_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        {% include "_csrf_field.html" %}
+        <div class="upload-row">
+            <label for="updates_file">Загрузить файл обновлений:</label>
+            <span class="file-picker">
+                <input type="file" name="updates_file" id="updates_file" accept=".xlsx,.xls,.csv" required data-file-name-target="updates_file_name">
+                <label for="updates_file" class="file-picker-button">Выберите файл</label>
+                <span id="updates_file_name" class="file-picker-name">Файл не выбран</span>
+            </span>
+            <button type="submit" class="btn">Обновить данные</button>
+        </div>
+    </form>
+    {{ render_upload_report(updates_report) }}
 </div>
 
 <hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
 
 <div class="upload-section">
     <h2>Загрузка студентов</h2>
-    <p>Для загрузки списка студентов используйте отдельную форму ниже. Файл должен быть в формате <b>CSV</b> и содержать столбцы: <b>username, password, email, firstname, lastname, cohort1</b>.</p>
+    <p class="file-hint">Файл студентов должен содержать <b>username, password, email, firstname, lastname, cohort1</b>. Можно добавить необязательные поля <b>source_dogovor</b> и <b>source_fio</b>, чтобы студенты участвовали в проверке договоров.</p>
     <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary upload-template-link">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
@@ -126,6 +341,7 @@
             <button type="submit" class="btn">Загрузить студентов</button>
         </div>
     </form>
+    {{ render_upload_report(students_report) }}
 </div>
 <script>
 document.querySelectorAll('.file-picker input[type="file"]').forEach(function(input) {

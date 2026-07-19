@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Мастер миграции{% endblock %}
+{% block head %}
+<style>
+    .wizard-steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+    }
+    .wizard-step {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 14px;
+        background: #f8fafc;
+    }
+    .wizard-step strong {
+        display: block;
+        color: #2563eb;
+        margin-bottom: 6px;
+    }
+    .wizard-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+    }
+    @media (max-width: 900px) {
+        .wizard-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+        .wizard-steps { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Мастер миграции</h1>
+{% include "_campaign_switcher.html" %}
+
+<div class="wizard-steps">
+    <div class="wizard-step">
+        <strong>1. Кампания</strong>
+        <span>{{ dashboard.campaign_year }}{% if dashboard.is_archived %} · архив{% endif %}</span>
+    </div>
+    <div class="wizard-step">
+        <strong>2. Готовы</strong>
+        <span>{{ dashboard.ready }} абитуриентов с почтой и оплатой</span>
+    </div>
+    <div class="wizard-step">
+        <strong>3. Группы</strong>
+        <span>{{ groups|length }} доступных групп в папке {{ group_year }}</span>
+    </div>
+    <div class="wizard-step">
+        <strong>4. Проверки</strong>
+        <span>{{ dashboard.conflicts }} конфликтов, {{ dashboard.duplicates }} дублей</span>
+    </div>
+</div>
+
+<div class="wizard-actions">
+    <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">Начать миграцию абитуриентов</a>
+    <a href="{{ url_for('students_duplicates') }}" class="btn">Дублирующие записи студентов</a>
+    <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дублирующие записи абитуриентов</a>
+    {% if session.get('role') == 'admin' %}
+    <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Академические группы</a>
+    {% endif %}
+</div>
+{% endblock %}

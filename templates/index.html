@@ -1,201 +1,205 @@
 {% extends "base.html" %}
-{% block title %}manticore{% endblock %}
+{% block title %}Панель состояния{% endblock %}
 {% block head %}
 <style>
     body.home-page .container {
-        display: flex;
-        flex-direction: column;
+        overflow-y: auto;
     }
-    .home-content {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-        gap: 18px;
-        min-height: 0;
-        padding: 10px 0 38px 0;
+    .dashboard-header {
+        margin-bottom: 24px;
     }
-    .home-content .brand-wordmark {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 88px;
+    .dashboard-title {
         margin: 0;
-        padding: 8px 20px 14px;
-        color: #111827;
-        font-size: clamp(44px, 5vw, 58px);
-        font-weight: 800;
-        line-height: 1;
+    }
+    .dashboard-header .page-campaign-switcher {
+        margin: 14px 0 0 0;
+    }
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+    }
+    .metric {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+        padding: 14px;
+    }
+    .metric strong {
+        display: block;
+        color: #2563eb;
+        font-size: 28px;
+        margin-bottom: 4px;
+    }
+    .metric span {
+        color: #475569;
+    }
+    .dashboard-section {
+        border-top: 1px solid #e5e7eb;
+        padding-top: 16px;
+    }
+    .task-center {
+        border-top: 1px solid #e5e7eb;
+        padding-top: 16px;
+        margin-bottom: 22px;
+    }
+    .task-center-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+    .task-center-header h2 {
+        margin: 0;
+    }
+    .task-center-header .btn {
+        min-width: 170px;
         text-align: center;
     }
-    .home-content .brand-wordmark::after {
-        content: "";
-        position: absolute;
-        right: 20px;
-        bottom: 0;
-        left: 20px;
-        height: 6px;
-        border-radius: 999px;
-        background: linear-gradient(90deg, #0f766e, #f59e0b, #dc2626);
+    .task-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
     }
-    .home-content p {
-        margin: 0;
-        text-align: center;
-    }
-    .home-summary {
-        width: min(920px, 100%);
-        box-sizing: border-box;
-        margin-top: 4px;
-        padding: 22px 24px;
+    .task-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
         border: 1px solid #e5e7eb;
         border-radius: 8px;
         background: #f8fafc;
     }
-    .home-summary h2 {
-        margin: 0 0 10px;
-        text-align: center;
-        color: #1f2937;
-        font-size: 22px;
-    }
-    .home-summary-text {
-        width: 100%;
-        margin: 0 auto 18px;
-        color: #374151;
-        text-align: center;
-        line-height: 1.5;
-    }
-    .home-summary-text span {
-        display: block;
-    }
-    .home-features {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-    }
-    .home-feature {
-        min-height: 82px;
-        padding: 14px;
-        border: 1px solid #dbeafe;
-        border-radius: 8px;
-        background: #fff;
-        box-sizing: border-box;
-    }
-    .home-feature strong {
-        display: block;
-        margin-bottom: 6px;
+    .task-count {
+        min-width: 42px;
         color: #2563eb;
+        font-size: 26px;
+        font-weight: 800;
+        line-height: 1;
+        text-align: center;
     }
-    .home-feature span {
+    .task-title {
         display: block;
-        color: #4b5563;
-        font-size: 14px;
-        line-height: 1.35;
+        color: #1f2937;
+        font-size: 16px;
+        font-weight: 800;
+        white-space: normal;
     }
-    @media (max-height: 720px) {
-        .home-content {
-            padding-top: 12px;
-            gap: 14px;
-        }
-        .home-content .brand-wordmark {
-            min-height: 66px;
-            font-size: 44px;
-        }
-        .home-summary {
-            padding: 16px 18px;
-        }
-        .home-summary h2 {
-            font-size: 19px;
-            margin-bottom: 8px;
-        }
-        .home-summary-text {
-            margin-bottom: 12px;
-            font-size: 14px;
-        }
-        .home-feature {
-            min-height: 72px;
-            padding: 11px;
-        }
-        .home-feature span {
-            font-size: 13px;
-        }
+    .task-description {
+        display: block;
+        margin-top: 3px;
+        color: #64748b;
+        font-size: 13px;
+        line-height: 1.35;
+        white-space: normal;
+    }
+    .task-item .btn {
+        min-width: 94px;
+        text-align: center;
+    }
+    .dashboard-groups-scroll {
+        --dashboard-group-row-height: 44px;
+        max-height: calc(var(--dashboard-group-row-height) * 11 + 2px);
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+    }
+    .dashboard-groups-scroll table {
+        margin: 0;
+        border: 0;
+    }
+    .dashboard-groups-scroll th,
+    .dashboard-groups-scroll td {
+        box-sizing: border-box;
+        height: var(--dashboard-group-row-height);
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+    .dashboard-groups-scroll thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
     }
     @media (max-width: 900px) {
-        .home-content {
-            gap: 16px;
-            padding-top: 8px;
-        }
-        .home-features {
+        .metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .task-grid {
+            grid-template-columns: 1fr;
+        }
+        .task-center-header {
+            align-items: stretch;
+            flex-direction: column;
         }
     }
     @media (max-width: 560px) {
-        .home-content {
-            gap: 14px;
-            padding-top: 6px;
-            padding-bottom: 32px;
-        }
-        .home-content .brand-wordmark {
-            min-height: 54px;
-            padding: 6px 14px 12px;
-            font-size: 38px;
-        }
-        .home-content .brand-wordmark::after {
-            right: 14px;
-            left: 14px;
-            height: 5px;
-        }
-        .home-content p {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 8px;
-            line-height: 1.35;
-        }
-        .home-content p .btn {
-            margin: 0;
-        }
-        .home-features {
+        .metric-grid {
             grid-template-columns: 1fr;
         }
-        .home-summary {
-            padding: 18px 16px;
+        .task-item {
+            grid-template-columns: 1fr;
+        }
+        .task-count {
+            text-align: left;
+        }
+        .task-item .btn {
+            width: 100%;
         }
     }
 </style>
 {% endblock %}
 {% block content %}
-<div class="home-content">
-    <h1 class="brand-wordmark">manticore</h1>
-    <p>
-        Для работы с файлами перейдите на страницу <a href="{{ url_for('file_work') }}" class="btn">Работа с файлами</a>
-    </p>
-    <section class="home-summary" aria-label="Описание сервиса">
-        <h2>manticore сервис для подготовки логинов в ЭИОС Moodle</h2>
-        <p class="home-summary-text">
-            <span>Система помогает приемной комиссии вести абитуриентов и студентов,</span>
-            <span>формировать уникальные логины, контролировать дубли</span>
-            <span>и быстро готовить данные для загрузки в Moodle.</span>
-        </p>
-        <div class="home-features">
-            <div class="home-feature">
-                <strong>Импорт файлов</strong>
-                <span>Загрузка списков абитуриентов и студентов из Excel или CSV.</span>
-            </div>
-            <div class="home-feature">
-                <strong>Логины</strong>
-                <span>Автоматическое создание логинов по договору и приемной кампании.</span>
-            </div>
-            <div class="home-feature">
-                <strong>Проверка</strong>
-                <span>Поиск дублей, конфликтов и записей, требующих исправления.</span>
-            </div>
-            <div class="home-feature">
-                <strong>Миграция</strong>
-                <span>Перенос абитуриентов в студенты с назначением академических групп.</span>
-            </div>
-        </div>
-    </section>
+<div class="dashboard-header">
+    <h1 class="dashboard-title">Панель состояния</h1>
+    {% include "_campaign_switcher.html" %}
 </div>
+
+<div class="metric-grid">
+    <div class="metric"><strong>{{ dashboard.abiturients_total }}</strong><span>Абитуриентов</span></div>
+    <div class="metric"><strong>{{ dashboard.ready }}</strong><span>Готовы к миграции</span></div>
+    <div class="metric"><strong>{{ dashboard.students_total }}</strong><span>Студентов</span></div>
+    <div class="metric"><strong>{{ dashboard.groups|length }}</strong><span>Групп</span></div>
+</div>
+
+<section class="task-center">
+    <div class="task-center-header">
+        <h2>Центр задач</h2>
+        <a href="{{ url_for('data_checks') }}" class="btn">Полная проверка данных</a>
+    </div>
+    <div class="task-grid">
+        {% for task in dashboard.tasks %}
+        <div class="task-item">
+            <span class="task-count">{{ task.count }}</span>
+            <span>
+                <span class="task-title">{{ task.title }}</span>
+                <span class="task-description">{{ task.description }}</span>
+            </span>
+            <a href="{{ task.url }}" class="btn">{{ task.label }}</a>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="dashboard-section">
+    <h2>Группы</h2>
+    {% if dashboard.groups %}
+    <div class="dashboard-groups-scroll">
+        <table>
+            <thead><tr><th>Группа</th><th>Заполненность</th></tr></thead>
+            <tbody>
+                {% for group in dashboard.groups %}
+                <tr>
+                    <td>{{ group.name }}</td>
+                    <td>{{ group.fill }}{% if group.is_full %} · заполнена{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Группы для текущей кампании пока не заведены.</p>
+    {% endif %}
+</section>
 {% endblock %}

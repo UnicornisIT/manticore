@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Проверка данных{% endblock %}
+{% block head %}
+<style>
+    .checks-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 22px;
+    }
+    .checks-header h1 {
+        margin-bottom: 8px;
+    }
+    .checks-subtitle {
+        margin: 0;
+        color: #475569;
+        font-size: 17px;
+        font-weight: 600;
+    }
+    .checks-total {
+        min-width: 190px;
+        padding: 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+        text-align: center;
+    }
+    .checks-total strong {
+        display: block;
+        color: #2563eb;
+        font-size: 30px;
+    }
+    .checks-total span {
+        color: #475569;
+    }
+    .checks-section {
+        border-top: 1px solid #e5e7eb;
+        padding-top: 18px;
+        margin-top: 22px;
+    }
+    .checks-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+    .check-item {
+        padding: 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .check-item.success {
+        background: #f0fdf4;
+        border-color: #bbf7d0;
+    }
+    .check-item.warning {
+        background: #fffbeb;
+        border-color: #fde68a;
+    }
+    .check-topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .check-topline h3 {
+        margin: 0;
+        color: #1f2937;
+        font-size: 18px;
+    }
+    .check-count {
+        min-width: 42px;
+        color: #2563eb;
+        font-size: 24px;
+        font-weight: 800;
+        text-align: right;
+    }
+    .check-description {
+        margin: 8px 0 12px 0;
+        color: #475569;
+        line-height: 1.4;
+    }
+    .check-samples {
+        margin: 0 0 12px 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+        justify-content: stretch;
+        list-style: none;
+    }
+    .check-samples li {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.75);
+    }
+    .sample-title {
+        display: block;
+        color: #111827;
+        font-weight: 700;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .sample-detail {
+        display: block;
+        margin-top: 2px;
+        color: #64748b;
+        font-size: 13px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .check-ok {
+        color: #15803d;
+        font-weight: 700;
+    }
+    @media (max-width: 900px) {
+        .checks-header {
+            display: block;
+        }
+        .checks-total {
+            margin-top: 14px;
+            text-align: left;
+        }
+        .checks-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="checks-header">
+    <div>
+        <h1>Проверка данных</h1>
+        <p class="checks-subtitle">Кампания {{ report.campaign_year }}: записи, которые стоит проверить перед миграцией и выгрузками.</p>
+    </div>
+    <div class="checks-total">
+        <strong>{{ report.total_issues }}</strong>
+        <span>замечаний найдено</span>
+    </div>
+</div>
+
+{% for section in report.sections %}
+<section class="checks-section">
+    <h2>{{ section.title }}</h2>
+    <div class="checks-grid">
+        {% for check in section.checks %}
+        <article class="check-item {{ check.tone }}" id="{{ check.id }}">
+            <div class="check-topline">
+                <h3>{{ check.title }}</h3>
+                <span class="check-count">{{ check.count }}</span>
+            </div>
+            <p class="check-description">{{ check.description }}</p>
+            {% if check.samples %}
+            <ul class="check-samples">
+                {% for sample in check.samples %}
+                <li>
+                    {% if sample.url %}
+                    <a href="{{ sample.url }}" class="sample-title">{{ sample.title }}</a>
+                    {% else %}
+                    <span class="sample-title">{{ sample.title }}</span>
+                    {% endif %}
+                    {% if sample.detail %}
+                    <span class="sample-detail">{{ sample.detail }}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="check-ok">Проблем не найдено.</p>
+            {% endif %}
+            {% if check.action_url %}
+            <a href="{{ check.action_url }}" class="btn">{{ check.action_label }}</a>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endfor %}
+{% endblock %}

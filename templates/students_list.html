@@ -37,6 +37,16 @@
         padding: 0 18px;
         line-height: 1;
     }
+    .password-reveal summary {
+        cursor: pointer;
+        color: #2563eb;
+        font-weight: 600;
+    }
+    .password-reveal span {
+        display: inline-block;
+        margin-top: 6px;
+        font-family: Consolas, monospace;
+    }
 </style>
 {% endblock %}
 {% block content %}
@@ -78,7 +88,16 @@
         {% for s in students %}
         <tr>
             <td>{{ s['username'] }}</td>
-            <td>{{ s['password'] }}</td>
+            <td>
+                {% if session.get('role') == 'admin' %}
+                <details class="password-reveal">
+                    <summary>Показать</summary>
+                    <span>{{ s['password'] }}</span>
+                </details>
+                {% else %}
+                ••••••
+                {% endif %}
+            </td>
             <td>{{ s['email'] }}</td>
             <td>{{ s['lastname'] }}</td>
             <td>{{ s['firstname'] }}</td>

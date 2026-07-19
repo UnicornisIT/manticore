@@ -141,6 +141,68 @@
             font-size: 15px;
             line-height: 1.2;
         }
+        .nav-dropdown {
+            position: relative;
+        }
+        .nav-dropdown-summary {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #2563eb;
+            font-weight: 500;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 15px;
+            line-height: 1.2;
+            cursor: pointer;
+            list-style: none;
+            transition: background 0.2s;
+        }
+        .nav-dropdown-summary::-webkit-details-marker {
+            display: none;
+        }
+        .nav-dropdown-summary:hover,
+        .nav-dropdown-summary.active,
+        .nav-dropdown[open] .nav-dropdown-summary {
+            background: #e0e7ff;
+        }
+        .nav-dropdown-panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            z-index: 50;
+            min-width: 230px;
+            padding: 6px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
+        }
+        .nav-dropdown-panel a {
+            display: block;
+            padding: 9px 10px !important;
+            white-space: normal;
+        }
+        .nav-dropdown-panel a + a {
+            margin-top: 2px;
+        }
+        .nav-dropdown-caret {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            transition: transform 0.2s;
+        }
+        .nav-dropdown[open] .nav-dropdown-caret {
+            transform: rotate(180deg);
+        }
+        .main-nav li.main-nav-spacer {
+            flex: 1 1 auto;
+            min-width: 8px;
+        }
         .main-nav li a.nav-brand {
             padding: 6px 9px;
             font-size: 16px;
@@ -157,6 +219,15 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: #2563eb;
+            margin: 0;
+        }
+        .nav-icon-link:hover,
+        .nav-icon-link.active {
+            background: #e0e7ff;
         }
         .nav-icon {
             width: 18px;
@@ -166,6 +237,44 @@
             stroke-linecap: round;
             stroke-linejoin: round;
             fill: none;
+        }
+        .nav-search-item {
+            display: inline-flex !important;
+            align-items: center;
+        }
+        .nav-search {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            margin: 0;
+            padding: 0;
+        }
+        .nav-search-input {
+            box-sizing: border-box;
+            width: 0;
+            height: 34px;
+            min-width: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 6px;
+            opacity: 0;
+            pointer-events: none;
+            color: #111827;
+            font-size: 14px;
+            transition: width 0.2s ease, opacity 0.2s ease, padding 0.2s ease, border-color 0.2s ease;
+        }
+        .nav-search.is-open .nav-search-input {
+            width: 320px;
+            padding: 7px 10px;
+            border: 1px solid #cbd5e1;
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .nav-search-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
         }
         .sr-only {
             position: absolute;
@@ -305,6 +414,123 @@
             background: #dbeafe;
             border-color: #bfdbfe;
         }
+        body.global-search-lock {
+            overflow: hidden;
+        }
+        .global-search-modal[hidden] {
+            display: none;
+        }
+        .global-search-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+        }
+        .global-search-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.28);
+        }
+        .global-search-dialog {
+            position: relative;
+            box-sizing: border-box;
+            width: min(780px, calc(100vw - 32px));
+            max-height: min(680px, calc(100vh - 64px));
+            margin: 76px auto 0 auto;
+            overflow: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 22px 56px rgba(15, 23, 42, 0.22);
+        }
+        .global-search-header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 18px 20px 12px 20px;
+            background: #fff;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .global-search-header h2 {
+            margin: 0;
+            color: #1f2937;
+            font-size: 20px;
+        }
+        button.global-search-close {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            padding: 0;
+            margin: 0;
+            border: 0;
+            border-radius: 6px;
+            background: #f3f4f6;
+            color: #334155;
+            font-size: 24px;
+            line-height: 1;
+        }
+        button.global-search-close:hover,
+        button.global-search-close:focus {
+            background: #e5e7eb;
+            color: #111827;
+        }
+        .global-search-meta {
+            padding: 12px 20px 0 20px;
+            color: #64748b;
+            font-size: 14px;
+        }
+        .global-search-results {
+            display: grid;
+            gap: 8px;
+            padding: 14px 20px 20px 20px;
+        }
+        .global-search-result {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            align-items: center;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #f8fafc;
+        }
+        .global-search-result-title {
+            display: block;
+            color: #111827;
+            font-size: 16px;
+            font-weight: 700;
+            white-space: normal;
+        }
+        .global-search-result-subtitle {
+            display: block;
+            margin-top: 4px;
+            color: #475569;
+            font-size: 14px;
+            white-space: normal;
+        }
+        .global-search-result-status {
+            display: inline-block;
+            margin-bottom: 5px;
+            color: #2563eb;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .global-search-open {
+            min-width: 92px;
+            text-align: center;
+        }
+        .global-search-empty,
+        .global-search-error {
+            margin: 0;
+            padding: 14px 0;
+            color: #64748b;
+        }
+        .global-search-error {
+            color: #991b1b;
+        }
         @media (max-width: 1100px) {
             .main-nav {
                 justify-content: center;
@@ -313,6 +539,10 @@
                 overflow-x: visible;
             }
             .main-nav li a {
+                font-size: 14px;
+                padding: 7px 9px;
+            }
+            .nav-dropdown-summary {
                 font-size: 14px;
                 padding: 7px 9px;
             }
@@ -343,7 +573,8 @@
             .main-nav li {
                 min-width: 0;
             }
-            .main-nav li a {
+            .main-nav li a,
+            .nav-dropdown-summary {
                 width: 100%;
                 min-height: 34px;
                 box-sizing: border-box;
@@ -357,11 +588,44 @@
             .main-nav li a.nav-brand {
                 font-size: 16px;
             }
+            .main-nav li.main-nav-spacer {
+                display: none;
+            }
+            .nav-dropdown-panel {
+                position: static;
+                min-width: 0;
+                margin-top: 6px;
+                padding: 6px;
+                box-shadow: none;
+            }
             .main-nav .nav-icon-link {
                 width: 100%;
                 min-width: 0;
             }
             form { padding: 12px; }
+            .main-nav .nav-search-item {
+                grid-column: 1 / -1;
+                width: 100%;
+            }
+            .main-nav .nav-search {
+                width: 100%;
+                padding: 0;
+            }
+            .main-nav .nav-search.is-open .nav-search-input {
+                flex: 1 1 auto;
+                width: auto;
+            }
+            .global-search-dialog {
+                width: calc(100vw - 18px);
+                max-height: calc(100vh - 36px);
+                margin-top: 18px;
+            }
+            .global-search-result {
+                grid-template-columns: 1fr;
+            }
+            .global-search-open {
+                width: 100%;
+            }
         }
     </style>
     {% block head %}{% endblock %}
@@ -369,16 +633,64 @@
 <body class="{% if request.endpoint == 'index' %}home-page{% elif request.endpoint == 'login' %}login-page-body{% endif %}">
     <div class="container">
         {% if session.get('user') %}
+        {% set migration_nav_endpoints = ['migration_wizard', 'abiturients_to_students', 'duplicates', 'students_duplicates', 'duplicates_abiturients'] %}
+        {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list'] %}
+        {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints %}
         <ul class="main-nav">
             <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
-            <li><a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a></li>
-            <li><a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a></li>
-            <li><a href="{{ url_for('students_list') }}" {% if request.endpoint == 'students' %}class="active"{% endif %}>Список студентов</a></li>
-            <li><a href="{{ url_for('duplicates') }}" {% if request.endpoint == 'duplicates' %}class="active"{% endif %}>Дублирующиеся записи</a></li>
-            <li><a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a></li>
+            <li>
+                <details class="nav-dropdown">
+                    <summary class="nav-dropdown-summary{% if request.endpoint in contingent_nav_endpoints %} active{% endif %}">
+                        Контингент
+                        <svg class="nav-dropdown-caret" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6"></path>
+                        </svg>
+                    </summary>
+                    <div class="nav-dropdown-panel">
+                        <a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a>
+                        <a href="{{ url_for('students_list') }}" {% if request.endpoint in ['students', 'students_list'] %}class="active"{% endif %}>Список студентов</a>
+                    </div>
+                </details>
+            </li>
+            <li>
+                <details class="nav-dropdown">
+                    <summary class="nav-dropdown-summary{% if request.endpoint in operations_nav_endpoints %} active{% endif %}">
+                        Операции
+                        <svg class="nav-dropdown-caret" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6"></path>
+                        </svg>
+                    </summary>
+                    <div class="nav-dropdown-panel">
+                        <a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a>
+                        <a href="{{ url_for('data_checks') }}" {% if request.endpoint == 'data_checks' %}class="active"{% endif %}>Проверка данных</a>
+                        <a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a>
+                        <a href="{{ url_for('migration_wizard') }}" {% if request.endpoint in migration_nav_endpoints %}class="active"{% endif %}>Мастер миграции</a>
+                    </div>
+                </details>
+            </li>
+            <li class="main-nav-spacer" aria-hidden="true"></li>
+            <li class="nav-search-item">
+                <form
+                    action="{{ url_for('search') }}"
+                    method="get"
+                    class="nav-search{% if request.endpoint == 'search' %} is-open{% endif %}"
+                    role="search"
+                    data-search-overlay-url="{{ url_for('search_overlay') }}"
+                    data-person-url-template="{{ url_for('person_card', kind='__kind__', record_id='__record__') }}"
+                >
+                    <button type="button" class="nav-icon-link{% if request.endpoint in ['search', 'person_card'] %} active{% endif %} nav-search-toggle" aria-label="Поиск" title="Поиск" aria-expanded="{% if request.endpoint == 'search' %}true{% else %}false{% endif %}" aria-controls="global-search-input">
+                        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <path d="m20 20-3.5-3.5"></path>
+                        </svg>
+                        <span class="sr-only">Поиск</span>
+                    </button>
+                    <input id="global-search-input" class="nav-search-input" type="search" name="q" value="{{ request.args.get('q', '') if request.endpoint == 'search' else '' }}" placeholder="ФИО, договор, логин, email" autocomplete="off">
+                </form>
+            </li>
             {% if session.get('role') == 'admin' %}
             <li>
-                <a href="{{ url_for('admin_panel') }}" class="nav-icon-link{% if request.endpoint in ['admin_panel', 'approve_users', 'add_user', 'edit_user'] %} active{% endif %}" aria-label="Панель администратора" title="Панель администратора">
+                <a href="{{ url_for('admin_panel') }}" class="nav-icon-link{% if request.endpoint in ['admin_panel', 'approve_users', 'add_user', 'edit_user', 'campaigns', 'backups', 'audit_logs'] %} active{% endif %}" aria-label="Панель администратора" title="Панель администратора">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path>
                         <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.04a2 2 0 1 1-3.92 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.04a2 2 0 1 1 0-3.92L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.04a2 2 0 1 1 3.92 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.18.37.4.7.6 1l.04.04a2 2 0 1 1 0 3.92L20 14a1.7 1.7 0 0 0-.6 1Z"></path>
@@ -389,6 +701,17 @@
             {% endif %}
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>
+        <div class="global-search-modal" id="global-search-modal" hidden>
+            <div class="global-search-backdrop" data-global-search-close></div>
+            <section class="global-search-dialog" role="dialog" aria-modal="true" aria-labelledby="global-search-title">
+                <div class="global-search-header">
+                    <h2 id="global-search-title">Результаты поиска</h2>
+                    <button type="button" class="global-search-close" aria-label="Закрыть поиск" data-global-search-close>&times;</button>
+                </div>
+                <div class="global-search-meta" id="global-search-meta"></div>
+                <div class="global-search-results" id="global-search-results"></div>
+            </section>
+        </div>
         {% endif %}
         {% if request.endpoint != 'login' %}
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -403,6 +726,212 @@
         {% endif %}
         {% block content %}{% endblock %}
     </div>
+    <script>
+    (function() {
+        const dropdowns = Array.from(document.querySelectorAll('.nav-dropdown'));
+        if (!dropdowns.length) {
+            return;
+        }
+        dropdowns.forEach(function(dropdown) {
+            dropdown.addEventListener('toggle', function() {
+                if (!dropdown.open) {
+                    return;
+                }
+                dropdowns.forEach(function(otherDropdown) {
+                    if (otherDropdown !== dropdown) {
+                        otherDropdown.open = false;
+                    }
+                });
+            });
+        });
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('.nav-dropdown')) {
+                return;
+            }
+            dropdowns.forEach(function(dropdown) {
+                dropdown.open = false;
+            });
+        });
+        document.addEventListener('keydown', function(event) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            dropdowns.forEach(function(dropdown) {
+                dropdown.open = false;
+            });
+        });
+    })();
+    (function() {
+        const searchForm = document.querySelector('.nav-search');
+        if (!searchForm) {
+            return;
+        }
+        const toggle = searchForm.querySelector('.nav-search-toggle');
+        const input = searchForm.querySelector('.nav-search-input');
+        const modal = document.getElementById('global-search-modal');
+        const meta = document.getElementById('global-search-meta');
+        const resultsBox = document.getElementById('global-search-results');
+        const closeControls = Array.from(document.querySelectorAll('[data-global-search-close]'));
+        const endpoint = searchForm.dataset.searchOverlayUrl;
+        const personUrlTemplate = searchForm.dataset.personUrlTemplate;
+        let lastController = null;
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, function(character) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                }[character];
+            });
+        }
+
+        function personUrl(item) {
+            const kind = encodeURIComponent(String(item.kind ?? ''));
+            const recordId = encodeURIComponent(String(item.id ?? ''));
+            return personUrlTemplate
+                .replace('__kind__', kind)
+                .replace('__record__', recordId);
+        }
+
+        function openSearch() {
+            searchForm.classList.add('is-open');
+            toggle.setAttribute('aria-expanded', 'true');
+            window.setTimeout(function() {
+                input.focus();
+            }, 0);
+        }
+
+        function collapseSearch() {
+            if (input.value.trim()) {
+                return;
+            }
+            searchForm.classList.remove('is-open');
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+
+        function openModal() {
+            modal.hidden = false;
+            document.body.classList.add('global-search-lock');
+        }
+
+        function closeModal() {
+            modal.hidden = true;
+            document.body.classList.remove('global-search-lock');
+            toggle.focus();
+        }
+
+        function renderResults(payload) {
+            const query = payload.query || input.value.trim();
+            const results = Array.isArray(payload.results) ? payload.results : [];
+            if (!results.length) {
+                meta.textContent = 'По запросу «' + query + '» ничего не найдено';
+                resultsBox.innerHTML = '<p class="global-search-empty">Попробуйте ФИО, номер договора, логин, email или группу.</p>';
+                return;
+            }
+            meta.textContent = 'Найдено: ' + results.length + ' по запросу «' + query + '»';
+            resultsBox.innerHTML = results.map(function(item) {
+                const title = escapeHtml(item.title || 'Без названия');
+                const subtitle = escapeHtml(item.subtitle || '');
+                const status = escapeHtml(item.status || 'Запись');
+                return (
+                    '<article class="global-search-result">' +
+                        '<div>' +
+                            '<span class="global-search-result-status">' + status + '</span>' +
+                            '<span class="global-search-result-title">' + title + '</span>' +
+                            '<span class="global-search-result-subtitle">' + subtitle + '</span>' +
+                        '</div>' +
+                        '<a class="btn global-search-open" href="' + personUrl(item) + '">Открыть</a>' +
+                    '</article>'
+                );
+            }).join('');
+        }
+
+        async function runSearch() {
+            const query = input.value.trim();
+            openSearch();
+            if (!query) {
+                input.focus();
+                return;
+            }
+            openModal();
+            meta.textContent = 'Ищу...';
+            resultsBox.innerHTML = '';
+
+            if (lastController) {
+                lastController.abort();
+            }
+            lastController = window.AbortController ? new AbortController() : null;
+            const searchUrl = new URL(endpoint, window.location.origin);
+            searchUrl.searchParams.set('q', query);
+
+            try {
+                const options = { headers: { Accept: 'application/json' } };
+                if (lastController) {
+                    options.signal = lastController.signal;
+                }
+                const response = await fetch(searchUrl.toString(), options);
+                if (!response.ok) {
+                    throw new Error('Search request failed');
+                }
+                renderResults(await response.json());
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    return;
+                }
+                meta.textContent = '';
+                resultsBox.innerHTML = '<p class="global-search-error">Не удалось выполнить поиск. Попробуйте еще раз.</p>';
+            }
+        }
+
+        toggle.addEventListener('click', function(event) {
+            event.preventDefault();
+            if (!searchForm.classList.contains('is-open')) {
+                openSearch();
+                return;
+            }
+            if (input.value.trim()) {
+                runSearch();
+                return;
+            }
+            input.focus();
+        });
+
+        searchForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            runSearch();
+        });
+
+        input.addEventListener('keydown', function(event) {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            if (!modal.hidden) {
+                closeModal();
+                return;
+            }
+            input.value = '';
+            collapseSearch();
+            toggle.focus();
+        });
+
+        input.addEventListener('blur', function() {
+            window.setTimeout(collapseSearch, 120);
+        });
+
+        closeControls.forEach(function(control) {
+            control.addEventListener('click', closeModal);
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape' && !modal.hidden) {
+                closeModal();
+            }
+        });
+    })();
+    </script>
     {% if request.endpoint in ['index', 'login'] %}
     <footer id="main-footer">
         <div class="footer-inner">
