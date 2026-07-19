@@ -131,34 +131,70 @@
             white-space: normal;
         }
         .abiturients-table .action-cell {
-            min-width: 320px;
+            min-width: 150px;
             white-space: nowrap;
         }
         .abiturients-table .action-cell form {
             display: inline-flex !important;
             align-items: center;
         }
-        .abiturients-table .action-cell .btn {
-            min-width: auto;
-            margin: 0 3px;
-            padding: 7px 12px;
-        }
-        .paid-toggle {
-            cursor: pointer;
+        .row-actions {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            margin: 0 4px 0 0;
-            color: #374151;
-            font-weight: 600;
-            font-size: 14px;
-            white-space: nowrap;
         }
-        .paid-toggle.is-paid {
+        .action-icon-btn {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            padding: 0;
+            margin: 0;
+            border-radius: 6px;
+        }
+        .action-icon-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .action-icon-paid {
             color: #166534;
+            background: #dcfce7;
+            border: 1px solid #86efac;
         }
-        .paid-toggle.is-unpaid {
+        .action-icon-unpaid {
             color: #92400e;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+        }
+        .action-icon-edit {
+            color: #1d4ed8;
+            background: #dbeafe;
+            border: 1px solid #bfdbfe;
+        }
+        .action-icon-delete {
+            color: #991b1b;
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+        }
+        .action-icon-paid:hover,
+        .action-icon-paid:focus {
+            background: #bbf7d0;
+        }
+        .action-icon-unpaid:hover,
+        .action-icon-unpaid:focus {
+            background: #fde68a;
+        }
+        .action-icon-edit:hover,
+        .action-icon-edit:focus {
+            background: #bfdbfe;
+        }
+        .action-icon-delete:hover,
+        .action-icon-delete:focus {
+            background: #fecaca;
         }
         @media (max-width: 640px) {
             .bulk-toolbar,
@@ -275,34 +311,73 @@
                 <td>{{ a['created_at'] }}</td>
                 <td class="action-cell">
                     {% if session.get('role') == 'admin' %}
-                        <form method="post" action="{{ url_for('toggle_abiturient_paid') }}" style="display:inline; margin-right: 8px;">
-                            {% include "_csrf_field.html" %}
-                            <input type="hidden" name="id" value="{{ a['id'] }}">
-                            <input type="hidden" name="spec" value="{{ request.args.get('spec', '') }}">
-                            <input type="hidden" name="base" value="{{ request.args.get('base', '') }}">
-                            <input type="hidden" name="year" value="{{ request.args.get('year', '') }}">
-                            <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
-                            <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
-                            <input type="hidden" name="has_paid" value="{{ request.args.get('has_paid', '') }}">
-                            <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
-                            <input type="hidden" name="order_by" value="{{ order_by }}">
-                            <input type="hidden" name="order_dir" value="{{ order_dir }}">
-                            <label class="paid-toggle {{ 'is-paid' if a['paid'] else 'is-unpaid' }}">
-                                <input type="checkbox" name="paid" value="1" {% if a['paid'] %}checked{% endif %} onchange="this.form.submit()">
-                                {{ 'Оплачено' if a['paid'] else 'Не оплачено' }}
-                            </label>
-                        </form>
-                        <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');" style="display:inline;">
-                            {% include "_csrf_field.html" %}
-                            <input type="hidden" name="id" value="{{ a['id'] }}">
-                            <input type="hidden" name="login" value="{{ a['login'] }}">
-                            <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">
-                            <button type="submit" class="btn btn-danger">Удалить</button>
-                        </form>
-                        <a href="{{ url_for('edit_abiturient', login=a['login'], campaign_year=a['campaign_year']) }}" class="btn">Редактировать</a>
+                        <div class="row-actions">
+                            <form method="post" action="{{ url_for('toggle_abiturient_paid') }}">
+                                {% include "_csrf_field.html" %}
+                                <input type="hidden" name="id" value="{{ a['id'] }}">
+                                <input type="hidden" name="paid" value="{{ '0' if a['paid'] else '1' }}">
+                                <input type="hidden" name="spec" value="{{ request.args.get('spec', '') }}">
+                                <input type="hidden" name="base" value="{{ request.args.get('base', '') }}">
+                                <input type="hidden" name="year" value="{{ request.args.get('year', '') }}">
+                                <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
+                                <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
+                                <input type="hidden" name="has_paid" value="{{ request.args.get('has_paid', '') }}">
+                                <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
+                                <input type="hidden" name="order_by" value="{{ order_by }}">
+                                <input type="hidden" name="order_dir" value="{{ order_dir }}">
+                                <button
+                                    type="submit"
+                                    class="btn action-icon-btn {{ 'action-icon-paid' if a['paid'] else 'action-icon-unpaid' }}"
+                                    title="{{ 'Снять оплату' if a['paid'] else 'Отметить оплату' }}"
+                                    aria-label="{{ 'Снять оплату' if a['paid'] else 'Отметить оплату' }}"
+                                >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h11"></path>
+                                        <path d="M18 9V5a2 2 0 0 0-2-2H7"></path>
+                                        <path d="M16 13h6v4h-6a2 2 0 0 1 0-4z"></path>
+                                    </svg>
+                                </button>
+                            </form>
+                            <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');">
+                                {% include "_csrf_field.html" %}
+                                <input type="hidden" name="id" value="{{ a['id'] }}">
+                                <input type="hidden" name="login" value="{{ a['login'] }}">
+                                <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">
+                                <button type="submit" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M3 6h18"></path>
+                                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                        <path d="M10 11v6"></path>
+                                        <path d="M14 11v6"></path>
+                                    </svg>
+                                </button>
+                            </form>
+                            <a href="{{ url_for('edit_abiturient', login=a['login'], campaign_year=a['campaign_year']) }}" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                                </svg>
+                            </a>
+                        </div>
                     {% else %}
-                        <button type="button" class="btn btn-danger" onclick="alert('У вас недостаточно прав для удаления!'); return false;">Удалить</button>
-                        <button type="button" class="btn" onclick="alert('У вас недостаточно прав для редактирования данных!'); return false;">Редактировать</button>
+                        <div class="row-actions">
+                            <button type="button" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить" onclick="alert('У вас недостаточно прав для удаления!'); return false;">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 6h18"></path>
+                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                    <path d="M10 11v6"></path>
+                                    <path d="M14 11v6"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать" onclick="alert('У вас недостаточно прав для редактирования данных!'); return false;">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 20h9"></path>
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                                </svg>
+                            </button>
+                        </div>
                     {% endif %}
                 </td>
             </tr>
