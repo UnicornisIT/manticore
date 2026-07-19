@@ -32,6 +32,37 @@ function Write-Step {
     Write-Host "== $Message ==" -ForegroundColor Cyan
 }
 
+function Write-AdminPasswordNotice {
+    param([string]$Password)
+
+    $restartTranscript = $false
+    if ($script:TranscriptStarted) {
+        Stop-Transcript | Out-Null
+        $script:TranscriptStarted = $false
+        $restartTranscript = $true
+    }
+
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host "ВАЖНО / IMPORTANT" -ForegroundColor Red
+    Write-Host "Локальный администратор: admin" -ForegroundColor Yellow
+    Write-Host "Admin password: $Password" -ForegroundColor Green
+    Write-Host "RU: Сохраните этот пароль. При первом входе обязательно смените пароль администратора." -ForegroundColor Yellow
+    Write-Host "EN: Save this password. You must change the admin password after the first login." -ForegroundColor Yellow
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host ""
+
+    if ($restartTranscript) {
+        try {
+            Start-Transcript -Path $LogPath -Append | Out-Null
+            $script:TranscriptStarted = $true
+        }
+        catch {
+            $script:TranscriptStarted = $false
+        }
+    }
+}
+
 function Write-CommandLine {
     param(
         [string]$Exe,
@@ -199,6 +230,7 @@ if (-not (Test-Path -LiteralPath ".env")) {
         "APP_DEBUG=false"
     ) | Set-Content -Path ".env" -Encoding UTF8
     Write-Host "Generated local admin password and saved it in .env." -ForegroundColor Yellow
+    Write-AdminPasswordNotice -Password $adminPassword
 }
 
 $lanIp = $null

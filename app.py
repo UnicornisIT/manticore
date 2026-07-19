@@ -1,6 +1,8 @@
 import os
 import re
 import csv
+import copy
+import json
 import secrets
 import tempfile
 import shutil
@@ -12,6 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import sqlite3
 import io
 import hmac
+from string import Formatter
 from functools import wraps
 from datetime import date, datetime
 from time import time
@@ -250,6 +253,229 @@ base_codes = {
     "11": "11", "9": "9", 
 }
 
+LOGIN_RULES_SETTINGS_ID = 1
+LOGIN_TEMPLATE_FIELDS = {'yyyy', 'yy', 'spec', 'base', 'seq', 'num'}
+LOGIN_MATCH_MODES = {'last_part', 'anywhere'}
+
+DEFAULT_LOGIN_GENERATION_RULES = {
+    'mode': 'standard',
+    'template': '{yy}{spec}{base}{seq}',
+    'number_width': 3,
+    'error_prefix': 'error',
+    'duplicate_prefix': 'dubl',
+    'unique_scope': 'campaign',
+    'year_regex': r'20\d{2}',
+    'base_match_mode': 'last_part',
+    'spec_codes': spec_codes,
+    'base_codes': base_codes,
+}
+
+def get_default_login_generation_rules():
+    return copy.deepcopy(DEFAULT_LOGIN_GENERATION_RULES)
+
+def merge_login_generation_rules(raw_rules=None):
+    rules = get_default_login_generation_rules()
+    if isinstance(raw_rules, dict):
+        for key, value in raw_rules.items():
+            if key in {'spec_codes', 'base_codes'} and isinstance(value, dict):
+                rules[key] = {str(k).strip(): str(v).strip() for k, v in value.items() if str(k).strip()}
+            elif key in rules:
+                rules[key] = value
+    rules['mode'] = 'custom' if rules.get('mode') == 'custom' else 'standard'
+    rules['template'] = str(rules.get('template') or DEFAULT_LOGIN_GENERATION_RULES['template']).strip()
+    try:
+        rules['number_width'] = max(1, min(8, int(rules.get('number_width', 3))))
+    except (TypeError, ValueError):
+        rules['number_width'] = 3
+    rules['error_prefix'] = str(rules.get('error_prefix') or 'error').strip() or 'error'
+    rules['duplicate_prefix'] = str(rules.get('duplicate_prefix') or 'dubl').strip() or 'dubl'
+    rules['unique_scope'] = 'global' if rules.get('unique_scope') == 'global' else 'campaign'
+    rules['year_regex'] = str(rules.get('year_regex') or r'20\d{2}').strip() or r'20\d{2}'
+    rules['base_match_mode'] = rules.get('base_match_mode') if rules.get('base_match_mode') in LOGIN_MATCH_MODES else 'last_part'
+    if not rules.get('spec_codes'):
+        rules['spec_codes'] = copy.deepcopy(spec_codes)
+    if not rules.get('base_codes'):
+        rules['base_codes'] = copy.deepcopy(base_codes)
+    return rules
+
+def create_login_generation_settings_table(conn):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS login_generation_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            settings_json TEXT NOT NULL,
+            setup_completed INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+            updated_by TEXT
+        )
+    ''')
+
+def get_login_generation_settings_row():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            create_login_generation_settings_table(conn)
+            return conn.execute(
+                '''
+                SELECT settings_json, setup_completed, updated_at, updated_by
+                FROM login_generation_settings
+                WHERE id=?
+                ''',
+                (LOGIN_RULES_SETTINGS_ID,)
+            ).fetchone()
+    except sqlite3.Error:
+        return None
+
+def get_login_generation_rules():
+    row = get_login_generation_settings_row()
+    if not row:
+        return get_default_login_generation_rules()
+    try:
+        stored_rules = json.loads(row[0] or '{}')
+    except (TypeError, ValueError):
+        stored_rules = {}
+    return merge_login_generation_rules(stored_rules)
+
+def is_login_generation_setup_completed():
+    row = get_login_generation_settings_row()
+    return bool(row and row[1])
+
+def save_login_generation_settings(rules, setup_completed=True, updated_by=''):
+    normalized_rules = merge_login_generation_rules(rules)
+    validate_login_generation_rules(normalized_rules)
+    with sqlite3.connect(DB_PATH) as conn:
+        create_login_generation_settings_table(conn)
+        conn.execute(
+            '''
+            INSERT INTO login_generation_settings (id, settings_json, setup_completed, updated_at, updated_by)
+            VALUES (?, ?, ?, datetime('now', 'localtime'), ?)
+            ON CONFLICT(id) DO UPDATE SET
+                settings_json=excluded.settings_json,
+                setup_completed=excluded.setup_completed,
+                updated_at=excluded.updated_at,
+                updated_by=excluded.updated_by
+            ''',
+            (
+                LOGIN_RULES_SETTINGS_ID,
+                json.dumps(normalized_rules, ensure_ascii=False, sort_keys=True),
+                1 if setup_completed else 0,
+                updated_by,
+            )
+        )
+        conn.commit()
+    return normalized_rules
+
+def mapping_to_text(mapping):
+    return '\n'.join(f'{key} = {value}' for key, value in (mapping or {}).items())
+
+def parse_mapping_text(text, field_label):
+    mapping = {}
+    for line_number, raw_line in enumerate(str(text or '').splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        separator = '=' if '=' in line else ':' if ':' in line else ''
+        if not separator:
+            raise ValueError(f'{field_label}: строка {line_number} должна быть в формате "значение = код".')
+        key, value = [part.strip() for part in line.split(separator, 1)]
+        if not key or not value:
+            raise ValueError(f'{field_label}: строка {line_number} содержит пустое значение или код.')
+        if re.search(r'\s', value):
+            raise ValueError(f'{field_label}: код в строке {line_number} не должен содержать пробелы.')
+        mapping[key] = value
+    if not mapping:
+        raise ValueError(f'{field_label}: добавьте хотя бы одну строку.')
+    return mapping
+
+def validate_login_template(template):
+    template = str(template or '').strip()
+    if not template:
+        raise ValueError('Шаблон логина не может быть пустым.')
+    formatter = Formatter()
+    try:
+        parsed_parts = list(formatter.parse(template))
+    except ValueError as exc:
+        raise ValueError(f'Шаблон логина заполнен некорректно: {exc}') from exc
+    used_fields = set()
+    for _literal, field_name, format_spec, conversion in parsed_parts:
+        if field_name is None:
+            continue
+        if conversion:
+            raise ValueError('Шаблон логина не должен использовать преобразования вида !r или !s.')
+        if field_name not in LOGIN_TEMPLATE_FIELDS:
+            allowed = ', '.join(sorted(f'{{{field}}}' for field in LOGIN_TEMPLATE_FIELDS))
+            raise ValueError(f'Неизвестное поле {{{field_name}}}. Доступны: {allowed}.')
+        used_fields.add(field_name)
+        if format_spec:
+            for _spec_literal, nested_field, _nested_spec, _nested_conversion in formatter.parse(format_spec):
+                if nested_field:
+                    raise ValueError('Шаблон логина не должен содержать вложенные поля форматирования.')
+    if 'seq' not in used_fields and 'num' not in used_fields:
+        raise ValueError('Шаблон логина должен содержать {seq} или {num}.')
+    return template
+
+def validate_login_generation_rules(rules):
+    rules = merge_login_generation_rules(rules)
+    validate_login_template(rules['template'])
+    re.compile(rules['year_regex'])
+    if not rules['spec_codes']:
+        raise ValueError('Добавьте хотя бы один код специальности.')
+    if not rules['base_codes']:
+        raise ValueError('Добавьте хотя бы один код базы.')
+    for prefix_label, prefix in (('Префикс ошибок', rules['error_prefix']), ('Префикс дублей', rules['duplicate_prefix'])):
+        if re.search(r'\s', prefix):
+            raise ValueError(f'{prefix_label} не должен содержать пробелы.')
+    render_login_template(
+        rules,
+        {'year': '2026', 'year_code': '26', 'spec_code': '1', 'base_code': '11'},
+        1
+    )
+    return True
+
+def build_login_rules_from_form(form, mode='custom'):
+    if mode == 'standard':
+        return get_default_login_generation_rules()
+    return merge_login_generation_rules({
+        'mode': 'custom',
+        'template': form.get('template'),
+        'number_width': form.get('number_width'),
+        'error_prefix': form.get('error_prefix'),
+        'duplicate_prefix': form.get('duplicate_prefix'),
+        'unique_scope': form.get('unique_scope'),
+        'year_regex': form.get('year_regex'),
+        'base_match_mode': form.get('base_match_mode'),
+        'spec_codes': parse_mapping_text(form.get('spec_codes_text'), 'Коды специальностей'),
+        'base_codes': parse_mapping_text(form.get('base_codes_text'), 'Коды базы'),
+    })
+
+def render_login_template(rules, parts, number):
+    rules = merge_login_generation_rules(rules)
+    width = rules['number_width']
+    number = int(number)
+    context = {
+        'yyyy': parts['year'],
+        'yy': parts['year_code'],
+        'spec': parts['spec_code'],
+        'base': parts['base_code'],
+        'seq': f'{number:0{width}d}',
+        'num': number,
+    }
+    return rules['template'].format(**context)
+
+def get_login_rules_form_context(rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    sample_spec = next(iter(rules.get('spec_codes') or {'ФМ': '6'}))
+    sample_base = next(iter(rules.get('base_codes') or {'11': '11'}))
+    sample_dogovor = f'2026-{sample_spec}-0001-{sample_base}'
+    sample_parts = parse_dogovor_parts(sample_dogovor, rules)
+    sample_login = render_login_template(rules, sample_parts, 1) if sample_parts else ''
+    return {
+        'rules': rules,
+        'setup_completed': is_login_generation_setup_completed(),
+        'spec_codes_text': mapping_to_text(rules.get('spec_codes')),
+        'base_codes_text': mapping_to_text(rules.get('base_codes')),
+        'sample_dogovor': sample_dogovor,
+        'sample_login': sample_login,
+    }
+
 _dogovor_latin_lookalikes = str.maketrans({
     'A': 'А',
     'B': 'В',
@@ -271,37 +497,63 @@ def normalize_dogovor_text(dogovor):
     normalized = _dogovor_dash_re.sub('-', normalized).replace(' ', '-')
     return normalized.upper().translate(_dogovor_latin_lookalikes)
 
-def parse_dogovor(dogovor):
-    # Нормализуем дефисы, пробелы и регистр
+def find_mapped_code(normalized_text, mapping):
+    for label, code in sorted((mapping or {}).items(), key=lambda item: len(item[0]), reverse=True):
+        if str(label).upper() in normalized_text:
+            return str(label), str(code)
+    return None, None
+
+def find_base_code(normalized_text, mapping, match_mode='last_part'):
+    if match_mode == 'anywhere':
+        return find_mapped_code(normalized_text, mapping)
+
+    parts = normalized_text.split('-')
+    if len(parts) < 2:
+        return None, None
+    last_part = parts[-1].strip()
+    for label, code in sorted((mapping or {}).items(), key=lambda item: len(item[0]), reverse=True):
+        if last_part == str(label).upper():
+            return str(label), str(code)
+    return None, None
+
+def parse_dogovor_parts(dogovor, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
     normalized = normalize_dogovor_text(dogovor)
-    year_match = re.search(r'20\d{2}', normalized)
-    spec_match = None
+    year_match = re.search(rules['year_regex'], normalized)
+    spec_label, spec_code = find_mapped_code(normalized, rules['spec_codes'])
+    base_label, base_code = find_base_code(normalized, rules['base_codes'], rules['base_match_mode'])
 
-    # Определяем специальность - ищем в нормализованной строке
-    for spec in sorted(spec_codes.keys(), key=len, reverse=True):
-        if spec.upper() in normalized:
-            spec_match = spec
-            break
+    if not (year_match and spec_code and base_code):
+        return None
 
-    # Определяем базу образования по последнему элементу после дефиса
-    base_match = None
-    parts = normalized.split('-')
-    if len(parts) >= 2:
-        last_part = parts[-1].strip()
-        # Проверяем по словарю base_codes
-        for base in sorted(base_codes.keys(), key=len, reverse=True):
-            if last_part == base.upper():
-                base_match = base
-                break
+    year = year_match.group()
+    return {
+        'year': year,
+        'year_code': year[-2:],
+        'spec_label': spec_label,
+        'spec_code': spec_code,
+        'base_label': base_label,
+        'base_code': base_code,
+    }
 
-    if not (year_match and spec_match and base_match):
-        return "error"
+def build_login_from_parts(parts, number, rules=None):
+    return render_login_template(rules or get_login_generation_rules(), parts, number)
 
-    year_code = year_match.group()[-2:]
-    spec_code = spec_codes[spec_match]
-    base_code = base_codes[base_match]
+def next_login_from_parts(parts, existing_logins, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    number = 1
+    while True:
+        login = build_login_from_parts(parts, number, rules)
+        if login not in existing_logins:
+            return login
+        number += 1
 
-    return f"{year_code}{spec_code}{base_code}"
+def parse_dogovor(dogovor, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    parts = parse_dogovor_parts(dogovor, rules)
+    if not parts:
+        return rules['error_prefix']
+    return f"{parts['year_code']}{parts['spec_code']}{parts['base_code']}"
 
 def split_fio(fio):
     fio = ' '.join(str(fio or '').split())
@@ -640,6 +892,20 @@ def protect_post_requests_with_csrf():
     refresh_csrf_token()
     flash('Сессия формы устарела. Попробуйте ещё раз.', 'error')
     return redirect(get_safe_referrer(default_endpoint='index'), code=303)
+
+SETUP_ALLOWED_ENDPOINTS = {'static', 'login', 'logout', 'register', 'login_generation_setup'}
+
+@app.before_request
+def require_login_generation_setup():
+    if request.endpoint in SETUP_ALLOWED_ENDPOINTS or not session.get('user'):
+        return None
+    if is_login_generation_setup_completed():
+        return None
+    if session.get('role') == 'admin':
+        return redirect(url_for('login_generation_setup'), code=303)
+    session.clear()
+    flash('Администратор должен завершить первичную настройку правил логинов.', 'error')
+    return redirect(url_for('login'), code=303)
 
 def get_client_ip():
     forwarded_for = request.headers.get('X-Forwarded-For', '')
@@ -1691,6 +1957,7 @@ def init_db():
         ensure_students_origin_columns(conn)
         create_audit_log_table(conn)
         create_campaign_settings_table(conn)
+        create_login_generation_settings_table(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
@@ -1779,14 +2046,18 @@ def get_group_years(selected_year=None, include_base=False):
 
     return sorted(years)
 
-def get_used_logins(campaign_year):
+def get_used_logins(campaign_year, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
     used_logins = set()
     with sqlite3.connect(DB_PATH) as conn:
         for table in ('abiturients', 'pending_duplicates', 'login_conflicts'):
-            cur = conn.execute(
-                f"SELECT login FROM {table} WHERE campaign_year=? AND login IS NOT NULL",
-                (campaign_year,)
-            )
+            if rules['unique_scope'] == 'global':
+                cur = conn.execute(f"SELECT login FROM {table} WHERE login IS NOT NULL")
+            else:
+                cur = conn.execute(
+                    f"SELECT login FROM {table} WHERE campaign_year=? AND login IS NOT NULL",
+                    (campaign_year,)
+                )
             used_logins.update(str(row[0]).strip() for row in cur.fetchall() if str(row[0]).strip())
         if table_exists(conn, 'students') and 'username' in get_table_columns(conn, 'students'):
             cur = conn.execute(
@@ -1795,18 +2066,29 @@ def get_used_logins(campaign_year):
             used_logins.update(str(row[0]).strip() for row in cur.fetchall() if str(row[0]).strip())
     return used_logins
 
-def get_prefixed_logins(table, prefix, campaign_year):
+def get_prefixed_logins(table, prefix, campaign_year, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            f"SELECT login FROM {table} WHERE campaign_year=? AND login LIKE ?",
-            (campaign_year, f'{prefix}%')
-        )
+        if rules['unique_scope'] == 'global':
+            cur = conn.execute(
+                f"SELECT login FROM {table} WHERE login LIKE ?",
+                (f'{prefix}%',)
+            )
+        else:
+            cur = conn.execute(
+                f"SELECT login FROM {table} WHERE campaign_year=? AND login LIKE ?",
+                (campaign_year, f'{prefix}%')
+            )
         return set(row[0] for row in cur.fetchall())
 
-def next_numbered_login(prefix, existing_logins):
+def next_numbered_login(prefix, existing_logins, width=3):
+    try:
+        width = max(1, min(8, int(width)))
+    except (TypeError, ValueError):
+        width = 3
     number = 1
     while True:
-        login = f"{prefix}{number:03d}"
+        login = f"{prefix}{number:0{width}d}"
         if login not in existing_logins:
             return login
         number += 1
@@ -1825,11 +2107,15 @@ def is_login_exists(login, campaign_year=None):
     login = str(login or '').strip()
     if not login:
         return False
+    rules = get_login_generation_rules()
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute(
-            'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
-            (login, campaign_year)
-        )
+        if rules['unique_scope'] == 'global':
+            cur = conn.execute('SELECT 1 FROM abiturients WHERE login=?', (login,))
+        else:
+            cur = conn.execute(
+                'SELECT 1 FROM abiturients WHERE login=? AND campaign_year=?',
+                (login, campaign_year)
+            )
         if cur.fetchone() is not None:
             return True
         if table_exists(conn, 'students') and 'username' in get_table_columns(conn, 'students'):
@@ -2046,11 +2332,15 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
     second_name = fio_split[1].fillna('').astype(str).str.strip()
     third_name = fio_split[2].fillna('').astype(str).str.strip()
     df['Имя_Отчество'] = (second_name + ' ' + third_name).str.strip()
-    df['login_prefix'] = df['Договор'].apply(parse_dogovor)
+    login_rules = get_login_generation_rules()
+    df['login_parts'] = df['Договор'].apply(lambda value: parse_dogovor_parts(value, login_rules))
     df['campaign_year'] = campaign_year
 
-    used_logins = get_used_logins(campaign_year)
-    used_duplicate_logins = set(get_prefixed_logins('pending_duplicates', 'dubl', campaign_year))
+    used_logins = get_used_logins(campaign_year, login_rules)
+    error_prefix = login_rules['error_prefix']
+    duplicate_prefix = login_rules['duplicate_prefix']
+    number_width = login_rules['number_width']
+    used_duplicate_logins = set(get_prefixed_logins('pending_duplicates', duplicate_prefix, campaign_year, login_rules))
     known_person_keys = get_existing_person_keys(campaign_year)
     existing_dogovor_keys = get_existing_dogovor_keys(campaign_year)
     planned_dogovor_keys = set()
@@ -2066,10 +2356,10 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
         fam = row['Фамилия']
         fio_key = normalize_fio_key(fio)
         dogovor_key = normalize_dogovor_key(row['Договор'])
-        prefix = row['login_prefix']
+        login_parts = row['login_parts']
 
         if not fio or not fam:
-            login = next_numbered_login('error', used_logins)
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2078,8 +2368,8 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             has_warning_values.append(False)
             continue
 
-        if prefix == 'error':
-            login = next_numbered_login('error', used_logins)
+        if not login_parts:
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2089,7 +2379,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             continue
 
         if dogovor_key in existing_dogovor_keys['abiturients']:
-            login = next_numbered_login('error', used_logins)
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2099,7 +2389,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             continue
 
         if dogovor_key in existing_dogovor_keys['students']:
-            login = next_numbered_login('error', used_logins)
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2109,7 +2399,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             continue
 
         if dogovor_key in existing_dogovor_keys['pending_duplicates']:
-            login = next_numbered_login('dubl', used_duplicate_logins)
+            login = next_numbered_login(duplicate_prefix, used_duplicate_logins, number_width)
             used_duplicate_logins.add(login)
             used_logins.add(login)
             logins.append(login)
@@ -2120,7 +2410,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             continue
 
         if dogovor_key in existing_dogovor_keys['login_conflicts']:
-            login = next_numbered_login('error', used_logins)
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2130,7 +2420,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             continue
 
         if dogovor_key in planned_dogovor_keys:
-            login = next_numbered_login('error', used_logins)
+            login = next_numbered_login(error_prefix, used_logins, number_width)
             used_logins.add(login)
             logins.append(login)
             actions.append('conflict')
@@ -2139,12 +2429,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
             has_warning_values.append(False)
             continue
 
-        number = 1
-        while True:
-            login = f'{prefix}{number:03d}'
-            if login not in used_logins:
-                break
-            number += 1
+        login = next_login_from_parts(login_parts, used_logins, login_rules)
 
         used_logins.add(login)
         planned_dogovor_keys.add(dogovor_key)
@@ -2933,8 +3218,9 @@ def abiturients():
     has_paid = request.args.get('has_paid')
     q = request.args.get('q', '').strip()
     abiturients = get_all_abiturients(order_by, order_dir, spec, base, year, is_i, campaign_year, has_email, has_paid, q)
-    specs = list(spec_codes.keys())
-    bases = list(base_codes.keys())
+    login_rules = get_login_generation_rules()
+    specs = list(login_rules['spec_codes'].keys())
+    bases = list(login_rules['base_codes'].keys())
     years = get_campaign_years()
     return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
@@ -3355,8 +3641,9 @@ def manual_create():
     conflict_info = None
     campaign_year = get_active_campaign_year()
     years = get_campaign_years()
-    specs = list(spec_codes.keys())
-    bases = list(base_codes.keys())
+    login_rules = get_login_generation_rules()
+    specs = list(login_rules['spec_codes'].keys())
+    bases = list(login_rules['base_codes'].keys())
     if request.method == 'POST':
         year = normalize_campaign_year(request.form.get('year'), campaign_year)
         campaign_year = year
@@ -3369,25 +3656,32 @@ def manual_create():
         fam, imotch = fio.split(' ', 1) if ' ' in fio else (fio, '')
         dogovor = f"{year} {spec} {base}"
 
-        prefix = parse_dogovor(dogovor)
-        if prefix == "error":
+        login_parts = parse_dogovor_parts(dogovor, login_rules)
+        if not login_parts:
             # Сохраняем ошибочный логин в конфликты
-            error_login = next_numbered_login('error', get_used_logins(campaign_year))
+            error_login = next_numbered_login(
+                login_rules['error_prefix'],
+                get_used_logins(campaign_year, login_rules),
+                login_rules['number_width']
+            )
             save_login_conflict(fio, dogovor, error_login, fam, imotch, campaign_year)
             message = f"Ошибка парсинга договора! Запись отправлена в раздел 'Конфликты логинов' с логином {error_login}."
         else:
-            existing_logins = get_used_logins(campaign_year)
-
-            number = 1
-            while True:
-                login = f"{prefix}{number:03d}"
-                if login not in existing_logins:
-                    break
-                number += 1
+            existing_logins = get_used_logins(campaign_year, login_rules)
+            login = next_login_from_parts(login_parts, existing_logins, login_rules)
 
             if is_fio_duplicate(fam, campaign_year):
-                dubl_logins = get_prefixed_logins('pending_duplicates', 'dubl', campaign_year)
-                dubl_login = next_numbered_login('dubl', dubl_logins)
+                dubl_logins = get_prefixed_logins(
+                    'pending_duplicates',
+                    login_rules['duplicate_prefix'],
+                    campaign_year,
+                    login_rules
+                )
+                dubl_login = next_numbered_login(
+                    login_rules['duplicate_prefix'],
+                    dubl_logins,
+                    login_rules['number_width']
+                )
                 save_pending_duplicate(fio, dogovor, dubl_login, fam, imotch, campaign_year)
                 message = f"Дублирующее ФИО! Запись отправлена в раздел 'Дублирующиеся ФИО'. Логин: {dubl_login}"
             else:
@@ -3532,6 +3826,22 @@ def register():
         flash('Заявка на регистрацию отправлена. Ожидайте одобрения администратора.')
         return redirect(url_for('login'))
     return render_template('register.html')
+
+@app.route('/setup', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def login_generation_setup():
+    if request.method == 'POST':
+        mode = request.form.get('mode', 'custom')
+        try:
+            rules = build_login_rules_from_form(request.form, mode)
+            save_login_generation_settings(rules, setup_completed=True, updated_by=session.get('user', ''))
+            log_action('login_generation_settings_saved', 'settings', 'login_generation', f"mode={rules['mode']}")
+            flash('Правила формирования логинов сохранены.', 'success')
+            return redirect(url_for('index'))
+        except (ValueError, re.error) as exc:
+            flash(f'Не удалось сохранить правила: {exc}', 'error')
+    return render_template('login_rules_setup.html', **get_login_rules_form_context())
 
 @app.route('/admin_panel')
 @admin_required

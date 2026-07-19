@@ -11,6 +11,29 @@ SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_USER=${DEPLOY_USER:-www-data}
 
+show_admin_password_notice() {
+  local password="$1"
+  cat <<EOF
+
+============================================================
+ВАЖНО / IMPORTANT
+Локальный администратор: admin
+Admin password: $password
+RU: Сохраните этот пароль. При первом входе обязательно смените пароль администратора.
+EN: Save this password. You must change the admin password after the first login.
+============================================================
+
+EOF
+}
+
+generate_secret_key() {
+  python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+}
+
+generate_admin_password() {
+  python3 -c 'import secrets, string; chars = string.ascii_letters + string.digits; print("".join(secrets.choice(chars) for _ in range(20)))'
+}
+
 if [[ "$EUID" -ne 0 ]]; then
   echo "Запустите скрипт от root или через sudo"
   exit 1
@@ -36,6 +59,26 @@ if [[ "$CURRENT_DIR" != "$APP_DIR" ]]; then
 fi
 
 cd "$APP_DIR"
+
+if [[ ! -f "$APP_DIR/.env" ]]; then
+  SECRET_KEY="$(generate_secret_key)"
+  ADMIN_PASSWORD="$(generate_admin_password)"
+  cat > "$APP_DIR/.env" <<EOF
+SECRET_KEY=$SECRET_KEY
+ADMIN_DEFAULT_PASSWORD=$ADMIN_PASSWORD
+UPLOAD_FOLDER=uploads
+DB_FILENAME=baze.db
+DEFAULT_CAMPAIGN_YEAR=2026
+LEGACY_CAMPAIGN_YEAR=2025
+FLASK_ENV=production
+APP_HOST=127.0.0.1
+APP_PORT=8000
+APP_DEBUG=false
+EOF
+  chmod 640 "$APP_DIR/.env"
+  echo "Generated local admin password and saved it in $APP_DIR/.env."
+  show_admin_password_notice "$ADMIN_PASSWORD"
+fi
 
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"

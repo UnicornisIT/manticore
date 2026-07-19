@@ -39,6 +39,7 @@ def reset_database():
             'audit_logs',
             'login_attempts',
             'campaign_settings',
+            'login_generation_settings',
         ):
             conn.execute(f'DELETE FROM {table}')
 
@@ -50,6 +51,11 @@ class ManticoreAppTests(unittest.TestCase):
 
     def setUp(self):
         reset_database()
+        manticore.save_login_generation_settings(
+            manticore.get_default_login_generation_rules(),
+            setup_completed=True,
+            updated_by='test'
+        )
 
     def make_abiturients_file(self, rows, filename='abiturients.xlsx'):
         file_path = os.path.join(TEST_UPLOAD_DIR, filename)
@@ -65,6 +71,49 @@ class ManticoreAppTests(unittest.TestCase):
         token_match = re.search(r'name="csrf_token" value="([^"]+)"', response.get_data(as_text=True))
         self.assertIsNotNone(token_match)
         return token_match.group(1)
+
+    def test_custom_login_generation_rules_are_used_for_import(self):
+        rules = manticore.get_default_login_generation_rules()
+        rules.update({
+            'mode': 'custom',
+            'template': 'u{yy}{spec}{base}{seq}',
+            'number_width': 4,
+            'error_prefix': 'bad',
+            'duplicate_prefix': 'copy',
+            'spec_codes': {'ИТ': 'it'},
+            'base_codes': {'очно': 'o'},
+            'base_match_mode': 'last_part',
+        })
+        manticore.save_login_generation_settings(rules, setup_completed=True, updated_by='test')
+
+        file_path = self.make_abiturients_file([
+            {'ФИО': 'Тестов Тест Тестович', 'Договор': '2026-ИТ-0001-очно'},
+            {'ФИО': 'Ошибкин Олег Олегович', 'Договор': 'без номера'},
+        ], filename='custom_rules.xlsx')
+
+        plan_df, summary = manticore.build_abiturients_import_plan(file_path, '2026')
+
+        self.assertEqual(summary['ready_count'], 1)
+        self.assertEqual(summary['conflict_count'], 1)
+        self.assertEqual(plan_df['login'].tolist(), ['u26ito0001', 'bad0001'])
+
+    def test_admin_is_redirected_to_setup_until_login_rules_are_saved(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute('DELETE FROM login_generation_settings')
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/file_work')
+        self.assertEqual(response.status_code, 303)
+        self.assertIn('/setup', response.headers['Location'])
+
+        setup_response = client.get('/setup')
+        csrf_token = self.csrf_from_response(setup_response)
+        save_response = client.post('/setup', data={'csrf_token': csrf_token, 'mode': 'standard'})
+
+        self.assertEqual(save_response.status_code, 302)
+        self.assertTrue(manticore.is_login_generation_setup_completed())
 
     def test_abiturients_import_plan_uses_dogovor_and_warns_about_namesakes(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
