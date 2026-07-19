@@ -129,6 +129,9 @@
     .preview-table-wrap table {
         min-width: 920px;
     }
+    .students-preview-table table {
+        min-width: 1120px;
+    }
     .preview-note {
         margin: 0 0 12px 0;
         color: #475569;
@@ -288,13 +291,31 @@
                         <td>{{ row.campaign_year }}</td>
                         <td>{{ row['ФИО'] }}</td>
                         <td>{{ row['Договор'] }}</td>
-                        <td>{{ row.login }}</td>
-                        <td>{{ row['Фамилия'] }}</td>
-                        <td>{{ row['Имя_Отчество'] }}</td>
-                        <td>{{ row.import_action }}</td>
-                        <td>{{ row.import_status }}</td>
-                    </tr>
-                    {% endfor %}
+            <td>{{ row.login }}</td>
+            <td>{{ row['Фамилия'] }}</td>
+            <td>{{ row['Имя_Отчество'] }}</td>
+            <td>
+                {% if row.import_action == 'create' %}
+                    <span class="status-badge status-success">Будет добавлен</span>
+                {% elif row.import_action == 'duplicate' %}
+                    <span class="status-badge status-warning">В дубли</span>
+                {% else %}
+                    <span class="status-badge status-danger">Конфликт</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if row.import_action == 'create' and not row.has_warning %}
+                    <span class="status-badge status-success">{{ row.import_status }}</span>
+                {% elif row.import_action == 'create' and row.has_warning %}
+                    <span class="status-badge status-warning">{{ row.import_status }}</span>
+                {% elif row.import_action == 'duplicate' %}
+                    <span class="status-badge status-warning">{{ row.import_status }}</span>
+                {% else %}
+                    <span class="status-badge status-danger">{{ row.import_status }}</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -331,8 +352,9 @@
     <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary upload-template-link">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
+        <input type="hidden" name="students_import_action" value="preview">
         <div class="upload-row">
-            <label for="students_file">Загрузить файл студентов (CSV):</label>
+            <label for="students_file">Загрузить файл студентов (Excel или CSV):</label>
             <span class="file-picker">
                 <input type="file" name="file" id="students_file" accept=".xlsx,.xls,.csv" required data-file-name-target="students_file_name">
                 <label for="students_file" class="file-picker-button">Выберите файл</label>
@@ -342,6 +364,72 @@
         </div>
     </form>
     {{ render_upload_report(students_report) }}
+    {% if students_preview %}
+    <div class="import-preview">
+        <h3>Предпросмотр загрузки студентов</h3>
+        <div class="preview-stats">
+            <div class="preview-stat"><strong>{{ students_preview.total }}</strong>Всего строк</div>
+            <div class="preview-stat"><strong>{{ students_preview.ready_count }}</strong>Будет добавлено</div>
+            <div class="preview-stat"><strong>{{ students_preview.duplicate_count }}</strong>В дублях</div>
+            <div class="preview-stat"><strong>{{ students_preview.skipped_count }}</strong>Будет пропущено</div>
+        </div>
+        <p class="preview-note">База студентов не изменится, пока вы не подтвердите загрузку.</p>
+        <div class="preview-actions">
+            <form method="post" action="{{ url_for('students_upload') }}">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="students_import_action" value="confirm">
+                <input type="hidden" name="pending_students_import" value="{{ pending_students_import_token }}">
+                <button type="submit" class="btn">Подтвердить загрузку студентов</button>
+            </form>
+            <form method="post" action="{{ url_for('students_upload') }}">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="students_import_action" value="cancel">
+                <input type="hidden" name="pending_students_import" value="{{ pending_students_import_token }}">
+                <button type="submit" class="btn btn-danger">Отменить</button>
+            </form>
+        </div>
+        <div class="preview-table-wrap students-preview-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Строка</th>
+                        <th>Логин</th>
+                        <th>Email</th>
+                        <th>Фамилия</th>
+                        <th>Имя</th>
+                        <th>Группа</th>
+                        <th>Договор при поступлении</th>
+                        <th>Кампания</th>
+                        <th>Действие</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in students_preview_rows %}
+                    <tr>
+                        <td>{{ row['_row_number'] }}</td>
+                        <td>{{ row.username }}</td>
+                        <td>
+                            {% if row.email %}
+                                <span class="status-badge status-success">Есть почта</span>
+                            {% else %}
+                                <span class="status-badge status-danger">Нет почты</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.lastname }}</td>
+                        <td>{{ row.firstname }}</td>
+                        <td>{{ row.cohort1 }}</td>
+                        <td>{{ row.source_dogovor or '-' }}</td>
+                        <td>{{ row.source_campaign_year or '-' }}</td>
+                        <td><span class="status-badge {{ row.badge_class }}">{{ row.action_label }}</span></td>
+                        <td><span class="status-badge {{ row.badge_class }}">{{ row.import_status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 </div>
 <script>
 document.querySelectorAll('.file-picker input[type="file"]').forEach(function(input) {

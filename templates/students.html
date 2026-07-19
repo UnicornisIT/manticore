@@ -99,10 +99,22 @@
                 ••••••
                 {% endif %}
             </td>
-            <td>{{ s['email'] }}</td>
+            <td>
+                {% if s['email'] %}
+                    <span class="status-badge status-success" title="{{ s['email'] }}">Есть почта</span>
+                {% else %}
+                    <span class="status-badge status-danger">Нет почты</span>
+                {% endif %}
+            </td>
             <td>{{ s['lastname'] }}</td>
             <td>{{ s['firstname'] }}</td>
-            <td>{{ s['cohort1'] }}</td>
+            <td>
+                {% if s['cohort1'] %}
+                    <span class="status-badge status-info">{{ s['cohort1'] }}</span>
+                {% else %}
+                    <span class="status-badge status-warning">Нет группы</span>
+                {% endif %}
+            </td>
             {% if session.get('role') == 'admin' %}
             <td>
                 <a href="{{ url_for('edit_student', username=s['username']) }}">Редактировать</a>
