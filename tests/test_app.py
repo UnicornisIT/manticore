@@ -97,6 +97,74 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(summary['conflict_count'], 1)
         self.assertEqual(plan_df['login'].tolist(), ['u26ito0001', 'bad0001'])
 
+    def test_lowercase_i_base_aliases_are_hidden_but_still_accepted(self):
+        rules = manticore.get_default_login_generation_rules()
+        rules['base_codes'] = {
+            '11и': '11i',
+            '11И': '11i',
+            '9и': '9i',
+            '9И': '9i',
+            '11': '11',
+            '9': '9',
+        }
+        manticore.save_login_generation_settings(rules, setup_completed=True, updated_by='test')
+
+        normalized_rules = manticore.get_login_generation_rules()
+        self.assertNotIn('11и', normalized_rules['base_codes'])
+        self.assertNotIn('9и', normalized_rules['base_codes'])
+        self.assertIn('11И', normalized_rules['base_codes'])
+        self.assertIn('9И', normalized_rules['base_codes'])
+        self.assertEqual(
+            manticore.parse_dogovor('2026-СД-0001-11и', normalized_rules),
+            manticore.parse_dogovor('2026-СД-0001-11И', normalized_rules),
+        )
+        self.assertEqual(
+            manticore.parse_dogovor('2026-ЛД-0002-9и', normalized_rules),
+            manticore.parse_dogovor('2026-ЛД-0002-9И', normalized_rules),
+        )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        for path in ('/abiturients', '/manual_create'):
+            response = client.get(path)
+            body = response.get_data(as_text=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('value="11и"', body)
+            self.assertNotIn('value="9и"', body)
+            self.assertIn('value="11И"', body)
+            self.assertIn('value="9И"', body)
+
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                ('Старый Тест Запись', '2026-СД-0003-11и', 'old001', '2026', 'Старый', 'Тест Запись')
+            )
+        filtered_rows = manticore.get_all_abiturients(base='11И', campaign_year='2026')
+        self.assertTrue(any(row['login'] == 'old001' for row in filtered_rows))
+
+        file_path = self.make_abiturients_file([
+            {'ФИО': 'Новый Один Тестович', 'Договор': '2026-СД-0001-11и'},
+            {'ФИО': 'Новый Два Тестович', 'Договор': '2026-ЛД-0002-9и'},
+        ], filename='lowercase_i.xlsx')
+
+        plan_df, summary = manticore.build_abiturients_import_plan(file_path, '2026')
+
+        self.assertEqual(summary['ready_count'], 2)
+        self.assertEqual(plan_df['Договор'].tolist(), ['2026-СД-0001-11И', '2026-ЛД-0002-9И'])
+
+        result_path, summary = manticore.apply_abiturients_import(file_path, '2026')
+        self.assertEqual(summary['ready_count'], 2)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            stored_dogovors = {
+                row[0]
+                for row in conn.execute("SELECT dogovor FROM abiturients WHERE login IN ('26311i001', '2619i001')")
+            }
+        self.assertEqual(stored_dogovors, {'2026-СД-0001-11И', '2026-ЛД-0002-9И'})
+        os.remove(result_path)
+
     def test_admin_is_redirected_to_setup_until_login_rules_are_saved(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             conn.execute('DELETE FROM login_generation_settings')
