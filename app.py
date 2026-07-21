@@ -248,7 +248,6 @@ spec_codes = {
 base_codes = {
     "2НМ": "inm", "2М": "im",
     "НМ": "nm", "М": "im",
-    "11и": "11i", "9и": "9i",
     "11И": "11i", "9И": "9i",
     "11": "11", "9": "9", 
 }
@@ -273,14 +272,34 @@ DEFAULT_LOGIN_GENERATION_RULES = {
 def get_default_login_generation_rules():
     return copy.deepcopy(DEFAULT_LOGIN_GENERATION_RULES)
 
+def canonicalize_base_label(label):
+    label = str(label or '').strip()
+    folded = label.casefold()
+    if folded == '11и':
+        return '11И'
+    if folded == '9и':
+        return '9И'
+    return label
+
+def normalize_base_codes_mapping(mapping):
+    normalized = {}
+    for label, code in (mapping or {}).items():
+        label = canonicalize_base_label(label)
+        if label:
+            normalized[label] = str(code).strip()
+    return normalized
+
 def merge_login_generation_rules(raw_rules=None):
     rules = get_default_login_generation_rules()
     if isinstance(raw_rules, dict):
         for key, value in raw_rules.items():
-            if key in {'spec_codes', 'base_codes'} and isinstance(value, dict):
+            if key == 'base_codes' and isinstance(value, dict):
+                rules[key] = normalize_base_codes_mapping(value)
+            elif key == 'spec_codes' and isinstance(value, dict):
                 rules[key] = {str(k).strip(): str(v).strip() for k, v in value.items() if str(k).strip()}
             elif key in rules:
                 rules[key] = value
+    rules['base_codes'] = normalize_base_codes_mapping(rules.get('base_codes'))
     rules['mode'] = 'custom' if rules.get('mode') == 'custom' else 'standard'
     rules['template'] = str(rules.get('template') or DEFAULT_LOGIN_GENERATION_RULES['template']).strip()
     try:
@@ -491,11 +510,16 @@ _dogovor_latin_lookalikes = str.maketrans({
     'X': 'Х',
 })
 _dogovor_dash_re = re.compile(r'[\u2010-\u2015\u2212]')
+_dogovor_individual_base_re = re.compile(r'\b(9|11)[иi]\b', re.IGNORECASE)
 
 def normalize_dogovor_text(dogovor):
     normalized = str(dogovor or '').strip()
     normalized = _dogovor_dash_re.sub('-', normalized).replace(' ', '-')
     return normalized.upper().translate(_dogovor_latin_lookalikes)
+
+def normalize_dogovor_storage_text(dogovor):
+    value = str(dogovor or '').strip()
+    return _dogovor_individual_base_re.sub(lambda match: f'{match.group(1)}И', value)
 
 def find_mapped_code(normalized_text, mapping):
     for label, code in sorted((mapping or {}).items(), key=lambda item: len(item[0]), reverse=True):
@@ -2134,6 +2158,7 @@ def is_fio_duplicate(fam, campaign_year=None):
         return cur.fetchall()
 
 def save_abiturient(fio, dogovor, login, fam, imotch, campaign_year=None):
+    dogovor = normalize_dogovor_storage_text(dogovor)
     campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     if is_login_exists(login, campaign_year):
         raise sqlite3.IntegrityError(f'Login already exists: {login}')
@@ -2145,6 +2170,7 @@ def save_abiturient(fio, dogovor, login, fam, imotch, campaign_year=None):
         conn.commit()
 
 def save_pending_duplicate(fio, dogovor, login, fam, imotch, campaign_year=None):
+    dogovor = normalize_dogovor_storage_text(dogovor)
     campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -2154,6 +2180,7 @@ def save_pending_duplicate(fio, dogovor, login, fam, imotch, campaign_year=None)
         conn.commit()
 
 def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
+    dogovor = normalize_dogovor_storage_text(dogovor)
     campaign_year = normalize_campaign_year(campaign_year, infer_campaign_year(dogovor))
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -2322,7 +2349,7 @@ def build_abiturients_import_plan(file_path, campaign_year=None):
     df = df.copy()
     df['_row_number'] = range(2, len(df) + 2)
     df['ФИО'] = df['ФИО'].apply(clean_upload_text)
-    df['Договор'] = df['Договор'].apply(clean_upload_text)
+    df['Договор'] = df['Договор'].apply(lambda value: normalize_dogovor_storage_text(clean_upload_text(value)))
 
     fio_split = df['ФИО'].str.split(' ', n=2, expand=True)
     for column_index in range(3):
@@ -3224,6 +3251,20 @@ def abiturients():
     years = get_campaign_years()
     return render_template('abiturients.html', abiturients=abiturients, order_by=order_by, order_dir=order_dir, specs=specs, bases=bases, years=years, campaign_year=campaign_year)
 
+def base_filter_variants(base):
+    value = str(base or '').strip()
+    if not value:
+        return []
+    variants = [value]
+    canonical = canonicalize_base_label(value)
+    if canonical and canonical not in variants:
+        variants.append(canonical)
+    if canonical in {'11И', '9И'}:
+        lowercase_alias = f'{canonical[:-1]}и'
+        if lowercase_alias not in variants:
+            variants.append(lowercase_alias)
+    return variants
+
 def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base=None, year=None, is_i=None, campaign_year=None, has_email=None, has_paid=None, q=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     valid_columns = {'id', 'fio', 'dogovor', 'login', 'campaign_year', 'fam', 'imotch', 'created_at', 'email', 'paid'}
@@ -3237,8 +3278,9 @@ def get_all_abiturients(order_by='created_at', order_dir='desc', spec=None, base
         query += " AND dogovor LIKE ?"
         params.append(f"%{spec}%")
     if base:
-        query += " AND dogovor LIKE ?"
-        params.append(f"%{base}%")
+        variants = base_filter_variants(base)
+        query += " AND (" + " OR ".join("dogovor LIKE ?" for _ in variants) + ")"
+        params.extend(f"%{variant}%" for variant in variants)
     if year:
         query += " AND dogovor LIKE ?"
         params.append(f"%{year}%")
