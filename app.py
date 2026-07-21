@@ -59,7 +59,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
-APP_VERSION = os.environ.get('APP_VERSION', '1.0.7')
+APP_VERSION = os.environ.get('APP_VERSION', '1.0.8')
 ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
 HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
 HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
