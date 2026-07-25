@@ -23,8 +23,8 @@
         <option value="0" {% if user[3] == 0 %}selected{% endif %}>Ожидает</option>
     </select>
     <div style="display:flex; justify-content:center; gap:10px;">
-        <button type="submit" class="btn" style="width:60%; text-align:center; display:block;">Сохранить</button>
-        <a href="{{ url_for('admin_panel') }}" class="btn btn-danger" style="width:60%; text-align:center; display:block;">Отмена</a>
+        <button type="submit" class="btn" style="flex:1;">Сохранить</button>
+        <a href="{{ url_for('admin_panel') }}" class="btn btn-danger" style="flex:1;">Отмена</a>
     </div>
 </form>
 {% endblock %}

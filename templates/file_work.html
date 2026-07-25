@@ -1,7 +1,33 @@
 {% extends "base.html" %}
-{% block title %}Работа с файлами{% endblock %}
+{% block title %}{{ active_file_section_title or 'Работа с файлами' }}{% endblock %}
 {% block head %}
 <style>
+    .file-work-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: -8px 0 24px 0;
+        max-width: 100%;
+        overflow-x: auto;
+        padding-bottom: 4px;
+    }
+    .file-work-tabs a {
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 8px 12px;
+        border: 1px solid #bfdbfe;
+        border-radius: 6px;
+        background: #fff;
+        color: #1d4ed8;
+        font-weight: 700;
+    }
+    .file-work-tabs a.active,
+    .file-work-tabs a:hover,
+    .file-work-tabs a:focus {
+        background: #dbeafe;
+        color: #1d4ed8;
+    }
     .upload-section {
         margin-bottom: 32px;
     }
@@ -136,6 +162,78 @@
         margin: 0 0 12px 0;
         color: #475569;
     }
+    .order-history {
+        margin-top: 24px;
+        max-width: 1100px;
+    }
+    .order-history h3 {
+        margin: 0 0 12px 0;
+    }
+    .order-history-table-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .order-history-table {
+        min-width: 980px;
+    }
+    .order-history-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+    .order-history-actions form {
+        margin: 0;
+    }
+    .order-history-icon-btn {
+        box-sizing: border-box;
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 38px;
+    }
+    .order-history-icon-btn svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+    }
+    .order-history-empty {
+        max-width: 900px;
+        margin: 12px 0 0 0;
+        color: #64748b;
+    }
+    .fio-suggestion {
+        display: grid;
+        gap: 8px;
+        min-width: 280px;
+        white-space: normal;
+    }
+    .fio-suggestion strong {
+        color: #92400e;
+    }
+    .fio-suggestion-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .fio-suggestion-actions form {
+        margin: 0;
+    }
+    .fio-suggestion-note {
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.35;
+    }
     .updates-report {
         max-width: 900px;
         margin: 16px 0 0 0;
@@ -223,16 +321,25 @@
     {% endif %}
 {% endmacro %}
 
-<h1>Работа с файлами</h1>
+<h1>{{ active_file_section_title or 'Работа с файлами' }}</h1>
 {% include "_campaign_switcher.html" %}
 
-<div class="upload-section">
+<nav class="file-work-tabs" aria-label="Разделы работы с файлами">
+    <a href="{{ url_for('file_work') }}" {% if not active_file_section %}class="active"{% endif %}>Все</a>
+    {% for section in file_work_sections %}
+    <a href="{{ url_for('file_work', section=section.key) }}" {% if active_file_section == section.key %}class="active"{% endif %}>{{ section.title }}</a>
+    {% endfor %}
+</nav>
+
+{% if not active_file_section or active_file_section == 'abiturients' %}
+<div class="upload-section" id="file-section-abiturients">
     <h2>Загрузка абитуриентов</h2>
     <p class="file-hint">Файл абитуриентов должен содержать столбцы <b>ФИО</b> и <b>Договор</b>. Сначала будет показан предпросмотр: договоры проверяются среди абитуриентов, дублей, конфликтов и студентов.</p>
     <p><a href="{{ url_for('download_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон для абитуриентов</a></p>
     <form method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
         <input type="hidden" name="import_action" value="preview">
+        <input type="hidden" name="file_section" value="abiturients">
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <div class="upload-row">
             <label for="file">Загрузить файл абитуриентов (Excel):</label>
@@ -260,6 +367,7 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="import_action" value="confirm">
+                <input type="hidden" name="file_section" value="abiturients">
                 <input type="hidden" name="pending_import" value="{{ pending_import_token }}">
                 <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
                 <button type="submit" class="btn">Подтвердить импорт</button>
@@ -267,6 +375,7 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="import_action" value="cancel">
+                <input type="hidden" name="file_section" value="abiturients">
                 <input type="hidden" name="pending_import" value="{{ pending_import_token }}">
                 <button type="submit" class="btn btn-danger">Отменить</button>
             </form>
@@ -322,15 +431,20 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
 
+{% if not active_file_section %}
 <hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+{% endif %}
 
-<div class="upload-section">
+{% if not active_file_section or active_file_section == 'updates' %}
+<div class="upload-section" id="file-section-updates">
     <h2>Обновление почты и оплаты</h2>
     <p class="file-hint">Файл обновлений должен содержать столбец <b>Договор</b>. Дополнительно можно указать <b>Email</b> или <b>Почта</b>, а также <b>Оплата</b> или <b>paid</b>. Значения оплаты: да/нет, 1/0, оплачен/не оплачен.</p>
     <p><a href="{{ url_for('download_abiturients_updates_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон обновлений</a></p>
     <form action="{{ url_for('abiturients_updates_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
+        <input type="hidden" name="file_section" value="updates">
         <div class="upload-row">
             <label for="updates_file">Загрузить файл обновлений:</label>
             <span class="file-picker">
@@ -343,16 +457,206 @@
     </form>
     {{ render_upload_report(updates_report) }}
 </div>
+{% endif %}
 
+{% if not active_file_section %}
 <hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+{% endif %}
 
-<div class="upload-section">
+{% if not active_file_section or active_file_section == 'orders' %}
+<div class="upload-section" id="file-section-orders">
+    <h2>Приказ о зачислении</h2>
+    <p class="file-hint">Приказ сверяется с кандидатами к зачислению по <b>ФИО</b> и <b>Специальности</b>. Если в приказе есть <b>Группа</b>, при переносе в студенты нужно будет выбрать эту же группу.</p>
+    <p><a href="{{ url_for('download_enrollment_order_template') }}" class="btn btn-secondary upload-template-link">Скачать шаблон приказа</a></p>
+    <form action="{{ url_for('enrollment_order_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+        {% include "_csrf_field.html" %}
+        <input type="hidden" name="order_import_action" value="preview">
+        <input type="hidden" name="file_section" value="orders">
+        <div class="upload-row">
+            <label for="order_file">Загрузить приказ:</label>
+            <span class="file-picker">
+                <input type="file" name="order_file" id="order_file" accept=".xlsx,.xls,.csv,.docx,.pdf" required data-file-name-target="order_file_name">
+                <label for="order_file" class="file-picker-button">Выберите файл</label>
+                <span id="order_file_name" class="file-picker-name">Файл не выбран</span>
+            </span>
+            <button type="submit" class="btn">Проверить приказ</button>
+        </div>
+    </form>
+    {{ render_upload_report(order_report) }}
+    {% if enrollment_order_preview %}
+    <div class="import-preview">
+        <h3>Предпросмотр приказа</h3>
+        <div class="preview-stats">
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.total }}</strong>Всего строк</div>
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.import_count }}</strong>Будет загружено</div>
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.matched_count }}</strong>Совпало</div>
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.unmatched_count }}</strong>Без кандидата</div>
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.fio_suggestion_count or 0 }}</strong>Похожих ФИО</div>
+            <div class="preview-stat"><strong>{{ enrollment_order_preview.skipped_count }}</strong>Пропуск</div>
+        </div>
+        <p class="preview-note">После подтверждения приказ добавится в журнал текущей кампании, а кандидаты получат новый статус сверки.</p>
+        <div class="preview-actions">
+            <form method="post" action="{{ url_for('enrollment_order_upload') }}">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="order_import_action" value="confirm">
+                <input type="hidden" name="file_section" value="orders">
+                <input type="hidden" name="pending_enrollment_order_import" value="{{ pending_enrollment_order_import_token }}">
+                <button type="submit" class="btn" {% if enrollment_order_preview.import_count == 0 %}disabled{% endif %}>Подтвердить приказ</button>
+            </form>
+            <form method="post" action="{{ url_for('enrollment_order_upload') }}">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="order_import_action" value="cancel">
+                <input type="hidden" name="file_section" value="orders">
+                <input type="hidden" name="pending_enrollment_order_import" value="{{ pending_enrollment_order_import_token }}">
+                <button type="submit" class="btn btn-danger">Отменить</button>
+            </form>
+        </div>
+        <div class="preview-table-wrap">
+            <table style="min-width: 1380px;">
+                <thead>
+                    <tr>
+                        <th>Строка</th>
+                        <th>ФИО</th>
+                        <th>Специальность</th>
+                        <th>Группа</th>
+                        <th>Номер приказа</th>
+                        <th>Дата приказа</th>
+                        <th>Действие</th>
+                        <th>Статус</th>
+                        <th>Проверка ФИО</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in enrollment_order_preview_rows %}
+                    <tr>
+                        <td>{{ row['_row_number'] }}</td>
+                        <td>{{ row['ФИО'] }}</td>
+                        <td>{{ row['Специальность'] }}</td>
+                        <td>{{ row['Группа'] or '-' }}</td>
+                        <td>{{ row['Номер приказа'] or '-' }}</td>
+                        <td>{{ row['Дата приказа'] or '-' }}</td>
+                        <td><span class="status-badge {{ row.badge_class }}">{{ row.action_label }}</span></td>
+                        <td><span class="status-badge {{ row.badge_class }}">{{ row.import_status }}</span></td>
+                        <td>
+                            {% if row.has_fio_suggestion %}
+                            <div class="fio-suggestion">
+                                {% if row.fio_review_reason == 'source_mismatch' %}
+                                <strong>В основной базе: {{ row.suggested_candidate_fio }}. В кандидате: {{ row.suggested_candidate_actual_fio }}.</strong>
+                                {% else %}
+                                <strong>Похоже на базу: {{ row.suggested_candidate_fio }} ({{ row.suggested_candidate_similarity }}%)</strong>
+                                {% endif %}
+                                <span class="fio-suggestion-note">
+                                    Логин: {{ row.suggested_candidate_login or '-' }}{% if row.suggested_candidate_dogovor %}; договор: {{ row.suggested_candidate_dogovor }}{% endif %}.
+                                </span>
+                                <div class="fio-suggestion-actions">
+                                    <form method="post" action="{{ url_for('fix_enrollment_candidate_fio_from_order') }}">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="file_section" value="orders">
+                                        <input type="hidden" name="pending_enrollment_order_import" value="{{ pending_enrollment_order_import_token }}">
+                                        <input type="hidden" name="row_number" value="{{ row['_row_number'] }}">
+                                        <input type="hidden" name="candidate_id" value="{{ row.suggested_candidate_id }}">
+                                        <button type="submit" class="btn btn-secondary">Исправить базу по приказу</button>
+                                    </form>
+                                </div>
+                                <span class="fio-suggestion-note">Если ошибка в приказе: исправьте в файле на “{{ row.suggested_candidate_fio }}” и загрузите приказ заново.</span>
+                            </div>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    <div class="order-history">
+        <h3>Загруженные приказы</h3>
+        {% if enrollment_order_uploads %}
+        <div class="order-history-table-wrap">
+            <table class="order-history-table">
+                <thead>
+                    <tr>
+                        <th>Дата загрузки</th>
+                        <th>Файл</th>
+                        <th>Номера приказов</th>
+                        <th>Даты приказов</th>
+                        <th>Строки</th>
+                        <th>Совпало</th>
+                        <th>Активно</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for upload in enrollment_order_uploads %}
+                    <tr>
+                        <td>{{ upload.created_at or '-' }}</td>
+                        <td>{{ upload.original_filename or ('Приказ #' ~ upload.id) }}</td>
+                        <td>{{ upload.order_numbers or '-' }}</td>
+                        <td>{{ upload.order_dates or '-' }}</td>
+                        <td>{{ upload.import_count }}</td>
+                        <td>{{ upload.matched_count }}</td>
+                        <td>{{ upload.active_count }}</td>
+                        <td>
+                            <div class="order-history-actions">
+                                <a href="{{ url_for('enrollment_order_upload_detail', upload_id=upload.id) }}" class="btn btn-secondary order-history-icon-btn" aria-label="Просмотр приказа" title="Просмотр приказа">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                        <path d="M14 2v6h6"></path>
+                                        <circle cx="11" cy="14" r="3"></circle>
+                                        <path d="m13.5 16.5 2 2"></path>
+                                    </svg>
+                                </a>
+                                {% if upload.stored_filename %}
+                                <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-secondary order-history-icon-btn" aria-label="Скачать приказ" title="Скачать приказ">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <path d="M7 10l5 5 5-5"></path>
+                                        <path d="M12 15V3"></path>
+                                    </svg>
+                                </a>
+                                {% endif %}
+                                <form method="post" action="{{ url_for('delete_enrollment_order_upload_route', upload_id=upload.id) }}" onsubmit="return confirm('Удалить этот приказ из сверки? Статусы кандидатов будут пересчитаны.');">
+                                    {% include "_csrf_field.html" %}
+                                    <input type="hidden" name="file_section" value="orders">
+                                    <button type="submit" class="btn btn-danger order-history-icon-btn" aria-label="Удалить приказ" title="Удалить приказ">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M3 6h18"></path>
+                                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                            <path d="M10 11v6"></path>
+                                            <path d="M14 11v6"></path>
+                                        </svg>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="order-history-empty">По этой приемной кампании приказы еще не загружены.</p>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if not active_file_section %}
+<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+{% endif %}
+
+{% if not active_file_section or active_file_section == 'students' %}
+<div class="upload-section" id="file-section-students">
     <h2>Загрузка студентов</h2>
     <p class="file-hint">Файл студентов должен содержать <b>username, password, email, firstname, lastname, cohort1</b>. Можно добавить необязательные поля <b>source_dogovor</b> и <b>source_fio</b>, чтобы студенты участвовали в проверке договоров.</p>
     <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-secondary upload-template-link">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
         <input type="hidden" name="students_import_action" value="preview">
+        <input type="hidden" name="file_section" value="students">
         <div class="upload-row">
             <label for="students_file">Загрузить файл студентов (Excel или CSV):</label>
             <span class="file-picker">
@@ -378,12 +682,14 @@
             <form method="post" action="{{ url_for('students_upload') }}">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="students_import_action" value="confirm">
+                <input type="hidden" name="file_section" value="students">
                 <input type="hidden" name="pending_students_import" value="{{ pending_students_import_token }}">
                 <button type="submit" class="btn">Подтвердить загрузку студентов</button>
             </form>
             <form method="post" action="{{ url_for('students_upload') }}">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="students_import_action" value="cancel">
+                <input type="hidden" name="file_section" value="students">
                 <input type="hidden" name="pending_students_import" value="{{ pending_students_import_token }}">
                 <button type="submit" class="btn btn-danger">Отменить</button>
             </form>
@@ -431,6 +737,7 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
 <script>
 document.querySelectorAll('.file-picker input[type="file"]').forEach(function(input) {
     const target = document.getElementById(input.dataset.fileNameTarget);

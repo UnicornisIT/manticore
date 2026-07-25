@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Просмотр приказа{% endblock %}
+{% block head %}
+<style>
+    .order-detail-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .order-detail-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .order-detail-actions form {
+        margin: 0;
+    }
+    .order-summary {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 18px 0;
+    }
+    .order-summary-item {
+        min-width: 130px;
+        padding: 10px 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .order-summary-item strong {
+        display: block;
+        color: #2563eb;
+        font-size: 20px;
+    }
+    .order-meta {
+        margin: 0;
+        color: #475569;
+        line-height: 1.5;
+    }
+    .order-rows-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .order-rows-table {
+        min-width: 1100px;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="order-detail-header">
+    <div>
+        <h1>Просмотр приказа</h1>
+        <p class="order-meta">
+            {{ upload.original_filename or ('Приказ #' ~ upload.id) }}<br>
+            Загружен: {{ upload.created_at or '-' }}{% if upload.uploaded_by %}, пользователь: {{ upload.uploaded_by }}{% endif %}<br>
+            Номера приказов: {{ upload.order_numbers or '-' }}. Даты приказов: {{ upload.order_dates or '-' }}.
+        </p>
+    </div>
+    <div class="order-detail-actions">
+        <a href="{{ url_for('file_work', section='orders') }}" class="btn btn-secondary">Назад</a>
+        {% if upload.stored_filename %}
+        <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-secondary">Скачать файл</a>
+        {% endif %}
+        <form method="post" action="{{ url_for('delete_enrollment_order_upload_route', upload_id=upload.id) }}" onsubmit="return confirm('Удалить этот приказ из сверки? Статусы кандидатов будут пересчитаны.');">
+            {% include "_csrf_field.html" %}
+            <button type="submit" class="btn btn-danger">Удалить</button>
+        </form>
+    </div>
+</div>
+
+<div class="order-summary">
+    <div class="order-summary-item"><strong>{{ upload.total_count }}</strong>Всего строк</div>
+    <div class="order-summary-item"><strong>{{ upload.import_count }}</strong>Загружено</div>
+    <div class="order-summary-item"><strong>{{ upload.matched_count }}</strong>Совпало</div>
+    <div class="order-summary-item"><strong>{{ upload.unmatched_count }}</strong>Без кандидата</div>
+    <div class="order-summary-item"><strong>{{ upload.duplicate_count }}</strong>Повторов</div>
+    <div class="order-summary-item"><strong>{{ upload.skipped_count }}</strong>Пропуск</div>
+</div>
+
+<div class="order-rows-wrap">
+    <table class="order-rows-table">
+        <thead>
+            <tr>
+                <th>Строка</th>
+                <th>ФИО</th>
+                <th>Специальность</th>
+                <th>Группа</th>
+                <th>Номер приказа</th>
+                <th>Дата приказа</th>
+                <th>Действие</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.fio }}</td>
+                <td>{{ row.specialty }}</td>
+                <td>{{ row.group_name or '-' }}</td>
+                <td>{{ row.order_number or '-' }}</td>
+                <td>{{ row.order_date or '-' }}</td>
+                <td><span class="status-badge {{ row.badge_class }}">{{ row.action_label }}</span></td>
+                <td><span class="status-badge {{ row.badge_class }}">{{ row.import_status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

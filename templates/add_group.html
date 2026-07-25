@@ -110,41 +110,9 @@
     .groups-table-actions .btn,
     .groups-panel-top .btn {
         box-sizing: border-box;
-        height: 36px;
+        min-height: 38px;
         min-width: 104px;
         margin: 0;
-        padding: 0 16px;
-        border-radius: 6px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-        font-weight: 600;
-        text-align: center;
-    }
-    .groups-btn-secondary {
-        background: #e5e7eb;
-        color: #1f2937;
-    }
-    .groups-btn-secondary:hover,
-    .groups-btn-secondary:focus {
-        background: #d1d5db;
-    }
-    .groups-btn-danger {
-        background: #dc2626;
-        color: #fff;
-    }
-    .groups-btn-danger:hover,
-    .groups-btn-danger:focus {
-        background: #b91c1c;
-    }
-    .groups-btn-muted {
-        background: #64748b;
-        color: #fff;
-    }
-    .groups-btn-muted:hover,
-    .groups-btn-muted:focus {
-        background: #475569;
     }
     .groups-table-wrap {
         overflow-x: auto;
@@ -221,7 +189,7 @@
                 <input type="checkbox" name="show_hidden" value="1" onchange="this.form.submit()" {% if show_hidden %}checked{% endif %}>
                 Показать скрытые
             </label>
-            <a href="{{ url_for('admin_panel') }}" class="btn groups-btn-secondary">Назад</a>
+            <a href="{{ url_for('admin_panel') }}" class="btn btn-secondary">Назад</a>
         </form>
 
         <div class="groups-layout">
@@ -256,7 +224,7 @@
                     </select>
                 </div>
                 <div class="groups-actions">
-                    <button type="submit" class="btn" {% if not visible_groups %}disabled{% endif %}>Создать следующую</button>
+                    <button type="submit" class="btn" {% if not visible_groups %}disabled{% endif %}>Создать подгруппу</button>
                 </div>
             </form>
 
@@ -271,7 +239,7 @@
                     <input type="file" id="groups_file" name="groups_file" accept=".csv" required>
                 </div>
                 <div class="groups-actions">
-                    <a href="{{ url_for('download_groups_template', group_year=group_year) }}" class="btn groups-btn-secondary">Скачать шаблон</a>
+                    <a href="{{ url_for('download_groups_template', group_year=group_year) }}" class="btn btn-secondary">Скачать шаблон</a>
                     <button type="submit" class="btn">Загрузить</button>
                 </div>
             </form>
@@ -323,7 +291,7 @@
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="show">
                                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-                                <button type="submit" class="btn groups-btn-muted">Показать</button>
+                                <button type="submit" class="btn btn-muted">Показать</button>
                             </form>
                             {% else %}
                             <form method="post">
@@ -332,7 +300,7 @@
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="hide">
                                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-                                <button type="submit" class="btn groups-btn-secondary">Скрыть</button>
+                                <button type="submit" class="btn btn-secondary">Скрыть</button>
                             </form>
                             {% endif %}
                             <form method="post" onsubmit="return confirm('Удалить группу {{ group.name }}?');">
@@ -341,7 +309,7 @@
                                 <input type="hidden" name="group_name" value="{{ group.name }}">
                                 <input type="hidden" name="group_action" value="delete">
                                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-                                <button type="submit" class="btn groups-btn-danger">Удалить</button>
+                                <button type="submit" class="btn btn-danger">Удалить</button>
                             </form>
                         </td>
                     </tr>

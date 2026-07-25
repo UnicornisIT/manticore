@@ -51,9 +51,15 @@
 </style>
 {% endblock %}
 {% block content %}
+{% macro sort_link(column, label) -%}
+    {% set next_dir = 'desc' if order_by == column and order_dir == 'asc' else 'asc' %}
+    <a href="{{ url_for_with_query('students_list', order_by=column, order_dir=next_dir) }}">{{ label }}{% if order_by == column %} {{ '↑' if order_dir == 'asc' else '↓' }}{% endif %}</a>
+{%- endmacro %}
 <h1>Список студентов</h1>
 <form method="get" action="{{ url_for('students_list') }}" class="students-filter">
     <div class="students-filter-row">
+        <input type="hidden" name="order_by" value="{{ order_by }}">
+        <input type="hidden" name="order_dir" value="{{ order_dir }}">
         <input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
         <input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
         <input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
@@ -74,12 +80,12 @@
 <table>
     <thead>
         <tr>
-            <th>Логин</th>
+            <th>{{ sort_link('username', 'Логин') }}</th>
             <th>Пароль</th>
-            <th>Email</th>
-            <th>Фамилия</th>
-            <th>Имя</th>
-            <th>Группа</th>
+            <th>{{ sort_link('email', 'Email') }}</th>
+            <th>{{ sort_link('lastname', 'Фамилия') }}</th>
+            <th>{{ sort_link('firstname', 'Имя') }}</th>
+            <th>{{ sort_link('cohort1', 'Группа') }}</th>
             {% if session.get('role') == 'admin' %}
             <th>Действия</th>
             {% endif %}
@@ -117,11 +123,11 @@
             </td>
             {% if session.get('role') == 'admin' %}
             <td>
-                <a href="{{ url_for('edit_student', username=s['username']) }}">Редактировать</a>
+                <a href="{{ url_for('edit_student', username=s['username']) }}" class="btn btn-secondary btn-small">Редактировать</a>
                 <form method="post" action="{{ url_for('delete_student') }}" style="display:inline;" onsubmit="return confirm('Удалить студента?');">
                     {% include "_csrf_field.html" %}
                     <input type="hidden" name="username" value="{{ s['username'] }}">
-                    <button type="submit">Удалить</button>
+                    <button type="submit" class="btn btn-danger btn-small">Удалить</button>
                 </form>
             </td>
             {% endif %}

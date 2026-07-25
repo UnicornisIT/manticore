@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Миграция абитуриентов в студенты{% endblock %}
+{% block title %}Сверка и перенос в студенты{% endblock %}
 {% block head %}
 <style>
     .sort-button {
@@ -35,35 +35,45 @@
         opacity: 1;
     }
     .migration-form {
-        max-width: 980px;
+        max-width: 1180px;
         margin: 0 auto 140px auto;
         background: #f3f6fa;
         padding: 28px 32px 22px 32px;
         border-radius: 8px;
         box-shadow: 0 2px 8px #e5e7eb;
     }
-    .migration-controls {
-        margin-bottom: 18px;
+    .stage-panel {
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
-        align-items: flex-end;
+        align-items: center;
+        margin-bottom: 18px;
     }
+    .stage-note {
+        flex: 1 1 360px;
+        margin: 0;
+        color: #475569;
+        line-height: 1.4;
+        white-space: normal;
+    }
+    .migration-controls,
     .group-folder-form {
+        margin-bottom: 18px;
         display: flex;
         gap: 12px;
-        align-items: flex-end;
         flex-wrap: wrap;
-        margin-bottom: 18px;
+        align-items: flex-end;
     }
     .migration-controls select,
     .group-folder-form select,
-    .migration-controls .btn {
+    .migration-controls .btn,
+    .stage-panel .btn {
         box-sizing: border-box;
-        height: 36px;
+        min-height: 38px;
         margin: 0;
     }
-    .migration-controls .btn {
+    .migration-controls .btn,
+    .stage-panel .btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -73,7 +83,7 @@
         margin-bottom: 18px;
     }
     .migration-table-wrapper {
-        max-height: clamp(220px, calc(100vh - 600px), 360px);
+        max-height: clamp(260px, calc(100vh - 620px), 420px);
         overflow: auto;
         border: 1px solid #e5e7eb;
         border-radius: 6px;
@@ -87,6 +97,14 @@
         color: #64748b;
         margin: 0 0 18px 0;
     }
+    .order-warning {
+        margin: 0 0 18px 0;
+        padding: 10px 12px;
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        background: #fffbeb;
+        color: #92400e;
+    }
     @media (max-width: 700px) {
         .migration-form {
             padding: 18px 16px 20px 16px;
@@ -98,10 +116,24 @@
 </style>
 {% endblock %}
 {% block content %}
-<h2>Миграция абитуриентов в студенты</h2>
+<h2>Сверка и перенос в студенты</h2>
 {% include "_campaign_switcher.html" %}
 
 <div class="migration-form">
+    <div class="stage-panel">
+        <form method="post" action="{{ url_for('enrollment_candidates_sync') }}">
+            {% include "_csrf_field.html" %}
+            <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+            <input type="hidden" name="group_year" value="{{ group_year }}">
+            <button type="submit" class="btn">1. Обновить кандидатов</button>
+        </form>
+        <p class="stage-note">Кандидаты формируются из абитуриентов с почтой и оплатой. Перенос в студенты доступен только после совпадения с приказом о зачислении.</p>
+    </div>
+
+    {% if order_total == 0 %}
+    <p class="order-warning">Приказ текущей кампании ещё не загружен. Кандидатов можно подготовить, но создать студентов получится только после сверки с приказом.</p>
+    {% endif %}
+
     <form method="get" class="group-folder-form">
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <div>
@@ -112,85 +144,99 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label for="specialty" style="font-weight: 500; display:block; margin-bottom:6px;">Специальность:</label>
+            <select name="specialty" id="specialty" onchange="this.form.submit()" style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:220px;">
+                <option value="">Все специальности</option>
+                {% for specialty in specialties %}
+                <option value="{{ specialty.key }}" {% if specialty.key == selected_specialty %}selected{% endif %}>{{ specialty.name }} ({{ specialty.count }})</option>
+                {% endfor %}
+            </select>
+        </div>
     </form>
 
-    {% if not groups %}
-    <p class="groups-empty">В папке {{ group_year }} пока нет академических групп.</p>
+    {% if not suggested_groups %}
+    <p class="groups-empty">Для выбранной специальности в папке {{ group_year }} пока нет подходящих академических групп.</p>
     {% endif %}
 
     <form method="post" target="_blank" rel="noopener">
         {% include "_csrf_field.html" %}
-    <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-    <input type="hidden" name="group_year" value="{{ group_year }}">
-    <div class="migration-controls">
-        <div>
-            <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
-            <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:220px;">
-                <option value="">Выберите группу</option>
-                {% for group in groups %}
-                <option value="{{ group.name }}" {% if group.is_full %}disabled{% endif %}>
-                    {{ group.name }} ({{ group.fill }}){% if group.is_full %} - заполнена{% endif %}
-                </option>
-                {% endfor %}
-            </select>
-        </div>
-        {% if session.get('role') == 'admin' %}
-            <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
-        {% endif %}
-        <label style="display:inline-flex; align-items:center; gap:8px; font-weight:500; height:36px;">
-            <input type="checkbox" name="auto_split" value="1">
-            Автораспределить по подгруппам
-        </label>
-    </div>
-
-    <div class="migration-table-block">
-        <label style="font-weight: 500;">Абитуриенты:</label>
-        <div class="migration-table-wrapper">
-            <table style="min-width: 760px;">
-                <thead>
-                    <tr>
-                        <th style="width:44px;">
-                            <input type="checkbox" id="select_all_ready" title="Выбрать всех с почтой">
-                        </th>
-                        <th><button type="button" class="sort-button" data-sort-key="fio">ФИО</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="login">Логин</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="email">Email</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="status">Статус</button></th>
-                    </tr>
-                </thead>
-                <tbody id="abiturients_table_body">
-                    {% for ab in abiturients %}
-                    <tr
-                        data-fio="{{ (ab.fio or '')|lower }}"
-                        data-login="{{ (ab.login or '')|lower }}"
-                        data-email="{{ (ab.email or '')|lower }}"
-                        data-status="{{ 'готов к миграции' if ab.has_email and ab.paid else 'не готов' }}"
-                    >
-                        <td>
-                            <input type="checkbox" name="abiturient_ids" value="{{ ab.id }}" {% if not ab.has_email or not ab.paid %}disabled{% endif %}>
-                        </td>
-                        <td style="white-space: normal; min-width:240px;">{{ ab.fio }}</td>
-                        <td>{{ ab.login }}</td>
-                        <td>{{ ab.email if ab.email else '-' }}</td>
-                        <td>
-                            {% if ab.has_email and ab.paid %}
-                                <span class="status-badge status-success">Готов к миграции</span>
-                            {% elif not ab.has_email %}
-                                <span class="status-badge status-danger">Нет почты</span>
-                            {% else %}
-                                <span class="status-badge status-warning">Не оплачен</span>
-                            {% endif %}
-                        </td>
-                    </tr>
+        <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+        <input type="hidden" name="group_year" value="{{ group_year }}">
+        <input type="hidden" name="specialty" value="{{ selected_specialty }}">
+        <div class="migration-controls">
+            <div>
+                <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
+                <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:240px;">
+                    <option value="">Выберите группу</option>
+                    {% for group in suggested_groups %}
+                    <option value="{{ group.name }}" {% if group.is_full %}disabled{% endif %}>
+                        {{ group.name }} ({{ group.fill }}){% if group.is_full %} - заполнена{% endif %}
+                    </option>
                     {% endfor %}
-                </tbody>
-            </table>
+                </select>
+            </div>
+            {% if session.get('role') == 'admin' %}
+                <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
+            {% endif %}
+            <label style="display:inline-flex; align-items:center; gap:8px; font-weight:500; min-height:38px;">
+                <input type="checkbox" name="auto_split" value="1">
+                Автораспределить по подгруппам
+            </label>
         </div>
-    </div>
 
-    <div class="migration-actions">
-        <button type="submit" class="btn btn-success" {% if not groups %}disabled{% endif %}>Мигрировать выбранных</button>
-    </div>
+        <div class="migration-table-block">
+            <label style="font-weight: 500;">Кандидаты к зачислению:</label>
+            <div class="migration-table-wrapper">
+                <table style="min-width: 980px;">
+                    <thead>
+                        <tr>
+                            <th style="width:44px;">
+                                <input type="checkbox" id="select_all_ready" title="Выбрать всех сверенных">
+                            </th>
+                            <th><button type="button" class="sort-button" data-sort-key="fio">ФИО</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="specialty">Специальность</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="login">Логин</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="email">Email</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="group">Группа по приказу</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="status">Статус</button></th>
+                        </tr>
+                    </thead>
+                    <tbody id="abiturients_table_body">
+                        {% for candidate in candidates %}
+                        <tr
+                            data-fio="{{ (candidate.fio or '')|lower }}"
+                            data-specialty="{{ (candidate.specialty or '')|lower }}"
+                            data-login="{{ (candidate.login or '')|lower }}"
+                            data-email="{{ (candidate.email or '')|lower }}"
+                            data-group="{{ (candidate.order_group_name or '')|lower }}"
+                            data-status="{{ (candidate.status_label or '')|lower }}"
+                        >
+                            <td>
+                                <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" {% if not candidate.can_migrate %}disabled{% endif %}>
+                            </td>
+                            <td style="white-space: normal; min-width:240px;">{{ candidate.fio }}</td>
+                            <td>{{ candidate.specialty }}</td>
+                            <td>{{ candidate.login }}</td>
+                            <td>
+                                {% if candidate.email %}
+                                    <span class="status-badge status-success" title="{{ candidate.email }}">Есть почта</span>
+                                {% else %}
+                                    <span class="status-badge status-danger">Нет почты</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ candidate.order_group_name or '-' }}</td>
+                            <td><span class="status-badge {{ candidate.badge_class }}">{{ candidate.status_label }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="migration-actions">
+            <button type="submit" class="btn btn-success" {% if not suggested_groups %}disabled{% endif %}>2. Перенести сверенных в студенты</button>
+        </div>
     </form>
 </div>
 
@@ -198,7 +244,7 @@
 const selectAllReady = document.getElementById('select_all_ready');
 if (selectAllReady) {
     selectAllReady.addEventListener('change', function() {
-        document.querySelectorAll('input[name="abiturient_ids"]:not(:disabled)').forEach(function(input) {
+        document.querySelectorAll('input[name="candidate_ids"]:not(:disabled)').forEach(function(input) {
             input.checked = selectAllReady.checked;
         });
     });
@@ -221,19 +267,6 @@ sortButtons.forEach(function(button) {
         rows.sort(function(firstRow, secondRow) {
             const firstValue = getSortValue(firstRow, key);
             const secondValue = getSortValue(secondRow, key);
-            const firstMissing = key === 'email' && !firstValue;
-            const secondMissing = key === 'email' && !secondValue;
-
-            if (firstMissing && secondMissing) {
-                return 0;
-            }
-            if (firstMissing) {
-                return 1;
-            }
-            if (secondMissing) {
-                return -1;
-            }
-
             const result = firstValue.localeCompare(secondValue, 'ru', {
                 numeric: true,
                 sensitivity: 'base',

@@ -16,7 +16,7 @@
     }
     .metric-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
         margin-bottom: 22px;
     }
@@ -158,7 +158,10 @@
 
 <div class="metric-grid">
     <div class="metric"><strong>{{ dashboard.abiturients_total }}</strong><span>Абитуриентов</span></div>
-    <div class="metric"><strong>{{ dashboard.ready }}</strong><span>Готовы к миграции</span></div>
+    <div class="metric"><strong>{{ dashboard.ready }}</strong><span>Готовы к кандидатам</span></div>
+    <div class="metric"><strong>{{ dashboard.candidate_total }}</strong><span>Кандидатов к зачислению</span></div>
+    <div class="metric"><strong>{{ dashboard.candidate_verified }}</strong><span>Сверены приказом</span></div>
+    <div class="metric"><strong>{{ dashboard.order_total }}</strong><span>Строк в приказе</span></div>
     <div class="metric"><strong>{{ dashboard.students_total }}</strong><span>Студентов</span></div>
     <div class="metric"><strong>{{ dashboard.groups|length }}</strong><span>Групп</span></div>
 </div>

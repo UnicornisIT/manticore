@@ -186,6 +186,64 @@
         .nav-dropdown-panel a + a {
             margin-top: 2px;
         }
+        .nav-dropdown-panel > * + * {
+            margin-top: 2px;
+        }
+        .nav-submenu {
+            position: relative;
+        }
+        .nav-submenu-main {
+            box-sizing: border-box;
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-submenu-caret {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            transform: rotate(-90deg);
+        }
+        .nav-submenu-panel {
+            position: absolute;
+            top: -6px;
+            left: calc(100% - 1px);
+            z-index: 60;
+            display: none;
+            min-width: 270px;
+            padding: 6px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
+        }
+        .nav-submenu:hover .nav-submenu-panel,
+        .nav-submenu:focus-within .nav-submenu-panel {
+            display: block;
+        }
+        .nav-submenu-panel a + a {
+            margin-top: 2px;
+        }
+        @media (max-width: 900px) {
+            .nav-submenu-panel {
+                position: static;
+                display: block;
+                min-width: 0;
+                margin: 6px 0 0 0;
+                padding: 6px;
+                box-shadow: none;
+                background: #f8fafc;
+            }
+            .nav-submenu-caret {
+                transform: none;
+            }
+        }
         .nav-dropdown-caret {
             width: 14px;
             height: 14px;
@@ -302,30 +360,93 @@
             background: #f3f4f6;
             font-weight: 600;
         }
-        button, .btn, input[type="submit"] {
-            background: #3b82f6;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 8px 18px;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-            margin: 2px 0;
+        .btn, input[type="submit"] {
+            --btn-bg: #3b82f6;
+            --btn-bg-hover: #2563eb;
+            --btn-color: #fff;
+            --btn-border: transparent;
+            --btn-focus: rgba(59, 130, 246, 0.22);
+            appearance: none;
+            box-sizing: border-box;
+            min-height: 38px;
+            min-width: 100px;
+            margin: 0;
+            padding: 0 18px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 100px;
-            box-sizing: border-box;
-            line-height: 1.2;
+            gap: 8px;
+            border: 1px solid var(--btn-border);
+            border-radius: 6px;
+            background: var(--btn-bg);
+            color: var(--btn-color);
+            cursor: pointer;
+            font: inherit;
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.15;
             text-align: center;
+            text-decoration: none;
+            white-space: nowrap;
+            vertical-align: middle;
+            transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.06s ease;
+        }
+        .btn:hover, input[type="submit"]:hover,
+        .btn:focus, input[type="submit"]:focus {
+            background: var(--btn-bg-hover);
+            color: var(--btn-color);
+            text-decoration: none;
+        }
+        .btn:focus-visible, input[type="submit"]:focus-visible {
+            outline: 0;
+            box-shadow: 0 0 0 3px var(--btn-focus);
+        }
+        .btn:active, input[type="submit"]:active {
+            transform: translateY(1px);
+        }
+        .btn:disabled, .btn[aria-disabled="true"], input[type="submit"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.62;
+            transform: none;
+        }
+        .btn-secondary {
+            --btn-bg: #fff;
+            --btn-bg-hover: #eff6ff;
+            --btn-color: #1d4ed8;
+            --btn-border: #bfdbfe;
+            --btn-focus: rgba(59, 130, 246, 0.18);
         }
         .btn-danger {
-            background: #ef4444;
+            --btn-bg: #ef4444;
+            --btn-bg-hover: #dc2626;
+            --btn-color: #fff;
+            --btn-border: transparent;
+            --btn-focus: rgba(239, 68, 68, 0.22);
         }
-        .btn-danger:hover {
-            background: #b91c1c;
+        .btn-success {
+            --btn-bg: #16a34a;
+            --btn-bg-hover: #15803d;
+            --btn-color: #fff;
+            --btn-border: transparent;
+            --btn-focus: rgba(22, 163, 74, 0.2);
+        }
+        .btn-muted {
+            --btn-bg: #64748b;
+            --btn-bg-hover: #475569;
+            --btn-color: #fff;
+            --btn-border: transparent;
+            --btn-focus: rgba(100, 116, 139, 0.22);
+        }
+        .btn-small {
+            min-height: 34px;
+            min-width: 82px;
+            padding: 0 12px;
+            font-size: 14px;
+        }
+        .btn-icon {
+            min-width: 38px;
+            width: 38px;
+            padding: 0;
         }
         .file-input-wrapper {
             margin-bottom: 18px;
@@ -639,6 +760,18 @@
                 padding: 6px;
                 box-shadow: none;
             }
+            .nav-submenu-panel {
+                position: static;
+                display: block;
+                min-width: 0;
+                margin: 6px 0 0 0;
+                padding: 6px;
+                box-shadow: none;
+                background: #f8fafc;
+            }
+            .nav-submenu-caret {
+                transform: none;
+            }
             .main-nav .nav-icon-link {
                 width: 100%;
                 min-width: 0;
@@ -677,6 +810,7 @@
         {% set migration_nav_endpoints = ['migration_wizard', 'abiturients_to_students', 'duplicates', 'students_duplicates', 'duplicates_abiturients'] %}
         {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list'] %}
         {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints %}
+        {% set file_work_nav_section = request.view_args.get('section') if request.view_args else None %}
         <ul class="main-nav">
             <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
             <li>
@@ -702,7 +836,20 @@
                         </svg>
                     </summary>
                     <div class="nav-dropdown-panel">
-                        <a href="{{ url_for('file_work') }}" {% if request.endpoint == 'file_work' %}class="active"{% endif %}>Работа с файлами</a>
+                        <div class="nav-submenu">
+                            <a href="{{ url_for('file_work') }}" class="nav-submenu-main{% if request.endpoint == 'file_work' %} active{% endif %}">
+                                <span>Работа с файлами</span>
+                                <svg class="nav-submenu-caret" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="m6 9 6 6 6-6"></path>
+                                </svg>
+                            </a>
+                            <div class="nav-submenu-panel" aria-label="Разделы работы с файлами">
+                                <a href="{{ url_for('file_work', section='abiturients') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'abiturients' %}class="active"{% endif %}>Загрузка абитуриентов</a>
+                                <a href="{{ url_for('file_work', section='updates') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'updates' %}class="active"{% endif %}>Обновление почты и оплаты</a>
+                                <a href="{{ url_for('file_work', section='orders') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'orders' %}class="active"{% endif %}>Приказ о зачислении</a>
+                                <a href="{{ url_for('file_work', section='students') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'students' %}class="active"{% endif %}>Загрузка студентов</a>
+                            </div>
+                        </div>
                         <a href="{{ url_for('data_checks') }}" {% if request.endpoint == 'data_checks' %}class="active"{% endif %}>Проверка данных</a>
                         <a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a>
                         <a href="{{ url_for('migration_wizard') }}" {% if request.endpoint in migration_nav_endpoints %}class="active"{% endif %}>Мастер миграции</a>

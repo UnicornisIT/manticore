@@ -207,15 +207,21 @@
     </style>
     {% endblock %}
     {% block content %}
+    {% macro sort_link(column, label) -%}
+        {% set next_dir = 'desc' if order_by == column and order_dir == 'asc' else 'asc' %}
+        <a href="{{ url_for_with_query('abiturients', order_by=column, order_dir=next_dir) }}">{{ label }}{% if order_by == column %} {{ '↑' if order_dir == 'asc' else '↓' }}{% endif %}</a>
+    {%- endmacro %}
     <h1>Список абитуриентов и логинов</h1>
     {% include "_campaign_switcher.html" %}
     <div class="abiturients-actions">
         {% if session.get('role') in ['admin', 'assistant'] %}
-            <a href="{{ url_for('abiturients_to_students') }}" class="btn" style="background:#16a34a;">Миграция абитуриентов</a>
+            <a href="{{ url_for('abiturients_to_students') }}" class="btn">Миграция абитуриентов</a>
         {% endif %}
         <a href="{{ url_for('login_conflicts') }}" class="btn">Конфликты логинов</a>
     </div>
     <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
+        <input type="hidden" name="order_by" value="{{ order_by }}">
+        <input type="hidden" name="order_dir" value="{{ order_dir }}">
         <input type="text" name="q" placeholder="Поиск по ФИО, логину, договору, почте" value="{{ request.args.get('q', '') }}">
         <select name="spec">
             <option value="">Все специальности</option>
@@ -252,8 +258,8 @@
         </select>
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
-        <a href="{{ url_for('download_abiturients') }}" class="btn">Скачать Excel</a>
-        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn">Скачать Excel (отфильтрованный)</a>
+        <a href="{{ url_for('download_abiturients') }}" class="btn btn-success">Скачать Excel</a>
+        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn btn-success">Скачать Excel (отфильтрованный)</a>
     </form>
     {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
     <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar">
@@ -276,18 +282,17 @@
     <div style="overflow-x:auto;">
         <table class="abiturients-table">
             <tr>
-                {% set dir = 'asc' if order_dir == 'desc' else 'desc' %}
                 {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
                 <th style="width:42px;"><input type="checkbox" id="select_all_abiturients" title="Выбрать все"></th>
                 {% endif %}
-                <th><a href="{{ url_for('abiturients', order_by='fio', order_dir=dir) }}">ФИО</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='campaign_year', order_dir=dir) }}">Кампания</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='dogovor', order_dir=dir) }}">Договор</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='login', order_dir=dir) }}">Логин</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='email', order_dir=dir) }}">Почта</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='fam', order_dir=dir) }}">Фамилия</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='imotch', order_dir=dir) }}">Имя Отчество</a></th>
-                <th><a href="{{ url_for('abiturients', order_by='created_at', order_dir=dir) }}">Дата добавления</a></th>
+                <th>{{ sort_link('fio', 'ФИО') }}</th>
+                <th>{{ sort_link('campaign_year', 'Кампания') }}</th>
+                <th>{{ sort_link('dogovor', 'Договор') }}</th>
+                <th>{{ sort_link('login', 'Логин') }}</th>
+                <th>{{ sort_link('email', 'Почта') }}</th>
+                <th>{{ sort_link('fam', 'Фамилия') }}</th>
+                <th>{{ sort_link('imotch', 'Имя Отчество') }}</th>
+                <th>{{ sort_link('created_at', 'Дата добавления') }}</th>
                 <th>Действие</th>
             </tr>
             {% for a in abiturients %}

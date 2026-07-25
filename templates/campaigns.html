@@ -1,11 +1,96 @@
 {% extends "base.html" %}
 {% block title %}Кампании{% endblock %}
+{% block head %}
+<style>
+    .campaigns-page {
+        max-width: 1180px;
+    }
+    .campaign-create {
+        max-width: 760px;
+        margin: 18px 0 24px 0;
+        padding: 18px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .campaign-create h2 {
+        margin: 0 0 8px 0;
+        color: #1f2937;
+        font-size: 22px;
+    }
+    .campaign-create p {
+        margin: 0 0 14px 0;
+        color: #475569;
+        line-height: 1.45;
+    }
+    .campaign-create-row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        padding: 0;
+    }
+    .campaign-create-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 700;
+    }
+    .campaign-create-field input {
+        box-sizing: border-box;
+        height: 38px;
+        width: 150px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 15px;
+    }
+    .campaign-actions form {
+        display: inline-flex;
+        margin: 0;
+        padding: 0;
+    }
+    .campaign-status {
+        font-weight: 700;
+    }
+    .campaign-status-open {
+        color: #166534;
+    }
+    .campaign-status-archived {
+        color: #92400e;
+    }
+    @media (max-width: 640px) {
+        .campaign-create-field,
+        .campaign-create-field input,
+        .campaign-create-row .btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
 {% block content %}
+<div class="campaigns-page">
 <h1>Кампании</h1>
 <p>Архивная кампания доступна для просмотра, но импорт, редактирование, удаление, очистка и миграция в ней заблокированы.</p>
 <div style="margin-bottom:18px;">
     <a href="{{ url_for('admin_panel') }}" class="btn">Назад</a>
 </div>
+
+<section class="campaign-create">
+    <h2>Добавить кампанию</h2>
+    <p>Новая кампания сразу появится в переключателе “Приемная кампания” и будет выбрана текущей.</p>
+    <form method="post" class="campaign-create-row">
+        {% include "_csrf_field.html" %}
+        <input type="hidden" name="campaign_action" value="create">
+        <div class="campaign-create-field">
+            <label for="new_campaign_year">Год кампании</label>
+            <input id="new_campaign_year" name="new_campaign_year" inputmode="numeric" pattern="20[0-9]{2}" maxlength="4" placeholder="2031" required>
+        </div>
+        <button type="submit" class="btn">Добавить кампанию</button>
+    </form>
+</section>
+
 <table>
     <thead>
         <tr>
@@ -20,12 +105,19 @@
         {% for campaign in campaigns %}
         <tr>
             <td>{{ campaign.campaign_year }}</td>
-            <td>{{ 'Архив' if campaign.is_archived else 'Открыта' }}</td>
-            <td>{{ campaign.archived_at or '-' }}</td>
-            <td>{{ campaign.archived_by or '-' }}</td>
             <td>
+                {% if campaign.is_archived %}
+                    <span class="campaign-status campaign-status-archived">Архив</span>
+                {% else %}
+                    <span class="campaign-status campaign-status-open">Открыта</span>
+                {% endif %}
+            </td>
+            <td>{{ campaign.changed_at or '-' }}</td>
+            <td>{{ campaign.changed_by or '-' }}</td>
+            <td class="campaign-actions">
                 <form method="post" onsubmit="return confirm('Изменить статус кампании?');">
                     {% include "_csrf_field.html" %}
+                    <input type="hidden" name="campaign_action" value="toggle_archive">
                     <input type="hidden" name="campaign_year" value="{{ campaign.campaign_year }}">
                     {% if campaign.is_archived %}
                     <input type="hidden" name="is_archived" value="0">
@@ -40,4 +132,5 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% endblock %}

@@ -23,7 +23,16 @@
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
+        align-items: center;
         margin-bottom: 20px;
+    }
+    .wizard-actions form {
+        display: inline-flex;
+        margin: 0;
+        padding: 0;
+    }
+    .wizard-actions .btn {
+        margin: 0;
     }
     @media (max-width: 900px) {
         .wizard-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -47,17 +56,24 @@
         <span>{{ dashboard.ready }} абитуриентов с почтой и оплатой</span>
     </div>
     <div class="wizard-step">
-        <strong>3. Группы</strong>
-        <span>{{ groups|length }} доступных групп в папке {{ group_year }}</span>
+        <strong>3. Кандидаты</strong>
+        <span>{{ dashboard.candidate_total }} подготовлено, {{ dashboard.candidate_verified }} сверено приказом</span>
     </div>
     <div class="wizard-step">
-        <strong>4. Проверки</strong>
-        <span>{{ dashboard.conflicts }} конфликтов, {{ dashboard.duplicates }} дублей</span>
+        <strong>4. Группы</strong>
+        <span>{{ groups|length }} доступных групп в папке {{ group_year }}</span>
     </div>
 </div>
 
 <div class="wizard-actions">
-    <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">Начать миграцию абитуриентов</a>
+    <form method="post" action="{{ url_for('enrollment_candidates_sync') }}">
+        {% include "_csrf_field.html" %}
+        <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+        <input type="hidden" name="group_year" value="{{ group_year }}">
+        <button type="submit" class="btn">1. Подготовить кандидатов</button>
+    </form>
+    <a href="{{ url_for('file_work', section='orders') }}" class="btn">2. Загрузить приказ</a>
+    <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">3. Перенести в студенты</a>
     <a href="{{ url_for('students_duplicates') }}" class="btn">Дублирующие записи студентов</a>
     <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дублирующие записи абитуриентов</a>
     {% if session.get('role') == 'admin' %}
