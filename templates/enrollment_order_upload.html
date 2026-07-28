@@ -66,7 +66,7 @@
     <div class="order-detail-actions">
         <a href="{{ url_for('file_work', section='orders') }}" class="btn btn-secondary">Назад</a>
         {% if upload.stored_filename %}
-        <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-secondary">Скачать файл</a>
+        <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-download">Скачать файл</a>
         {% endif %}
         <form method="post" action="{{ url_for('delete_enrollment_order_upload_route', upload_id=upload.id) }}" onsubmit="return confirm('Удалить этот приказ из сверки? Статусы кандидатов будут пересчитаны.');">
             {% include "_csrf_field.html" %}

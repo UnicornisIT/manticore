@@ -160,7 +160,10 @@
     <div class="metric"><strong>{{ dashboard.abiturients_total }}</strong><span>Абитуриентов</span></div>
     <div class="metric"><strong>{{ dashboard.ready }}</strong><span>Готовы к кандидатам</span></div>
     <div class="metric"><strong>{{ dashboard.candidate_total }}</strong><span>Кандидатов к зачислению</span></div>
-    <div class="metric"><strong>{{ dashboard.candidate_verified }}</strong><span>Сверены приказом</span></div>
+    <div class="metric">
+        <strong>{{ dashboard.ready_to_students }}</strong>
+        <span>{% if dashboard.enrollment_order_required %}Сверены приказом{% else %}Готовы к переносу{% endif %}</span>
+    </div>
     <div class="metric"><strong>{{ dashboard.order_total }}</strong><span>Строк в приказе</span></div>
     <div class="metric"><strong>{{ dashboard.students_total }}</strong><span>Студентов</span></div>
     <div class="metric"><strong>{{ dashboard.groups|length }}</strong><span>Групп</span></div>

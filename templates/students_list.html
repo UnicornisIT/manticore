@@ -72,7 +72,7 @@
         {% endif %}
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-danger">Сбросить</a>
-        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-success">Скачать Excel</a>
+        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-success btn-download">Скачать Excel</a>
     </div>
 </form>
 <div style="overflow-x:auto;">

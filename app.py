@@ -29,12 +29,27 @@ except ImportError:
 load_dotenv()
 
 TRUTHY_ENV_VALUES = {'1', 'true', 'yes', 'on'}
+FALSY_SETTING_VALUES = {'0', 'false', 'no', 'off'}
 
 def env_bool(name, default=False):
     value = os.environ.get(name)
     if value is None:
         return default
     return value.lower() in TRUTHY_ENV_VALUES
+
+def setting_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if value is None:
+        return default
+    normalized = str(value).strip().casefold()
+    if normalized in TRUTHY_ENV_VALUES:
+        return True
+    if normalized in FALSY_SETTING_VALUES:
+        return False
+    return default
 
 def env_int(name, default, minimum=None):
     try:
@@ -60,7 +75,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
-APP_VERSION = os.environ.get('APP_VERSION', '1.0.9')
+APP_VERSION = os.environ.get('APP_VERSION', '1.1.0')
 ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
 HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
 HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
@@ -323,6 +338,26 @@ base_codes = {
     "11": "11", "9": "9", 
 }
 
+LOGIN_GROUP_SPECIALTY_CODES = {
+    '1': 'ЛД',
+    '2': 'АД',
+    '3': 'СД',
+    '4': 'СтО',
+    '5': 'СтП',
+    '6': 'ФМ',
+    '7': 'ЛабД',
+    '8': 'СтД',
+}
+
+LOGIN_GROUP_BASE_CODES = {
+    '11i': '11И',
+    '9i': '9И',
+    '11': '11',
+    '9': '9',
+    'im': 'М',
+    'm': 'М',
+}
+
 LOGIN_RULES_SETTINGS_ID = 1
 LOGIN_TEMPLATE_FIELDS = {'yyyy', 'yy', 'spec', 'base', 'seq', 'num'}
 LOGIN_MATCH_MODES = {'last_part', 'anywhere'}
@@ -336,6 +371,7 @@ DEFAULT_LOGIN_GENERATION_RULES = {
     'unique_scope': 'campaign',
     'year_regex': r'20\d{2}',
     'base_match_mode': 'last_part',
+    'require_enrollment_order': True,
     'spec_codes': spec_codes,
     'base_codes': base_codes,
 }
@@ -382,6 +418,7 @@ def merge_login_generation_rules(raw_rules=None):
     rules['unique_scope'] = 'global' if rules.get('unique_scope') == 'global' else 'campaign'
     rules['year_regex'] = str(rules.get('year_regex') or r'20\d{2}').strip() or r'20\d{2}'
     rules['base_match_mode'] = rules.get('base_match_mode') if rules.get('base_match_mode') in LOGIN_MATCH_MODES else 'last_part'
+    rules['require_enrollment_order'] = setting_bool(rules.get('require_enrollment_order'), True)
     if not rules.get('spec_codes'):
         rules['spec_codes'] = copy.deepcopy(spec_codes)
     if not rules.get('base_codes'):
@@ -423,6 +460,10 @@ def get_login_generation_rules():
     except (TypeError, ValueError):
         stored_rules = {}
     return merge_login_generation_rules(stored_rules)
+
+def is_enrollment_order_required(rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    return bool(rules.get('require_enrollment_order'))
 
 def is_login_generation_setup_completed():
     row = get_login_generation_settings_row()
@@ -522,7 +563,9 @@ def validate_login_generation_rules(rules):
 
 def build_login_rules_from_form(form, mode='custom'):
     if mode == 'standard':
-        return get_default_login_generation_rules()
+        rules = get_default_login_generation_rules()
+        rules['require_enrollment_order'] = form.get('require_enrollment_order') == '1'
+        return rules
     return merge_login_generation_rules({
         'mode': 'custom',
         'template': form.get('template'),
@@ -532,6 +575,7 @@ def build_login_rules_from_form(form, mode='custom'):
         'unique_scope': form.get('unique_scope'),
         'year_regex': form.get('year_regex'),
         'base_match_mode': form.get('base_match_mode'),
+        'require_enrollment_order': form.get('require_enrollment_order') == '1',
         'spec_codes': parse_mapping_text(form.get('spec_codes_text'), 'Коды специальностей'),
         'base_codes': parse_mapping_text(form.get('base_codes_text'), 'Коды базы'),
     })
@@ -564,6 +608,7 @@ def get_login_rules_form_context(rules=None):
         'base_codes_text': mapping_to_text(rules.get('base_codes')),
         'sample_dogovor': sample_dogovor,
         'sample_login': sample_login,
+        'enrollment_order_required': is_enrollment_order_required(rules),
     }
 
 _dogovor_latin_lookalikes = str.maketrans({
@@ -1388,6 +1433,7 @@ def get_campaign_settings():
 
 def get_dashboard_data(campaign_year):
     campaign_year = normalize_campaign_year(campaign_year, DEFAULT_CAMPAIGN_YEAR)
+    enrollment_order_required = is_enrollment_order_required()
     with sqlite3.connect(DB_PATH) as conn:
         create_campaign_settings_table(conn)
         ab_total = conn.execute('SELECT COUNT(*) FROM abiturients WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
@@ -1430,6 +1476,8 @@ def get_dashboard_data(campaign_year):
             "SELECT COUNT(*) FROM enrollment_candidates WHERE campaign_year=? AND verification_status<>'verified'",
             (campaign_year,)
         ).fetchone()[0]
+        if not enrollment_order_required:
+            candidate_missing_order = 0
         order_total = conn.execute(
             'SELECT COUNT(*) FROM enrollment_orders WHERE campaign_year=?',
             (campaign_year,)
@@ -1469,9 +1517,9 @@ def get_dashboard_data(campaign_year):
         alerts.append(('Оплата', f'Не оплачены: {unpaid}'))
     if ready and not candidate_total:
         alerts.append(('Кандидаты', 'Готовые абитуриенты ещё не перенесены в кандидаты к зачислению'))
-    if candidate_total and not order_total:
+    if enrollment_order_required and candidate_total and not order_total:
         alerts.append(('Приказ', 'Приказ о зачислении ещё не загружен'))
-    if candidate_missing_order:
+    if enrollment_order_required and candidate_missing_order:
         alerts.append(('Сверка', f'Кандидатов без совпадения с приказом: {candidate_missing_order}'))
     if full_groups:
         alerts.append(('Группы', f'Заполненных групп: {len(full_groups)}'))
@@ -1514,7 +1562,8 @@ def get_dashboard_data(campaign_year):
         'candidate_verified': candidate_verified,
         'candidate_missing_order': candidate_missing_order,
         'order_total': order_total,
-        'ready_to_students': candidate_verified,
+        'ready_to_students': candidate_verified if enrollment_order_required else candidate_total,
+        'enrollment_order_required': enrollment_order_required,
         'duplicates': duplicates,
         'conflicts': conflicts,
         'students_total': students_total,
@@ -1594,6 +1643,7 @@ def get_invalid_student_email_rows(rows):
 
 def get_data_quality_report(campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    enrollment_order_required = is_enrollment_order_required()
     sample_limit = 5
     with sqlite3.connect(DB_PATH) as conn:
         ab_rows = conn.execute(
@@ -1668,7 +1718,7 @@ def get_data_quality_report(campaign_year=None):
     ]
     candidates_missing_order = [
         row for row in candidate_rows
-        if row[7] != 'verified'
+        if enrollment_order_required and row[7] != 'verified'
     ]
     candidate_keys = {
         make_enrollment_match_key(row[2], row[6])
@@ -2107,6 +2157,142 @@ def parse_paid_value(value):
         return 0
     return None
 
+def sync_enrollment_candidate_from_abiturient(conn, abiturient_id, campaign_year=None, login_rules=None, refresh_status=True):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    login_rules = login_rules or get_login_generation_rules()
+    row = conn.execute(
+        '''
+        SELECT id, fio, dogovor, login, fam, imotch, email, paid
+        FROM abiturients
+        WHERE id=? AND campaign_year=?
+        ''',
+        (abiturient_id, campaign_year)
+    ).fetchone()
+    if not row:
+        return {'action': 'missing_abiturient', 'display_name': str(abiturient_id)}
+
+    abiturient_id, fio, dogovor, login, fam, imotch, email, paid = row
+    display_name = fio or login or str(abiturient_id)
+    candidate_params = [campaign_year, abiturient_id]
+    candidate_where = ['abiturient_id=?']
+    if login:
+        candidate_where.append('login=?')
+        candidate_params.append(login)
+    candidate_ids = [
+        item[0]
+        for item in conn.execute(
+            f'''
+            SELECT id
+            FROM enrollment_candidates
+            WHERE campaign_year=? AND ({' OR '.join(candidate_where)})
+            ORDER BY CASE WHEN abiturient_id=? THEN 0 ELSE 1 END, id
+            ''',
+            candidate_params + [abiturient_id]
+        ).fetchall()
+    ]
+    candidate_id = candidate_ids[0] if candidate_ids else None
+
+    def remove_candidate(action):
+        if candidate_ids:
+            placeholders = ','.join('?' for _ in candidate_ids)
+            conn.execute(f'DELETE FROM enrollment_candidates WHERE id IN ({placeholders})', candidate_ids)
+        if refresh_status:
+            refresh_enrollment_candidate_statuses(conn, campaign_year)
+        return {'action': action, 'display_name': display_name, 'removed': len(candidate_ids)}
+
+    email = (email or '').strip()
+    if not email:
+        return remove_candidate('skipped_without_email')
+    if not is_paid_person_value(paid):
+        return remove_candidate('skipped_unpaid')
+    if login and conn.execute('SELECT 1 FROM students WHERE username=?', (login,)).fetchone():
+        return remove_candidate('skipped_existing_student')
+
+    parts = parse_dogovor_parts(dogovor, login_rules)
+    if not parts:
+        return remove_candidate('skipped_without_specialty')
+
+    specialty_code = normalize_specialty(parts['spec_label'])
+    specialty = get_specialty_display_name(specialty_code)
+    specialty_key = normalize_specialty_key(specialty_code)
+    base_label = parts.get('base_label') or ''
+
+    if candidate_id:
+        conn.execute(
+            '''
+            UPDATE enrollment_candidates
+            SET abiturient_id=?, fio=?, dogovor=?, login=?, fam=?, imotch=?,
+                email=?, specialty=?, specialty_key=?, base_label=?
+            WHERE id=?
+            ''',
+            (
+                abiturient_id, fio, dogovor, login, fam, imotch, email,
+                specialty, specialty_key, base_label, candidate_id
+            )
+        )
+        duplicate_ids = candidate_ids[1:]
+        if duplicate_ids:
+            placeholders = ','.join('?' for _ in duplicate_ids)
+            conn.execute(f'DELETE FROM enrollment_candidates WHERE id IN ({placeholders})', duplicate_ids)
+        action = 'updated'
+    else:
+        conn.execute(
+            '''
+            INSERT INTO enrollment_candidates
+                (abiturient_id, campaign_year, fio, dogovor, login, fam, imotch,
+                 email, specialty, specialty_key, base_label)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                abiturient_id, campaign_year, fio, dogovor, login, fam, imotch,
+                email, specialty, specialty_key, base_label
+            )
+        )
+        action = 'created'
+
+    if refresh_status:
+        refresh_enrollment_candidate_statuses(conn, campaign_year)
+    return {'action': action, 'display_name': display_name, 'removed': max(0, len(candidate_ids) - 1)}
+
+def sync_enrollment_candidates_for_abiturients(conn, abiturient_ids, campaign_year=None, login_rules=None):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    summary = {
+        'created': 0,
+        'updated': 0,
+        'removed': 0,
+        'skipped_without_email': [],
+        'skipped_unpaid': [],
+        'skipped_without_specialty': [],
+        'skipped_existing_students': [],
+    }
+    for abiturient_id in dict.fromkeys(str(item) for item in abiturient_ids if str(item).isdigit()):
+        result = sync_enrollment_candidate_from_abiturient(
+            conn,
+            int(abiturient_id),
+            campaign_year,
+            login_rules=login_rules,
+            refresh_status=False
+        )
+        action = result.get('action')
+        if action == 'created':
+            summary['created'] += 1
+        elif action == 'updated':
+            summary['updated'] += 1
+        elif action == 'skipped_without_email':
+            summary['skipped_without_email'].append(result.get('display_name', abiturient_id))
+            summary['removed'] += result.get('removed', 0)
+        elif action == 'skipped_unpaid':
+            summary['skipped_unpaid'].append(result.get('display_name', abiturient_id))
+            summary['removed'] += result.get('removed', 0)
+        elif action == 'skipped_without_specialty':
+            summary['skipped_without_specialty'].append(result.get('display_name', abiturient_id))
+            summary['removed'] += result.get('removed', 0)
+        elif action == 'skipped_existing_student':
+            summary['skipped_existing_students'].append(result.get('display_name', abiturient_id))
+            summary['removed'] += result.get('removed', 0)
+    refresh_enrollment_candidate_statuses(conn, campaign_year)
+    return summary
+
 def find_row_value_casefold(row, aliases):
     normalized = {str(key).strip().casefold(): key for key in row.index}
     for alias in aliases:
@@ -2138,6 +2324,7 @@ def process_abiturients_updates(file_path, campaign_year=None):
     not_found = []
     not_found_rows = []
     errors = []
+    touched_abiturient_ids = set()
     backup_path = create_database_backup('before_abiturients_updates')
     with sqlite3.connect(DB_PATH) as conn:
         for row_number, (_, row) in enumerate(df.iterrows(), start=2):
@@ -2181,9 +2368,13 @@ def process_abiturients_updates(file_path, campaign_year=None):
             if email:
                 conn.execute('UPDATE abiturients SET email=? WHERE id=?', (email, abiturient_id))
                 updated_email += 1
+                touched_abiturient_ids.add(abiturient_id)
             if paid_value is not None:
                 conn.execute('UPDATE abiturients SET paid=? WHERE id=?', (paid_value, abiturient_id))
                 updated_paid += 1
+                touched_abiturient_ids.add(abiturient_id)
+
+        sync_summary = sync_enrollment_candidates_for_abiturients(conn, touched_abiturient_ids, campaign_year)
 
         log_action(
             'abiturients_updates_import',
@@ -2191,6 +2382,8 @@ def process_abiturients_updates(file_path, campaign_year=None):
             campaign_year,
             (
                 f"rows={len(df)}; email={updated_email}; paid={updated_paid}; "
+                f"candidates_created={sync_summary['created']}; candidates_updated={sync_summary['updated']}; "
+                f"candidates_removed={sync_summary['removed']}; "
                 f"not_found={len(not_found)}; errors={len(errors)}; "
                 f"backup={os.path.basename(backup_path) if backup_path else ''}"
             ),
@@ -2200,6 +2393,7 @@ def process_abiturients_updates(file_path, campaign_year=None):
         'total': int(len(df)),
         'updated_email': updated_email,
         'updated_paid': updated_paid,
+        'candidate_sync': sync_summary,
         'not_found': not_found,
         'not_found_rows': not_found_rows,
         'errors': errors,
@@ -3518,6 +3712,326 @@ def get_candidate_group_options(groups, specialty_key=None):
         return groups
     return [group for group in groups if group_matches_specialty(group['name'], specialty_key)]
 
+def login_group_specialty_options(rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    options = {
+        str(code).strip().casefold(): label
+        for code, label in LOGIN_GROUP_SPECIALTY_CODES.items()
+    }
+    for label, code in (rules.get('spec_codes') or {}).items():
+        code_key = str(code or '').strip().casefold()
+        specialty = normalize_specialty(label)
+        if code_key and code_key not in options:
+            options[code_key] = specialty
+    return sorted(options.items(), key=lambda item: len(item[0]), reverse=True)
+
+def login_group_base_preference(base_label):
+    base_label = normalize_group_base(base_label)
+    preferred = {'11': 0, '9': 0, '11И': 0, '9И': 0, 'М': 0}
+    return preferred.get(base_label, 1), len(base_label), base_label
+
+def login_group_base_options(rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    options = {
+        code.casefold(): normalize_group_base(base)
+        for code, base in LOGIN_GROUP_BASE_CODES.items()
+    }
+    for label, code in (rules.get('base_codes') or {}).items():
+        code_key = str(code or '').strip().casefold()
+        base_label = normalize_group_base(canonicalize_base_label(label))
+        if not code_key or not base_label:
+            continue
+        current = options.get(code_key)
+        if current is None or login_group_base_preference(base_label) < login_group_base_preference(current):
+            options[code_key] = base_label
+    return sorted(options.items(), key=lambda item: len(item[0]), reverse=True)
+
+def parse_login_group_target(login, campaign_year=None, rules=None):
+    rules = merge_login_generation_rules(rules or get_login_generation_rules())
+    value = re.sub(r'[\s\-]+', '', str(login or '')).strip()
+    folded = value.casefold()
+    match = re.fullmatch(r'(?P<year>\d{2})(?P<body>[0-9a-zа-яё]+)', folded)
+    if not match:
+        return {
+            'ok': False,
+            'error': 'логин не похож на учебный формат',
+        }
+
+    year_code = match.group('year')
+    remainder = match.group('body')
+    for spec_code, specialty_label in login_group_specialty_options(rules):
+        if not remainder.startswith(spec_code):
+            continue
+        after_spec = remainder[len(spec_code):]
+        for base_code, base_label in login_group_base_options(rules):
+            if not after_spec.startswith(base_code):
+                continue
+            sequence = after_spec[len(base_code):]
+            if not sequence or not re.fullmatch(r'\d+', sequence):
+                continue
+            group_root = normalize_group_name(f'{year_code}{specialty_label}-{base_label}')
+            result = {
+                'ok': True,
+                'year_code': year_code,
+                'specialty_code': spec_code,
+                'specialty': specialty_label,
+                'specialty_key': normalize_specialty_key(specialty_label),
+                'base_label': base_label,
+                'sequence': sequence,
+                'group_root': group_root,
+                'target_group': normalize_group_name(f'{group_root}-1'),
+            }
+            if campaign_year and year_code != str(campaign_year)[-2:]:
+                result['warning'] = f'год в логине {year_code}, кампания {campaign_year}'
+            return result
+
+    return {
+        'ok': False,
+        'year_code': year_code,
+        'error': 'не удалось разобрать специальность или базу образования в логине',
+    }
+
+def get_group_assignment_state(conn, group_year):
+    rows = conn.execute(
+        'SELECT name, group_year, COALESCE(is_hidden, 0) FROM groups'
+    ).fetchall()
+    visible = {}
+    hidden = {}
+    other_year = {}
+    counts = {}
+    for name, row_group_year, is_hidden in rows:
+        normalized_name = normalize_group_name(name)
+        group_key = normalized_name.casefold()
+        normalized_year = normalize_group_year(row_group_year, infer_group_year(normalized_name, group_year))
+        if normalized_year != group_year:
+            other_year[group_key] = normalized_year
+            continue
+        if is_hidden:
+            hidden[group_key] = normalized_name
+            continue
+        visible[group_key] = normalized_name
+        counts[group_key] = get_group_student_count(conn, name)
+    return {
+        'visible': visible,
+        'hidden': hidden,
+        'other_year': other_year,
+        'counts': counts,
+    }
+
+def reserve_exact_group_assignment(group_name, group_year, state, planned_counts, reserve=True):
+    group_name = normalize_group_name(group_name)
+    group_key = group_name.casefold()
+    if not group_name or not is_valid_group_name(group_name):
+        return None, False, 'группа имеет неверный формат'
+    if infer_group_year(group_name, group_year) != group_year:
+        return None, False, f'группа не относится к папке {group_year}'
+    if group_key in state['hidden']:
+        return None, False, f'группа {group_name} скрыта'
+    if group_key in state['other_year']:
+        return None, False, f'группа {group_name} уже есть в другой папке'
+
+    target_group = state['visible'].get(group_key, group_name)
+    current_count = state['counts'].get(group_key, 0)
+    planned_count = planned_counts.get(group_key, 0)
+    if current_count + planned_count >= MAX_GROUP_STUDENTS:
+        return None, False, f'в группе {target_group} нет свободных мест'
+
+    if reserve:
+        planned_counts[group_key] = planned_count + 1
+    return target_group, group_key not in state['visible'], ''
+
+def reserve_group_by_root_assignment(root_group, group_year, state, planned_counts, reserve=True):
+    root_group = normalize_group_name(root_group)
+    if not root_group:
+        return None, False, 'не удалось определить корень группы'
+    index = 1
+    while index < 100:
+        group_name = normalize_group_name(f'{root_group}-{index}')
+        group_key = group_name.casefold()
+        if group_key in state['hidden']:
+            index += 1
+            continue
+        if group_key in state['other_year']:
+            return None, False, f'группа {group_name} уже есть в другой папке'
+        target_group = state['visible'].get(group_key, group_name)
+        current_count = state['counts'].get(group_key, 0)
+        planned_count = planned_counts.get(group_key, 0)
+        if current_count + planned_count < MAX_GROUP_STUDENTS:
+            if reserve:
+                planned_counts[group_key] = planned_count + 1
+            return target_group, group_key not in state['visible'], ''
+        index += 1
+    return None, False, f'для {root_group} не удалось подобрать свободную подгруппу'
+
+def get_selected_enrollment_candidate_rows(conn, campaign_year, ids):
+    ids = [str(item) for item in ids if str(item).isdigit()]
+    if not ids:
+        return []
+    placeholders = ','.join('?' for _ in ids)
+    cur = conn.execute(
+        f'''
+        SELECT
+            c.id AS candidate_id,
+            c.abiturient_id,
+            c.fio,
+            c.dogovor,
+            c.login,
+            c.fam,
+            c.imotch,
+            c.email AS candidate_email,
+            c.specialty,
+            c.specialty_key,
+            c.verification_status,
+            c.order_group_name,
+            a.id AS source_id,
+            a.email AS source_email,
+            a.paid AS source_paid
+        FROM enrollment_candidates c
+        LEFT JOIN abiturients a
+            ON a.id=c.abiturient_id AND a.campaign_year=c.campaign_year
+        WHERE c.campaign_year=? AND c.id IN ({placeholders})
+        ORDER BY c.fio
+        ''',
+        [campaign_year] + ids
+    )
+    columns = [description[0] for description in cur.description]
+    return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+def enrollment_candidate_readiness_issues(abiturient_id, email, paid):
+    if not abiturient_id:
+        return ['Исходная карточка абитуриента не найдена']
+    issues = []
+    if not str(email or '').strip():
+        issues.append('В карточке абитуриента не указана почта')
+    if not is_paid_person_value(paid):
+        issues.append('В карточке абитуриента не отмечена оплата')
+    return issues
+
+def build_login_group_distribution_plan(conn, candidate_rows, campaign_year, group_year):
+    group_year = normalize_group_year(group_year, campaign_year)
+    rules = get_login_generation_rules()
+    enrollment_order_required = is_enrollment_order_required(rules)
+    order_map = get_enrollment_order_map(campaign_year) if enrollment_order_required else {}
+    state = get_group_assignment_state(conn, group_year)
+    planned_counts = {}
+    rows = []
+    create_groups = set()
+
+    sorted_rows = sorted(
+        candidate_rows,
+        key=lambda row: (normalize_fio_key(row.get('fio')), str(row.get('login') or ''))
+    )
+    for row in sorted_rows:
+        issues = []
+        notes = []
+        target_group = ''
+        source = ''
+        will_create_group = False
+        display_name = row.get('fio') or row.get('login') or str(row.get('candidate_id'))
+        order_match = None
+        if enrollment_order_required:
+            order_match = get_enrollment_order_match_for_abiturient(
+                row.get('fio'),
+                row.get('dogovor'),
+                campaign_year,
+                order_map=order_map,
+                rules=rules
+            )
+
+        if enrollment_order_required and (row.get('verification_status') != 'verified' or not order_match):
+            issues.append('нет подтвержденного совпадения с приказом')
+
+        email = ((row.get('source_email') or row.get('candidate_email') or '')).strip()
+        issues.extend(enrollment_candidate_readiness_issues(row.get('source_id'), email, row.get('source_paid')))
+
+        username = str(row.get('login') or '').strip()
+        if not username:
+            issues.append('не указан логин')
+        elif conn.execute('SELECT 1 FROM students WHERE username=?', (username,)).fetchone():
+            issues.append('такой логин уже есть в студентах')
+
+        required_group = normalize_group_name(order_match.get('group_name') if order_match else '')
+        parsed_login = parse_login_group_target(username, campaign_year, rules) if username else {'ok': False}
+        if required_group:
+            source = 'Приказ'
+            should_reserve = not issues
+            target_group, will_create_group, group_error = reserve_exact_group_assignment(
+                required_group,
+                group_year,
+                state,
+                planned_counts,
+                reserve=should_reserve
+            )
+            notes.append('группа указана в приказе')
+            if group_error:
+                issues.append(group_error)
+        else:
+            source = 'Логин'
+            if not parsed_login.get('ok'):
+                issues.append(parsed_login.get('error') or 'не удалось разобрать логин')
+            else:
+                if parsed_login.get('warning'):
+                    issues.append(parsed_login['warning'])
+                if row.get('specialty_key') and parsed_login.get('specialty_key') != row.get('specialty_key'):
+                    issues.append(
+                        f"специальность логина {parsed_login.get('specialty')} не совпадает с кандидатом"
+                    )
+                should_reserve = not issues
+                target_group, will_create_group, group_error = reserve_group_by_root_assignment(
+                    parsed_login.get('group_root'),
+                    group_year,
+                    state,
+                    planned_counts,
+                    reserve=should_reserve
+                )
+                if group_error:
+                    issues.append(group_error)
+
+        if target_group and row.get('specialty_key') and not group_matches_specialty(target_group, row.get('specialty_key')):
+            issues.append('предложенная группа не совпадает со специальностью кандидата')
+
+        if will_create_group and target_group:
+            create_groups.add(target_group)
+            notes.append('группа будет создана при подтверждении')
+        elif target_group:
+            notes.append('группа уже есть в справочнике')
+
+        can_migrate = not issues and bool(target_group)
+        rows.append({
+            'candidate_id': row.get('candidate_id'),
+            'abiturient_id': row.get('abiturient_id'),
+            'fio': display_name,
+            'dogovor': row.get('dogovor') or '',
+            'login': username,
+            'email': email,
+            'firstname': row.get('imotch') or '',
+            'lastname': row.get('fam') or '',
+            'specialty': row.get('specialty') or '',
+            'target_group': target_group or '-',
+            'source': source or '-',
+            'will_create_group': will_create_group,
+            'can_migrate': can_migrate,
+            'status_label': 'Готов' if can_migrate else 'Проверить',
+            'badge_class': 'status-success' if can_migrate else 'status-danger',
+            'status_note': '; '.join(issues or notes),
+            'sort_status': 'готов' if can_migrate else 'проверить',
+        })
+
+    ready_count = sum(1 for row in rows if row['can_migrate'])
+    issue_count = len(rows) - ready_count
+    return {
+        'rows': rows,
+        'summary': {
+            'total': len(rows),
+            'ready_count': ready_count,
+            'issue_count': issue_count,
+            'create_group_count': len(create_groups),
+            'login_group_count': sum(1 for row in rows if row['source'] == 'Логин' and row['can_migrate']),
+            'order_group_count': sum(1 for row in rows if row['source'] == 'Приказ' and row['can_migrate']),
+            'can_confirm': bool(rows) and issue_count == 0,
+        },
+    }
+
 def get_enrollment_candidate_keys(campaign_year):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     keys = set()
@@ -3798,8 +4312,33 @@ def delete_enrollment_order_upload(upload_id, campaign_year=None):
     cleanup_temp_files(stored_path)
     return deleted
 
+def cleanup_not_ready_enrollment_candidates(conn, campaign_year):
+    campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    rows = conn.execute(
+        '''
+        SELECT c.id, c.login, a.id, a.email, a.paid
+        FROM enrollment_candidates c
+        LEFT JOIN abiturients a
+            ON a.id=c.abiturient_id AND a.campaign_year=c.campaign_year
+        WHERE c.campaign_year=?
+        ''',
+        (campaign_year,)
+    ).fetchall()
+    remove_ids = []
+    for candidate_id, login, source_id, email, paid in rows:
+        if not source_id or not str(email or '').strip() or not is_paid_person_value(paid):
+            remove_ids.append(candidate_id)
+            continue
+        if login and conn.execute('SELECT 1 FROM students WHERE username=?', (login,)).fetchone():
+            remove_ids.append(candidate_id)
+    if remove_ids:
+        placeholders = ','.join('?' for _ in remove_ids)
+        conn.execute(f'DELETE FROM enrollment_candidates WHERE id IN ({placeholders})', remove_ids)
+    return len(remove_ids)
+
 def refresh_enrollment_candidate_statuses(conn, campaign_year):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    cleanup_not_ready_enrollment_candidates(conn, campaign_year)
     order_rows = conn.execute(
         '''
         SELECT id, fio_key, specialty_key, group_name
@@ -3894,19 +4433,23 @@ def get_enrollment_candidate_specialties(campaign_year):
 
 def get_enrollment_candidates(campaign_year, specialty_key=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
+    enrollment_order_required = is_enrollment_order_required()
     query = '''
         SELECT
-            id, abiturient_id, fio, dogovor, login, fam, imotch, email,
-            specialty, specialty_key, base_label, verification_status,
-            matched_order_id, order_group_name, verified_at, created_at
-        FROM enrollment_candidates
-        WHERE campaign_year=?
+            c.id, c.abiturient_id, c.fio, c.dogovor, c.login, c.fam, c.imotch, c.email,
+            c.specialty, c.specialty_key, c.base_label, c.verification_status,
+            c.matched_order_id, c.order_group_name, c.verified_at, c.created_at,
+            a.id AS source_id, a.email AS source_email, a.paid AS source_paid
+        FROM enrollment_candidates c
+        LEFT JOIN abiturients a
+            ON a.id=c.abiturient_id AND a.campaign_year=c.campaign_year
+        WHERE c.campaign_year=?
     '''
     params = [campaign_year]
     if specialty_key:
-        query += ' AND specialty_key=?'
+        query += ' AND c.specialty_key=?'
         params.append(specialty_key)
-    query += ' ORDER BY specialty, fio'
+    query += ' ORDER BY c.specialty, c.fio'
     with sqlite3.connect(DB_PATH) as conn:
         refresh_enrollment_candidate_statuses(conn, campaign_year)
         cur = conn.execute(query, params)
@@ -3914,105 +4457,50 @@ def get_enrollment_candidates(campaign_year, specialty_key=None):
         rows = [dict(zip(columns, row)) for row in cur.fetchall()]
 
     for row in rows:
+        row['email'] = (row.get('source_email') or row.get('email') or '').strip()
+        readiness_issues = enrollment_candidate_readiness_issues(
+            row.get('source_id'),
+            row.get('email'),
+            row.get('source_paid')
+        )
+        row['readiness_note'] = '; '.join(readiness_issues)
         row['status_label'], row['badge_class'] = enrollment_candidate_status_view(row.get('verification_status'))
-        row['can_migrate'] = row.get('verification_status') == 'verified'
+        if readiness_issues:
+            row['can_migrate'] = False
+            row['status_label'] = readiness_issues[0]
+            row['badge_class'] = 'status-danger'
+        elif enrollment_order_required:
+            row['can_migrate'] = row.get('verification_status') == 'verified'
+        else:
+            row['can_migrate'] = True
+            if row.get('verification_status') != 'verified':
+                row['status_label'] = 'Готов по почте и оплате'
+                row['badge_class'] = 'status-info'
         row['group_hint'] = row.get('order_group_name') or 'Выберите группу по специальности'
     return rows
 
 def sync_enrollment_candidates_from_ready_abiturients(campaign_year):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     login_rules = get_login_generation_rules()
-    created = 0
-    updated = 0
-    skipped_without_email = []
-    skipped_unpaid = []
-    skipped_without_specialty = []
-    skipped_existing_students = []
     backup_path = None
 
     with sqlite3.connect(DB_PATH) as conn:
         abiturient_rows = conn.execute(
             '''
-            SELECT id, fio, dogovor, login, fam, imotch, email, paid
+            SELECT id
             FROM abiturients
             WHERE campaign_year=?
             ORDER BY fio
             ''',
             (campaign_year,)
         ).fetchall()
-        existing_students = {
-            row[0]
-            for row in conn.execute("SELECT username FROM students WHERE username IS NOT NULL AND username<>''")
-        }
-        existing_candidates = {}
-        for candidate_id, abiturient_id, login in conn.execute(
-            '''
-            SELECT id, abiturient_id, login
-            FROM enrollment_candidates
-            WHERE campaign_year=?
-            ''',
-            (campaign_year,)
-        ):
-            if abiturient_id is not None:
-                existing_candidates[('abiturient_id', abiturient_id)] = candidate_id
-            if login:
-                existing_candidates[('login', login)] = candidate_id
-
         backup_path = create_database_backup('before_enrollment_candidates_sync')
-        for abiturient_id, fio, dogovor, login, fam, imotch, email, paid in abiturient_rows:
-            display_name = fio or login or str(abiturient_id)
-            email = (email or '').strip()
-            if not email:
-                skipped_without_email.append(display_name)
-                continue
-            if not is_paid_person_value(paid):
-                skipped_unpaid.append(display_name)
-                continue
-            if login in existing_students:
-                skipped_existing_students.append(login)
-                continue
-
-            parts = parse_dogovor_parts(dogovor, login_rules)
-            if not parts:
-                skipped_without_specialty.append(display_name)
-                continue
-            specialty_code = normalize_specialty(parts['spec_label'])
-            specialty = get_specialty_display_name(specialty_code)
-            specialty_key = normalize_specialty_key(specialty_code)
-            base_label = parts.get('base_label') or ''
-            candidate_id = (
-                existing_candidates.get(('abiturient_id', abiturient_id))
-                or existing_candidates.get(('login', login))
-            )
-            if candidate_id:
-                conn.execute(
-                    '''
-                    UPDATE enrollment_candidates
-                    SET abiturient_id=?, fio=?, dogovor=?, login=?, fam=?, imotch=?,
-                        email=?, specialty=?, specialty_key=?, base_label=?
-                    WHERE id=?
-                    ''',
-                    (
-                        abiturient_id, fio, dogovor, login, fam, imotch, email,
-                        specialty, specialty_key, base_label, candidate_id
-                    )
-                )
-                updated += 1
-                continue
-
-            conn.execute(
-                '''
-                INSERT INTO enrollment_candidates
-                    (abiturient_id, campaign_year, fio, dogovor, login, fam, imotch,
-                     email, specialty, specialty_key, base_label)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
-                (
-                    abiturient_id, campaign_year, fio, dogovor, login, fam, imotch,
-                    email, specialty, specialty_key, base_label
-                )
-            )
-            created += 1
+        summary = sync_enrollment_candidates_for_abiturients(
+            conn,
+            [row[0] for row in abiturient_rows],
+            campaign_year,
+            login_rules=login_rules
+        )
 
         refresh_enrollment_candidate_statuses(conn, campaign_year)
         log_action(
@@ -4020,21 +4508,24 @@ def sync_enrollment_candidates_from_ready_abiturients(campaign_year):
             'campaign',
             campaign_year,
             (
-                f"created={created}; updated={updated}; no_email={len(skipped_without_email)}; "
-                f"unpaid={len(skipped_unpaid)}; no_specialty={len(skipped_without_specialty)}; "
-                f"existing_students={len(skipped_existing_students)}; "
+                f"created={summary['created']}; updated={summary['updated']}; "
+                f"removed={summary['removed']}; no_email={len(summary['skipped_without_email'])}; "
+                f"unpaid={len(summary['skipped_unpaid'])}; "
+                f"no_specialty={len(summary['skipped_without_specialty'])}; "
+                f"existing_students={len(summary['skipped_existing_students'])}; "
                 f"backup={os.path.basename(backup_path) if backup_path else ''}"
             ),
             conn
         )
 
     return {
-        'created': created,
-        'updated': updated,
-        'skipped_without_email': skipped_without_email,
-        'skipped_unpaid': skipped_unpaid,
-        'skipped_without_specialty': skipped_without_specialty,
-        'skipped_existing_students': skipped_existing_students,
+        'created': summary['created'],
+        'updated': summary['updated'],
+        'removed': summary['removed'],
+        'skipped_without_email': summary['skipped_without_email'],
+        'skipped_unpaid': summary['skipped_unpaid'],
+        'skipped_without_specialty': summary['skipped_without_specialty'],
+        'skipped_existing_students': summary['skipped_existing_students'],
     }
 
 def order_column_aliases(field):
@@ -5372,9 +5863,11 @@ def bulk_abiturients():
     with sqlite3.connect(DB_PATH) as conn:
         if action == 'mark_paid':
             conn.execute(f'UPDATE abiturients SET paid=1 WHERE id IN ({placeholders}) AND campaign_year=?', params)
+            sync_enrollment_candidates_for_abiturients(conn, selected_ids, campaign_year)
             flash(f'Отмечено оплаченных: {len(selected_ids)}', 'success')
         elif action == 'mark_unpaid':
             conn.execute(f'UPDATE abiturients SET paid=0 WHERE id IN ({placeholders}) AND campaign_year=?', params)
+            sync_enrollment_candidates_for_abiturients(conn, selected_ids, campaign_year)
             flash(f'Снята отметка оплаты: {len(selected_ids)}', 'success')
         elif action == 'delete':
             conn.execute(f'DELETE FROM abiturients WHERE id IN ({placeholders}) AND campaign_year=?', params)
@@ -5470,6 +5963,7 @@ def toggle_abiturient_paid():
     if abiturient_id:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('UPDATE abiturients SET paid=? WHERE id=? AND campaign_year=?', (paid, abiturient_id, campaign_year))
+            sync_enrollment_candidates_for_abiturients(conn, [abiturient_id], campaign_year)
             log_action('abiturient_paid_changed', 'abiturient', abiturient_id, f"paid={paid}; campaign_year={campaign_year}", conn)
     return redirect(url_for('abiturients', **{k: v for k, v in query_params.items() if v}))
 
@@ -5740,6 +6234,10 @@ def edit_abiturient(login):
             (login, campaign_year)
         )
         abiturient = cur.fetchone()
+        abiturient_id_row = conn.execute(
+            'SELECT id FROM abiturients WHERE login=? AND campaign_year=?',
+            (login, campaign_year)
+        ).fetchone()
     if not abiturient:
         flash('Абитуриент не найден')
         return redirect(url_for('abiturients'))
@@ -5765,6 +6263,7 @@ def edit_abiturient(login):
                     'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, login=?, comment=? WHERE login=? AND campaign_year=?',
                     (fio, fam, imotch, email, paid, new_login, comment, login, campaign_year)
                 )
+                sync_enrollment_candidates_for_abiturients(conn, [abiturient_id_row[0]], campaign_year)
                 log_action(
                     'abiturient_updated',
                     'abiturient',
@@ -5778,6 +6277,7 @@ def edit_abiturient(login):
                     'UPDATE abiturients SET fio=?, fam=?, imotch=?, email=?, paid=?, comment=? WHERE login=? AND campaign_year=?',
                     (fio, fam, imotch, email, paid, comment, login, campaign_year)
                 )
+                sync_enrollment_candidates_for_abiturients(conn, [abiturient_id_row[0]], campaign_year)
                 log_action(
                     'abiturient_updated',
                     'abiturient',
@@ -6271,7 +6771,7 @@ def enrollment_candidates_sync():
     flash(
         (
             f"Кандидаты к зачислению обновлены: добавлено {summary['created']}, "
-            f"обновлено {summary['updated']}."
+            f"обновлено {summary['updated']}, удалено неготовых {summary.get('removed', 0)}."
         ),
         'success'
     )
@@ -6292,6 +6792,7 @@ def abiturients_to_students():
     campaign_year = get_active_campaign_year()
     group_year = normalize_group_year(request.values.get('group_year'), campaign_year)
     specialty_filter = normalize_specialty_key(request.values.get('specialty'))
+    enrollment_order_required = is_enrollment_order_required()
     group_years = get_group_years(group_year)
     with sqlite3.connect(DB_PATH) as conn:
         groups = get_groups_with_counts(conn, group_year)
@@ -6304,6 +6805,28 @@ def abiturients_to_students():
         specialty_filter = ''
     suggested_groups = get_candidate_group_options(groups, specialty_filter) if specialty_filter else groups
     candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+    selected_candidate_ids = [item for item in request.values.getlist('candidate_ids') if str(item).isdigit()]
+    login_distribution_enabled = request.values.get('use_login_distribution') == '1'
+    login_distribution_preview = None
+
+    def render_stage(**extra_context):
+        context = {
+            'candidates': candidates,
+            'groups': groups,
+            'suggested_groups': suggested_groups,
+            'specialties': specialties,
+            'selected_specialty': specialty_filter,
+            'order_total': order_total,
+            'campaign_year': campaign_year,
+            'group_year': group_year,
+            'group_years': group_years,
+            'selected_candidate_ids': selected_candidate_ids,
+            'login_distribution_enabled': login_distribution_enabled,
+            'login_distribution_preview': login_distribution_preview,
+            'enrollment_order_required': enrollment_order_required,
+        }
+        context.update(extra_context)
+        return render_template('abiturients_to_students.html', **context)
 
     def redirect_to_stage():
         args = {'group_year': group_year}
@@ -6314,9 +6837,93 @@ def abiturients_to_students():
     if request.method == 'POST':
         if not ensure_campaign_open(campaign_year):
             return redirect(url_for('abiturients_to_students', group_year=group_year), code=303)
+        distribution_action = request.form.get('distribution_action', '').strip()
         cohort1 = request.form.get('cohort1', '').strip()
         ids = [item for item in request.form.getlist('candidate_ids') if str(item).isdigit()]
+        selected_candidate_ids = ids
+        login_distribution_enabled = request.form.get('use_login_distribution') == '1' or distribution_action == 'confirm_login_groups'
         auto_split = request.form.get('auto_split') == '1'
+
+        if login_distribution_enabled and distribution_action != 'confirm_login_groups':
+            if not ids:
+                flash('Выберите хотя бы одного кандидата для распределения по логинам')
+                return redirect_to_stage()
+            with sqlite3.connect(DB_PATH) as conn:
+                refresh_enrollment_candidate_statuses(conn, campaign_year)
+                candidate_rows = get_selected_enrollment_candidate_rows(conn, campaign_year, ids)
+                login_distribution_preview = build_login_group_distribution_plan(
+                    conn,
+                    candidate_rows,
+                    campaign_year,
+                    group_year
+                )
+            candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+            return render_stage(candidates=candidates, login_distribution_preview=login_distribution_preview)
+
+        if distribution_action == 'confirm_login_groups':
+            if not ids:
+                flash('Выберите хотя бы одного кандидата для распределения по логинам')
+                return redirect_to_stage()
+            with sqlite3.connect(DB_PATH) as conn:
+                refresh_enrollment_candidate_statuses(conn, campaign_year)
+                candidate_rows = get_selected_enrollment_candidate_rows(conn, campaign_year, ids)
+                login_distribution_preview = build_login_group_distribution_plan(
+                    conn,
+                    candidate_rows,
+                    campaign_year,
+                    group_year
+                )
+                if not login_distribution_preview['summary']['can_confirm']:
+                    flash('Распределение не подтверждено: сначала исправьте строки со статусом "Проверить".', 'error')
+                    candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+                    return render_stage(candidates=candidates, login_distribution_preview=login_distribution_preview)
+
+                backup_path = create_database_backup('before_login_group_distribution_migration')
+                migrated_count = 0
+                touched_groups = set()
+                for plan_row in login_distribution_preview['rows']:
+                    target_group = normalize_group_name(plan_row['target_group'])
+                    conn.execute(
+                        'INSERT OR IGNORE INTO groups (name, group_year) VALUES (?, ?)',
+                        (target_group, group_year)
+                    )
+                    conn.execute(
+                        '''
+                        INSERT INTO students
+                            (username, password, email, firstname, lastname, cohort1, source_campaign_year, source_dogovor, source_fio)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''',
+                        (
+                            plan_row['login'], 'cron', plan_row['email'],
+                            plan_row['firstname'], plan_row['lastname'], target_group,
+                            campaign_year, plan_row['dogovor'], plan_row['fio']
+                        )
+                    )
+                    conn.execute(
+                        'DELETE FROM abiturients WHERE id=? AND campaign_year=?',
+                        (plan_row['abiturient_id'], campaign_year)
+                    )
+                    conn.execute('DELETE FROM enrollment_candidates WHERE id=?', (plan_row['candidate_id'],))
+                    migrated_count += 1
+                    touched_groups.add(target_group)
+
+                if migrated_count:
+                    log_action(
+                        'verified_candidates_migrated_by_login_groups',
+                        'campaign',
+                        campaign_year,
+                        (
+                            f"group_year={group_year}; count={migrated_count}; "
+                            f"groups={','.join(sorted(touched_groups))}; "
+                            f"backup={os.path.basename(backup_path) if backup_path else ''}"
+                        ),
+                        conn
+                    )
+            flash(f'Распределено по логинам и перенесено студентов: {migrated_count}')
+            if login_distribution_preview['summary']['create_group_count']:
+                flash(f"Создано групп: {login_distribution_preview['summary']['create_group_count']}")
+            return redirect(url_for('students_list'))
+
         if not cohort1 or not ids:
             flash('Выберите группу и хотя бы одного кандидата к зачислению')
             return redirect_to_stage()
@@ -6335,7 +6942,7 @@ def abiturients_to_students():
                 SELECT
                     c.id, c.abiturient_id, c.fio, c.dogovor, c.login, c.fam, c.imotch,
                     c.email, c.specialty, c.specialty_key, c.verification_status,
-                    c.order_group_name, a.email, a.paid
+                    c.order_group_name, a.id, a.email, a.paid
                 FROM enrollment_candidates c
                 LEFT JOIN abiturients a
                     ON a.id=c.abiturient_id AND a.campaign_year=c.campaign_year
@@ -6355,23 +6962,28 @@ def abiturients_to_students():
                 (
                     candidate_id, abiturient_id, fio, dogovor, username, lastname,
                     firstname, candidate_email, specialty, specialty_key,
-                    verification_status, order_group_name, source_email, source_paid
+                    verification_status, order_group_name, source_id, source_email, source_paid
                 ) = row
                 display_name = fio or username or str(candidate_id)
-                order_match = get_enrollment_order_match_for_abiturient(fio, dogovor, campaign_year)
-                if verification_status != 'verified' or not order_match:
+                order_match = (
+                    get_enrollment_order_match_for_abiturient(fio, dogovor, campaign_year)
+                    if enrollment_order_required
+                    else None
+                )
+                if enrollment_order_required and (verification_status != 'verified' or not order_match):
                     skipped_without_order.append(display_name)
                     continue
                 if not group_matches_specialty(cohort1, specialty_key):
                     skipped_wrong_group.append(f'{display_name} ({specialty})')
                     continue
-                required_group = order_match.get('group_name') or order_group_name
+                required_group = (order_match.get('group_name') or order_group_name) if enrollment_order_required and order_match else ''
                 if required_group and not group_matches_order_group(cohort1, required_group):
                     skipped_wrong_group.append(f'{display_name} (в приказе {required_group})')
                     continue
                 email = (source_email or candidate_email or '').strip()
-                if not abiturient_id or not email or not is_paid_person_value(source_paid):
-                    skipped_not_ready.append(display_name)
+                readiness_issues = enrollment_candidate_readiness_issues(source_id, email, source_paid)
+                if readiness_issues:
+                    skipped_not_ready.append(f"{display_name} ({', '.join(readiness_issues)})")
                     continue
                 student_exists = conn.execute('SELECT 1 FROM students WHERE username=?', (username,)).fetchone()
                 if student_exists:
@@ -6498,18 +7110,7 @@ def abiturients_to_students():
         if target == 'abiturients_to_students':
             return redirect_to_stage()
         return redirect(url_for(target))
-    return render_template(
-        'abiturients_to_students.html',
-        candidates=candidates,
-        groups=groups,
-        suggested_groups=suggested_groups,
-        specialties=specialties,
-        selected_specialty=specialty_filter,
-        order_total=order_total,
-        campaign_year=campaign_year,
-        group_year=group_year,
-        group_years=group_years,
-    )
+    return render_stage()
 
 @app.route('/migration_wizard')
 @login_required

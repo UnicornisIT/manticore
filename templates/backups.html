@@ -45,7 +45,7 @@
                 <td>{{ backup.size_text }}</td>
                 <td>
                     <div class="backup-actions">
-                        <a href="{{ url_for('download_backup', backup_name=backup.name) }}" class="btn">Скачать</a>
+                        <a href="{{ url_for('download_backup', backup_name=backup.name) }}" class="btn btn-download">Скачать</a>
                         <form method="post" action="{{ url_for('restore_backup') }}" onsubmit="return confirm('Восстановить базу из этой копии? Перед восстановлением будет создана ещё одна резервная копия текущей базы.');">
                             {% include "_csrf_field.html" %}
                             <input type="hidden" name="backup_name" value="{{ backup.name }}">

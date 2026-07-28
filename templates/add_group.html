@@ -53,7 +53,6 @@
         font-weight: 600;
     }
     .groups-field input[type="text"],
-    .groups-field input[type="file"],
     .groups-field select,
     .groups-control select {
         width: 100%;
@@ -86,19 +85,9 @@
         width: 16px;
         height: 16px;
     }
-    .groups-field input[type="file"] {
-        padding: 5px;
-    }
-    .groups-field input[type="file"]::file-selector-button {
-        height: 30px;
-        margin-right: 10px;
-        border: 0;
-        border-radius: 5px;
-        padding: 0 12px;
-        color: #fff;
-        background: #3b82f6;
-        font-weight: 600;
-        cursor: pointer;
+    .groups-field .file-picker {
+        width: 100%;
+        min-height: 110px;
     }
     .groups-actions {
         display: flex;
@@ -236,10 +225,15 @@
                 <div class="groups-description">Загрузка из файла.</div>
                 <div class="groups-field">
                     <label for="groups_file">Файл CSV:</label>
-                    <input type="file" id="groups_file" name="groups_file" accept=".csv" required>
+                    <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите CSV-файл групп">
+                        <input type="file" id="groups_file" name="groups_file" accept=".csv" required data-file-name-target="groups_file_name">
+                        <label for="groups_file" class="file-picker-button">Выберите файл</label>
+                        <span class="file-picker-drop-text">или перетащите сюда CSV</span>
+                        <span id="groups_file_name" class="file-picker-name">Файл не выбран</span>
+                    </span>
                 </div>
                 <div class="groups-actions">
-                    <a href="{{ url_for('download_groups_template', group_year=group_year) }}" class="btn btn-secondary">Скачать шаблон</a>
+                    <a href="{{ url_for('download_groups_template', group_year=group_year) }}" class="btn btn-download">Скачать шаблон</a>
                     <button type="submit" class="btn">Загрузить</button>
                 </div>
             </form>

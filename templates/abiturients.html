@@ -258,8 +258,8 @@
         </select>
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
-        <a href="{{ url_for('download_abiturients') }}" class="btn btn-success">Скачать Excel</a>
-        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn btn-success">Скачать Excel (отфильтрованный)</a>
+        <a href="{{ url_for('download_abiturients') }}" class="btn btn-success btn-download">Скачать Excel</a>
+        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn btn-success btn-download">Скачать Excel (отфильтрованный)</a>
     </form>
     {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
     <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar">

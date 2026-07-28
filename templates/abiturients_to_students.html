@@ -91,7 +91,66 @@
         margin-top: 8px;
     }
     .migration-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
         margin-top: 18px;
+    }
+    .login-mode-only {
+        display: none;
+    }
+    .login-distribution-active .manual-mode-only {
+        display: none !important;
+    }
+    .login-distribution-active .login-mode-only {
+        display: inline-flex;
+    }
+    .login-distribution-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 0 2px;
+        font-weight: 500;
+    }
+    .login-distribution-preview {
+        margin-top: 22px;
+        padding: 18px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .login-distribution-preview h3 {
+        margin: 0 0 14px 0;
+    }
+    .preview-stats {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+    }
+    .preview-stat {
+        min-width: 128px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #fff;
+        border: 1px solid #dbeafe;
+        color: #1f2937;
+    }
+    .preview-stat strong {
+        display: block;
+        color: #2563eb;
+        font-size: 20px;
+    }
+    .preview-note {
+        margin: 0 0 12px 0;
+        color: #475569;
+    }
+    .preview-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
     }
     .groups-empty {
         color: #64748b;
@@ -104,6 +163,14 @@
         border-radius: 8px;
         background: #fffbeb;
         color: #92400e;
+    }
+    .order-info {
+        margin: 0 0 18px 0;
+        padding: 10px 12px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1e3a8a;
     }
     @media (max-width: 700px) {
         .migration-form {
@@ -119,7 +186,7 @@
 <h2>Сверка и перенос в студенты</h2>
 {% include "_campaign_switcher.html" %}
 
-<div class="migration-form">
+<div class="migration-form {% if login_distribution_enabled %}login-distribution-active{% endif %}">
     <div class="stage-panel">
         <form method="post" action="{{ url_for('enrollment_candidates_sync') }}">
             {% include "_csrf_field.html" %}
@@ -127,11 +194,20 @@
             <input type="hidden" name="group_year" value="{{ group_year }}">
             <button type="submit" class="btn">1. Обновить кандидатов</button>
         </form>
-        <p class="stage-note">Кандидаты формируются из абитуриентов с почтой и оплатой. Перенос в студенты доступен только после совпадения с приказом о зачислении.</p>
+        <p class="stage-note">
+            Кандидаты формируются из абитуриентов с почтой и оплатой.
+            {% if enrollment_order_required %}
+            Перенос в студенты доступен только после совпадения с приказом о зачислении.
+            {% else %}
+            Сверка по приказу сейчас отключена, перенос доступен по почте и оплате.
+            {% endif %}
+        </p>
     </div>
 
-    {% if order_total == 0 %}
+    {% if enrollment_order_required and order_total == 0 %}
     <p class="order-warning">Приказ текущей кампании ещё не загружен. Кандидатов можно подготовить, но создать студентов получится только после сверки с приказом.</p>
+    {% elif not enrollment_order_required %}
+    <p class="order-info">Проверка по приказу отключена в правилах логинов. Приказы можно загружать и сверять, но они не блокируют перенос.</p>
     {% endif %}
 
     <form method="get" class="group-folder-form">
@@ -167,7 +243,7 @@
         <div class="migration-controls">
             <div>
                 <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
-                <select name="cohort1" id="cohort1" required style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:240px;">
+                <select name="cohort1" id="cohort1" data-manual-control="1" {% if not login_distribution_enabled %}required{% endif %} {% if login_distribution_enabled %}disabled{% endif %} style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:240px;">
                     <option value="">Выберите группу</option>
                     {% for group in suggested_groups %}
                     <option value="{{ group.name }}" {% if group.is_full %}disabled{% endif %}>
@@ -180,8 +256,12 @@
                 <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
             {% endif %}
             <label style="display:inline-flex; align-items:center; gap:8px; font-weight:500; min-height:38px;">
-                <input type="checkbox" name="auto_split" value="1">
+                <input type="checkbox" name="auto_split" value="1" data-manual-control="1" {% if login_distribution_enabled %}disabled{% endif %}>
                 Автораспределить по подгруппам
+            </label>
+            <label class="login-distribution-toggle">
+                <input type="checkbox" id="use_login_distribution" name="use_login_distribution" value="1" {% if login_distribution_enabled %}checked{% endif %}>
+                Распределить по логинам
             </label>
         </div>
 
@@ -194,12 +274,12 @@
                             <th style="width:44px;">
                                 <input type="checkbox" id="select_all_ready" title="Выбрать всех сверенных">
                             </th>
-                            <th><button type="button" class="sort-button" data-sort-key="fio">ФИО</button></th>
-                            <th><button type="button" class="sort-button" data-sort-key="specialty">Специальность</button></th>
-                            <th><button type="button" class="sort-button" data-sort-key="login">Логин</button></th>
-                            <th><button type="button" class="sort-button" data-sort-key="email">Email</button></th>
-                            <th><button type="button" class="sort-button" data-sort-key="group">Группа по приказу</button></th>
-                            <th><button type="button" class="sort-button" data-sort-key="status">Статус</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="abiturients_table_body">ФИО</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="abiturients_table_body">Специальность</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="login" data-sort-target="abiturients_table_body">Логин</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="email" data-sort-target="abiturients_table_body">Email</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="group" data-sort-target="abiturients_table_body">Группа по приказу</button></th>
+                            <th><button type="button" class="sort-button" data-sort-key="status" data-sort-target="abiturients_table_body">Статус</button></th>
                         </tr>
                     </thead>
                     <tbody id="abiturients_table_body">
@@ -213,7 +293,7 @@
                             data-status="{{ (candidate.status_label or '')|lower }}"
                         >
                             <td>
-                                <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" {% if not candidate.can_migrate %}disabled{% endif %}>
+                                <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" {% if candidate.id|string in selected_candidate_ids %}checked{% endif %} {% if not candidate.can_migrate %}disabled{% endif %}>
                             </td>
                             <td style="white-space: normal; min-width:240px;">{{ candidate.fio }}</td>
                             <td>{{ candidate.specialty }}</td>
@@ -235,9 +315,82 @@
         </div>
 
         <div class="migration-actions">
-            <button type="submit" class="btn btn-success" {% if not suggested_groups %}disabled{% endif %}>2. Перенести сверенных в студенты</button>
+            <button type="submit" class="btn btn-success manual-mode-only" {% if not suggested_groups %}disabled{% endif %}>2. Перенести сверенных в студенты</button>
+            <button type="submit" name="distribution_action" value="preview_login_groups" class="btn btn-success login-mode-only" formtarget="_self">2. Предпросмотр по логинам</button>
         </div>
     </form>
+
+    {% if login_distribution_preview %}
+    <div class="login-distribution-preview">
+        <h3>Предпросмотр распределения по логинам</h3>
+        <div class="preview-stats">
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.total }}</strong>Выбрано</div>
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.ready_count }}</strong>Готово</div>
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.issue_count }}</strong>Проверить</div>
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.create_group_count }}</strong>Создать групп</div>
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.login_group_count }}</strong>По логину</div>
+            <div class="preview-stat"><strong>{{ login_distribution_preview.summary.order_group_count }}</strong>По приказу</div>
+        </div>
+        <p class="preview-note">
+            Запись в студенты начнётся только после подтверждения.
+            {% if enrollment_order_required %}
+            Если в приказе есть группа, она имеет приоритет над логином.
+            {% else %}
+            Проверка по приказу отключена, поэтому группа рассчитывается по логину.
+            {% endif %}
+        </p>
+        <div class="preview-actions">
+            <form method="post">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="distribution_action" value="confirm_login_groups">
+                <input type="hidden" name="use_login_distribution" value="1">
+                <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+                <input type="hidden" name="group_year" value="{{ group_year }}">
+                <input type="hidden" name="specialty" value="{{ selected_specialty }}">
+                {% for row in login_distribution_preview.rows %}
+                <input type="hidden" name="candidate_ids" value="{{ row.candidate_id }}">
+                {% endfor %}
+                <button type="submit" class="btn btn-success" {% if not login_distribution_preview.summary.can_confirm %}disabled{% endif %}>Подтвердить распределение</button>
+            </form>
+            <a href="{{ url_for('abiturients_to_students', group_year=group_year, specialty=selected_specialty) }}" class="btn btn-danger">Отмена</a>
+        </div>
+        <div class="migration-table-wrapper">
+            <table style="min-width: 1120px;">
+                <thead>
+                    <tr>
+                        <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="login_distribution_preview_body">ФИО</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="login_distribution_preview_body">Специальность</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="login" data-sort-target="login_distribution_preview_body">Логин</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="group" data-sort-target="login_distribution_preview_body">Группа</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="source" data-sort-target="login_distribution_preview_body">Источник</button></th>
+                        <th><button type="button" class="sort-button" data-sort-key="status" data-sort-target="login_distribution_preview_body">Статус</button></th>
+                        <th>Комментарий</th>
+                    </tr>
+                </thead>
+                <tbody id="login_distribution_preview_body">
+                    {% for row in login_distribution_preview.rows %}
+                    <tr
+                        data-fio="{{ (row.fio or '')|lower }}"
+                        data-specialty="{{ (row.specialty or '')|lower }}"
+                        data-login="{{ (row.login or '')|lower }}"
+                        data-group="{{ (row.target_group or '')|lower }}"
+                        data-source="{{ (row.source or '')|lower }}"
+                        data-status="{{ (row.sort_status or '')|lower }}"
+                    >
+                        <td style="white-space: normal; min-width:240px;">{{ row.fio }}</td>
+                        <td>{{ row.specialty }}</td>
+                        <td>{{ row.login }}</td>
+                        <td>{{ row.target_group }}</td>
+                        <td>{{ row.source }}</td>
+                        <td><span class="status-badge {{ row.badge_class }}">{{ row.status_label }}</span></td>
+                        <td style="white-space: normal; min-width:260px;">{{ row.status_note or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <script>
@@ -250,9 +403,8 @@ if (selectAllReady) {
     });
 }
 
-const abiturientsTableBody = document.getElementById('abiturients_table_body');
 const sortButtons = document.querySelectorAll('.sort-button[data-sort-key]');
-let activeSort = { key: null, direction: 'asc' };
+const sortState = {};
 
 function getSortValue(row, key) {
     return (row.dataset[key] || '').trim();
@@ -261,8 +413,14 @@ function getSortValue(row, key) {
 sortButtons.forEach(function(button) {
     button.addEventListener('click', function() {
         const key = button.dataset.sortKey;
-        const direction = activeSort.key === key && activeSort.direction === 'asc' ? 'desc' : 'asc';
-        const rows = Array.from(abiturientsTableBody.querySelectorAll('tr'));
+        const targetId = button.dataset.sortTarget || 'abiturients_table_body';
+        const tableBody = document.getElementById(targetId);
+        if (!tableBody) {
+            return;
+        }
+        const previous = sortState[targetId] || { key: null, direction: 'asc' };
+        const direction = previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc';
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
 
         rows.sort(function(firstRow, secondRow) {
             const firstValue = getSortValue(firstRow, key);
@@ -276,15 +434,41 @@ sortButtons.forEach(function(button) {
         });
 
         rows.forEach(function(row) {
-            abiturientsTableBody.appendChild(row);
+            tableBody.appendChild(row);
         });
 
-        sortButtons.forEach(function(item) {
+        document.querySelectorAll('.sort-button[data-sort-target="' + targetId + '"]').forEach(function(item) {
             item.removeAttribute('data-sort-direction');
         });
         button.dataset.sortDirection = direction;
-        activeSort = { key: key, direction: direction };
+        sortState[targetId] = { key: key, direction: direction };
     });
 });
+
+const migrationForm = document.querySelector('.migration-form');
+const loginDistributionToggle = document.getElementById('use_login_distribution');
+const cohortSelect = document.getElementById('cohort1');
+const manualControls = document.querySelectorAll('[data-manual-control="1"]');
+
+function updateLoginDistributionMode() {
+    const enabled = loginDistributionToggle && loginDistributionToggle.checked;
+    if (migrationForm) {
+        migrationForm.classList.toggle('login-distribution-active', enabled);
+    }
+    manualControls.forEach(function(control) {
+        if (control === loginDistributionToggle) {
+            return;
+        }
+        control.disabled = enabled;
+    });
+    if (cohortSelect) {
+        cohortSelect.required = !enabled;
+    }
+}
+
+if (loginDistributionToggle) {
+    loginDistributionToggle.addEventListener('change', updateLoginDistributionMode);
+    updateLoginDistributionMode();
+}
 </script>
 {% endblock %}

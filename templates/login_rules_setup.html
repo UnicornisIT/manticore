@@ -103,6 +103,33 @@
     .rules-actions .btn {
         margin: 0;
     }
+    .rules-switch {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        margin: 14px 0 18px 0;
+        padding: 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #eff6ff;
+    }
+    .rules-switch input {
+        width: auto;
+        min-width: 18px;
+        height: 18px;
+        margin-top: 2px;
+    }
+    .rules-switch strong {
+        display: block;
+        color: #1f2937;
+        margin-bottom: 4px;
+    }
+    .rules-switch span {
+        display: block;
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.45;
+    }
     @media (max-width: 820px) {
         .rules-layout,
         .rules-grid {
@@ -127,6 +154,13 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="mode" value="standard">
+                <label class="rules-switch">
+                    <input type="checkbox" name="require_enrollment_order" value="1" {% if enrollment_order_required %}checked{% endif %}>
+                    <span>
+                        <strong>Требовать сверку по приказу перед переносом</strong>
+                        <span>Если выключить, перенос в студенты будет доступен по почте и оплате, как раньше.</span>
+                    </span>
+                </label>
                 <button type="submit" class="btn">Использовать стандартные правила</button>
             </form>
         </section>
@@ -143,6 +177,14 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="mode" value="custom">
+
+                <label class="rules-switch">
+                    <input type="checkbox" name="require_enrollment_order" value="1" {% if enrollment_order_required %}checked{% endif %}>
+                    <span>
+                        <strong>Требовать сверку по приказу перед переносом</strong>
+                        <span>Если выключить, перенос в студенты будет доступен по почте и оплате, как раньше.</span>
+                    </span>
+                </label>
 
                 <div class="rules-field">
                     <label for="template">Шаблон логина</label>

@@ -126,8 +126,13 @@ def run_command_capture(args: list[str], cwd: Path) -> subprocess.CompletedProce
 
 def update_git_repository(app_dir: Path) -> None:
     if not (app_dir / ".git").exists():
-        print("Git repository was not found, code update skipped.")
-        return
+        raise UpdateError(
+            "Program files were not updated because this folder is not a Git repository. "
+            f"Expected .git in: {app_dir}. "
+            "This usually happens when the app was downloaded as a ZIP archive or copied manually. "
+            "Install/update from a Git clone, or replace program files from a fresh release archive "
+            "while keeping .env and uploads."
+        )
     if not shutil.which("git"):
         raise UpdateError("Git was not found. Install Git or update the program files manually.")
 

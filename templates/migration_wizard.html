@@ -57,7 +57,14 @@
     </div>
     <div class="wizard-step">
         <strong>3. Кандидаты</strong>
-        <span>{{ dashboard.candidate_total }} подготовлено, {{ dashboard.candidate_verified }} сверено приказом</span>
+        <span>
+            {{ dashboard.candidate_total }} подготовлено,
+            {% if dashboard.enrollment_order_required %}
+            {{ dashboard.candidate_verified }} сверено приказом
+            {% else %}
+            {{ dashboard.ready_to_students }} готово к переносу
+            {% endif %}
+        </span>
     </div>
     <div class="wizard-step">
         <strong>4. Группы</strong>
@@ -72,7 +79,11 @@
         <input type="hidden" name="group_year" value="{{ group_year }}">
         <button type="submit" class="btn">1. Подготовить кандидатов</button>
     </form>
+    {% if dashboard.enrollment_order_required %}
     <a href="{{ url_for('file_work', section='orders') }}" class="btn">2. Загрузить приказ</a>
+    {% else %}
+    <a href="{{ url_for('login_generation_setup') }}" class="btn btn-secondary">Приказ отключён</a>
+    {% endif %}
     <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">3. Перенести в студенты</a>
     <a href="{{ url_for('students_duplicates') }}" class="btn">Дублирующие записи студентов</a>
     <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дублирующие записи абитуриентов</a>
