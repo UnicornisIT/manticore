@@ -8,12 +8,9 @@
         margin-bottom: 18px;
     }
     .admin-panel-card {
-        max-width: 960px;
+        max-width: 1080px;
         margin: 24px auto 32px auto;
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 4px 24px rgba(44, 62, 80, 0.08);
-        padding: 32px;
+        padding: 0;
     }
     .admin-toolbar {
         margin-bottom: 32px;
@@ -71,13 +68,26 @@
         margin: 0;
     }
     .admin-table-actions .btn {
-        min-height: 38px;
+        min-height: 34px;
         margin: 0;
     }
+    .admin-users-title {
+        margin: 0 0 14px 0;
+    }
+    .admin-users-table-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .admin-users-table {
+        min-width: 720px;
+    }
+    .admin-users-table th,
+    .admin-users-table td {
+        white-space: normal;
+    }
     @media (max-width: 700px) {
-        .admin-panel-card {
-            padding: 24px 18px;
-        }
         .admin-toolbar {
             grid-template-columns: 1fr;
         }
@@ -105,34 +115,34 @@
             </button>
         </form>
     </div>
-    <h2 style="margin-bottom:18px;">Пользователи с доступом к базе данных</h2>
-    <div style="overflow-x:auto;">
-        <table style="min-width:100%; border-collapse:collapse; table-layout:auto;">
-            <tr style="background:#f3f4f6;">
-                <th style="padding:8px; word-break:break-word;">Логин</th>
-                <th style="padding:8px; word-break:break-word;">Роль</th>
-                <th style="padding:8px; word-break:break-word;">Статус</th>
-                <th style="padding:8px; word-break:break-word;">Действия</th>
+    <h2 class="admin-users-title">Пользователи с доступом к базе данных</h2>
+    <div class="admin-users-table-wrap">
+        <table class="admin-users-table">
+            <tr>
+                <th>Логин</th>
+                <th>Роль</th>
+                <th>Статус</th>
+                <th>Действия</th>
             </tr>
             {% for user in all_users %}
-            <tr style="border-bottom:1px solid #e5e7eb;">
-                <td style="padding:8px; word-break:break-word;">{{ user[1] }}</td>
-                <td style="padding:8px; word-break:break-word;">{{ role_labels.get(user[2], user[2]) }}</td>
-                <td style="padding:8px; word-break:break-word;">
+            <tr>
+                <td>{{ user[1] }}</td>
+                <td>{{ role_labels.get(user[2], user[2]) }}</td>
+                <td>
                     {% if user[3] == 1 %}
-                        <span style="color:green;">Одобрен</span>
+                        <span class="status-badge status-success">Одобрен</span>
                     {% else %}
-                        <span style="color:orange;">Ожидает</span>
+                        <span class="status-badge status-warning">Ожидает</span>
                     {% endif %}
                 </td>
-                <td style="padding:8px; word-break:break-word;">
+                <td>
                     <div class="admin-table-actions">
-                    <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn">Редактировать</a>
+                    <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn btn-secondary btn-small">Редактировать</a>
                     {% if user[1] != 'vaanedain' %}
                     <form method="post" action="{{ url_for('delete_user') }}">
                         {% include "_csrf_field.html" %}
                         <input type="hidden" name="user_id" value="{{ user[0] }}">
-                        <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить пользователя?');">Удалить</button>
+                        <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Удалить пользователя?');">Удалить</button>
                     </form>
                     {% endif %}
                     </div>

@@ -19,26 +19,58 @@
         color: #2563eb;
         margin-bottom: 6px;
     }
-    .wizard-actions {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        align-items: center;
+    .wizard-action-groups {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.7fr);
+        gap: 16px;
+        align-items: start;
         margin-bottom: 20px;
     }
-    .wizard-actions form {
-        display: inline-flex;
+    .wizard-action-section {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 16px;
+        background: #f8fafc;
+    }
+    .wizard-action-section h2 {
+        margin: 0 0 12px 0;
+        color: #1f2937;
+        font-size: 18px;
+    }
+    .wizard-primary-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .wizard-secondary-actions {
+        display: grid;
+        gap: 10px;
+    }
+    .wizard-primary-actions form {
+        display: flex;
         margin: 0;
         padding: 0;
     }
-    .wizard-actions .btn {
+    .wizard-action-section .btn {
+        width: 100%;
+        min-height: 44px;
         margin: 0;
+        padding: 0 14px;
+        justify-content: center;
+    }
+    .wizard-secondary-actions .btn {
+        color: #1d4ed8;
+        background: #fff;
+        border-color: #bfdbfe;
+        box-shadow: none;
     }
     @media (max-width: 900px) {
         .wizard-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .wizard-action-groups { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
         .wizard-steps { grid-template-columns: 1fr; }
+        .wizard-primary-actions { grid-template-columns: 1fr; }
     }
 </style>
 {% endblock %}
@@ -72,23 +104,33 @@
     </div>
 </div>
 
-<div class="wizard-actions">
-    <form method="post" action="{{ url_for('enrollment_candidates_sync') }}">
-        {% include "_csrf_field.html" %}
-        <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-        <input type="hidden" name="group_year" value="{{ group_year }}">
-        <button type="submit" class="btn">1. Подготовить кандидатов</button>
-    </form>
-    {% if dashboard.enrollment_order_required %}
-    <a href="{{ url_for('file_work', section='orders') }}" class="btn">2. Загрузить приказ</a>
-    {% else %}
-    <a href="{{ url_for('login_generation_setup') }}" class="btn btn-secondary">Приказ отключён</a>
-    {% endif %}
-    <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">3. Перенести в студенты</a>
-    <a href="{{ url_for('students_duplicates') }}" class="btn">Дублирующие записи студентов</a>
-    <a href="{{ url_for('duplicates_abiturients') }}" class="btn">Дублирующие записи абитуриентов</a>
-    {% if session.get('role') == 'admin' %}
-    <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Академические группы</a>
-    {% endif %}
+<div class="wizard-action-groups">
+    <section class="wizard-action-section" aria-labelledby="wizard-primary-actions-title">
+        <h2 id="wizard-primary-actions-title">Основной маршрут миграции</h2>
+        <div class="wizard-primary-actions">
+            <form method="post" action="{{ url_for('enrollment_candidates_sync') }}">
+                {% include "_csrf_field.html" %}
+                <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
+                <input type="hidden" name="group_year" value="{{ group_year }}">
+                <button type="submit" class="btn">1. Подготовить кандидатов</button>
+            </form>
+            {% if dashboard.enrollment_order_required %}
+            <a href="{{ url_for('file_work', section='orders') }}" class="btn">2. Загрузить приказ</a>
+            {% else %}
+            <a href="{{ url_for('login_generation_setup') }}" class="btn btn-secondary">Приказ отключён</a>
+            {% endif %}
+            <a href="{{ url_for('abiturients_to_students', group_year=group_year) }}" class="btn">3. Перенести в студенты</a>
+        </div>
+    </section>
+    <section class="wizard-action-section" aria-labelledby="wizard-secondary-actions-title">
+        <h2 id="wizard-secondary-actions-title">Проверки и справочники</h2>
+        <div class="wizard-secondary-actions">
+            {% if session.get('role') == 'admin' %}
+            <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn btn-secondary">Академические группы</a>
+            {% endif %}
+            <a href="{{ url_for('students_duplicates') }}" class="btn btn-secondary">Дублирующие записи студентов</a>
+            <a href="{{ url_for('duplicates_abiturients') }}" class="btn btn-secondary">Дублирующие записи абитуриентов</a>
+        </div>
+    </section>
 </div>
 {% endblock %}

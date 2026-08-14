@@ -1,27 +1,83 @@
 {% extends "base.html" %}
 {% block title %}Редактировать конфликт логина{% endblock %}
+{% block head %}
+<style>
+    .conflict-edit-page {
+        max-width: 640px;
+        margin: 0 auto;
+    }
+    .conflict-edit-summary {
+        display: grid;
+        gap: 6px;
+        margin: 16px 0;
+        padding: 16px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1e3a8a;
+    }
+    .conflict-edit-summary p {
+        margin: 0;
+    }
+    .conflict-edit-form {
+        display: grid;
+        gap: 14px;
+        padding: 20px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+    .conflict-edit-field {
+        display: grid;
+        gap: 8px;
+    }
+    .conflict-edit-field label {
+        color: #374151;
+        font-weight: 600;
+    }
+    .conflict-edit-field input {
+        width: 100%;
+    }
+    .conflict-edit-note {
+        margin: 0;
+        color: #64748b;
+        font-size: 14px;
+    }
+    .conflict-edit-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    @media (max-width: 520px) {
+        .conflict-edit-actions {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
 {% block content %}
     <h1>Редактировать запись конфликта</h1>
-    <div style="max-width: 600px; margin: 0 auto;">
-        <div style="background:#f0f8ff; border:1px solid #4da6ff; padding:16px; margin:16px 0; border-radius:8px;">
+    <div class="conflict-edit-page">
+        <div class="conflict-edit-summary">
             <p><strong>ФИО:</strong> {{ conflict[1] }}</p>
             <p><strong>Кампания:</strong> {{ conflict[6] }}</p>
             <p><strong>Договор:</strong> {{ conflict[2] }}</p>
             <p><strong>Текущий логин:</strong> {{ conflict[3] }}</p>
         </div>
 
-        <form method="post" style="border:1px solid #ddd; padding:20px; border-radius:8px; background:#f9f9f9;">
+        <form method="post" class="conflict-edit-form">
             {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ conflict[6] }}">
-            <label for="login" style="font-weight:500; display:block; margin-bottom:8px;">Новый логин:</label>
-            <input type="text" id="login" name="login" required value="{{ conflict[3] }}" 
-                   style="width:100%; padding:10px; margin-bottom:16px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-            
-            <div style="color:#666; font-size:0.9em; margin-bottom:16px;">
-                <strong>Важно:</strong> При сохранении будет проверена уникальность логина. Если логин уже существует, запись останется в конфликтах.
+            <div class="conflict-edit-field">
+                <label for="login">Новый логин:</label>
+                <input type="text" id="login" name="login" required value="{{ conflict[3] }}">
             </div>
+            
+            <p class="conflict-edit-note">
+                <strong>Важно:</strong> При сохранении будет проверена уникальность логина. Если логин уже существует, запись останется в конфликтах.
+            </p>
 
-            <div style="display:flex; gap:10px;">
+            <div class="conflict-edit-actions">
                 <button type="submit" class="btn">Сохранить</button>
                 <a href="{{ url_for('login_conflicts') }}" class="btn btn-secondary">Отмена</a>
             </div>

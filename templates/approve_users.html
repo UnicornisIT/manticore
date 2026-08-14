@@ -1,22 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Одобрение заявок ассистентов{% endblock %}
+{% block head %}
+<style>
+    .approve-users-title {
+        text-align: center;
+    }
+    .approve-users-list {
+        display: grid;
+        gap: 10px;
+        width: min(100%, 560px);
+        margin: 28px auto;
+    }
+    .approve-user-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 14px 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .approve-user-name {
+        color: #111827;
+        font-size: 16px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+    }
+    .approve-user-role {
+        color: #2563eb;
+    }
+    .approve-user-actions {
+        display: inline-flex;
+        gap: 8px;
+        margin: 0;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+    .approve-users-empty {
+        color: #64748b;
+        text-align: center;
+    }
+    @media (max-width: 560px) {
+        .approve-user-row {
+            align-items: stretch;
+            flex-direction: column;
+        }
+        .approve-user-actions .btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
 {% block content %}
-<h2 style="text-align:center; margin-top:32px;">Заявки на регистрацию ассистентов</h2>
-<div style="max-width:500px; margin:32px auto; background:#fff; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); padding:32px;">
+<h2 class="approve-users-title">Заявки на регистрацию ассистентов</h2>
+<div class="approve-users-list">
     {% if pending_users %}
         {% for user in pending_users %}
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; border-bottom:1px solid #e5e7eb; padding-bottom:10px;">
-                <span style="font-size:16px; font-weight:500;">{{ user[1] }} <span style="color:#2563eb;">({{ user[2] }})</span></span>
-                <form method="post" style="display:inline;">
+            <div class="approve-user-row">
+                <span class="approve-user-name">{{ user[1] }} <span class="approve-user-role">({{ user[2] }})</span></span>
+                <form method="post" class="approve-user-actions">
                     {% include "_csrf_field.html" %}
                     <input type="hidden" name="user_id" value="{{ user[0] }}">
-                    <button name="action" value="approve" class="btn" style="margin-right:8px;">Одобрить</button>
+                    <button name="action" value="approve" class="btn">Одобрить</button>
                     <button name="action" value="reject" class="btn btn-danger">Отклонить</button>
                 </form>
             </div>
         {% endfor %}
     {% else %}
-        <div style="text-align:center; color:#888;">Нет заявок на регистрацию.</div>
+        <div class="approve-users-empty">Нет заявок на регистрацию.</div>
     {% endif %}
 </div>
 {% endblock %}

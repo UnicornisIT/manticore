@@ -58,6 +58,23 @@
         background: #fffbeb;
         border-color: #fde68a;
     }
+    .check-item.info {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+    }
+    .checks-section-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .checks-info-label {
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #dbeafe;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 700;
+    }
     .check-topline {
         display: flex;
         align-items: center;
@@ -145,7 +162,10 @@
 
 {% for section in report.sections %}
 <section class="checks-section">
-    <h2>{{ section.title }}</h2>
+    <h2 class="checks-section-title">
+        {{ section.title }}
+        {% if section.informational %}<span class="checks-info-label">Справочно</span>{% endif %}
+    </h2>
     <div class="checks-grid">
         {% for check in section.checks %}
         <article class="check-item {{ check.tone }}" id="{{ check.id }}">

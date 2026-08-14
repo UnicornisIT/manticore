@@ -1,16 +1,55 @@
 <!-- templates/register.html -->
 {% extends "base.html" %}
 {% block title %}Регистрация ассистента{% endblock %}
+{% block head %}
+<style>
+    .register-title {
+        text-align: center;
+    }
+    .register-form {
+        display: grid;
+        gap: 8px;
+        width: min(100%, 420px);
+        margin: 32px auto;
+        padding: 32px 40px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 4px 18px rgba(44, 62, 80, 0.08);
+    }
+    .register-form label {
+        color: #374151;
+        font-weight: 600;
+    }
+    .register-form input,
+    .register-form .btn {
+        width: 100%;
+    }
+    .register-help {
+        margin: -2px 0 10px 0;
+        color: #64748b;
+        font-size: 13px;
+    }
+    .register-form .btn-secondary {
+        margin-top: 4px;
+    }
+    @media (max-width: 520px) {
+        .register-form {
+            padding: 24px 18px;
+        }
+    }
+</style>
+{% endblock %}
 {% block content %}
-<h1 style="text-align:center;">Регистрация ассистента</h1>
-<form method="post" style="background:#fff; padding:32px 40px; border-radius:12px; box-shadow:0 4px 24px rgba(44,62,80,0.08); display:flex; flex-direction:column; align-items:center; max-width:400px; margin:32px auto;">
+<h1 class="register-title">Регистрация ассистента</h1>
+<form method="post" class="register-form">
     {% include "_csrf_field.html" %}
-    <label style="width:100%; text-align:left; font-weight:500; margin-bottom:8px;">Логин:</label>
-    <input type="text" name="username" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-    <label style="width:100%; text-align:left; font-weight:500; margin-bottom:8px;">Пароль:</label>
-    <input type="password" name="password" autocomplete="new-password" minlength="8" required style="width:100%;margin-bottom:8px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-    <div style="font-size:13px; color:#64748b; margin-bottom:18px;">Минимум 8 символов.</div>
-    <button type="submit" class="btn" style="width:100%;">Зарегистрироваться</button>
-    <a href="{{ url_for('login') }}" class="btn btn-secondary" style="width:100%; margin-top:12px;">Вернуться к входу</a>
+    <label for="username">Логин:</label>
+    <input type="text" id="username" name="username" required>
+    <label for="password">Пароль:</label>
+    <input type="password" id="password" name="password" autocomplete="new-password" minlength="8" required>
+    <div class="register-help">Минимум 8 символов.</div>
+    <button type="submit" class="btn">Зарегистрироваться</button>
+    <a href="{{ url_for('login') }}" class="btn btn-secondary">Вернуться к входу</a>
 </form>
 {% endblock %}

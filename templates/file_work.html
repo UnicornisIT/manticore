@@ -50,12 +50,14 @@
     }
     .upload-row {
         display: flex;
-        align-items: center;
-        gap: 12px;
+        align-items: flex-end;
+        gap: 10px 12px;
         flex-wrap: wrap;
     }
-    .upload-row label {
-        font-weight: 500;
+    .upload-row > label:not(.file-picker-button) {
+        flex: 1 0 100%;
+        color: #374151;
+        font-weight: 600;
     }
     .upload-row select {
         box-sizing: border-box;
@@ -69,7 +71,8 @@
         font-size: 15px;
     }
     .file-picker {
-        flex: 1 1 360px;
+        flex: 1 1 420px;
+        min-width: min(100%, 320px);
     }
     .upload-row .btn {
         box-sizing: border-box;
@@ -79,6 +82,7 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        flex: 0 0 auto;
     }
     .import-preview {
         max-width: 1100px;
@@ -257,6 +261,9 @@
         line-height: 1.45;
     }
     @media (max-width: 640px) {
+        .upload-row .btn {
+            width: 100%;
+        }
         .updates-report-list li {
             grid-template-columns: 1fr;
         }
@@ -325,7 +332,7 @@
     </form>
     {{ render_upload_report(abiturients_report) }}
     {% if abiturients_preview %}
-    <div class="import-preview">
+    <div class="import-preview" data-abiturients-import-preview>
         <h3>Предпросмотр импорта абитуриентов</h3>
         <div class="preview-stats">
             <div class="preview-stat"><strong>{{ abiturients_preview.total }}</strong>Всего строк</div>
@@ -336,7 +343,7 @@
         </div>
         <p class="preview-note">В таблице показаны все строки файла. Запись в базу начнётся только после подтверждения.</p>
         <div class="preview-actions">
-            <form method="post">
+            <form method="post" data-abiturients-import-action>
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="import_action" value="confirm">
                 <input type="hidden" name="file_section" value="abiturients">
@@ -344,7 +351,7 @@
                 <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
                 <button type="submit" class="btn">Подтвердить импорт</button>
             </form>
-            <form method="post">
+            <form method="post" data-abiturients-import-action>
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="import_action" value="cancel">
                 <input type="hidden" name="file_section" value="abiturients">
@@ -625,7 +632,11 @@
 {% if not active_file_section or active_file_section == 'students' %}
 <div class="upload-section" id="file-section-students">
     <h2>Загрузка студентов</h2>
+    {% if course_groups_enabled %}
+    <p class="file-hint">Файл студентов должен содержать <b>username, password, email, firstname, lastname, cohort1</b>. Глобальная группа курса рассчитывается автоматически; можно добавить необязательные поля <b>source_dogovor</b> и <b>source_fio</b>, чтобы студенты участвовали в проверке договоров.</p>
+    {% else %}
     <p class="file-hint">Файл студентов должен содержать <b>username, password, email, firstname, lastname, cohort1</b>. Можно добавить необязательные поля <b>source_dogovor</b> и <b>source_fio</b>, чтобы студенты участвовали в проверке договоров.</p>
+    {% endif %}
     <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-download upload-template-link">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
@@ -679,6 +690,9 @@
                         <th>Фамилия</th>
                         <th>Имя</th>
                         <th>Группа</th>
+                        {% if course_groups_enabled %}
+                        <th>Глобальная группа курса</th>
+                        {% endif %}
                         <th>Договор при поступлении</th>
                         <th>Кампания</th>
                         <th>Действие</th>
@@ -700,6 +714,9 @@
                         <td>{{ row.lastname }}</td>
                         <td>{{ row.firstname }}</td>
                         <td>{{ row.cohort1 }}</td>
+                        {% if course_groups_enabled %}
+                        <td>{{ row.cohort2 or '-' }}</td>
+                        {% endif %}
                         <td>{{ row.source_dogovor or '-' }}</td>
                         <td>{{ row.source_campaign_year or '-' }}</td>
                         <td><span class="status-badge {{ row.badge_class }}">{{ row.action_label }}</span></td>
@@ -713,4 +730,48 @@
     {% endif %}
 </div>
 {% endif %}
+
+{% if abiturients_import_result_ready %}
+<a
+    id="abiturients-import-result-download"
+    href="{{ url_for('download_abiturients_import_result') }}"
+    download="abiturients_with_logins.xlsx"
+    hidden
+>Скачать результат импорта</a>
+{% endif %}
+
+<script>
+(function() {
+    const preview = document.querySelector('[data-abiturients-import-preview]');
+    if (preview) {
+        const forms = Array.from(preview.querySelectorAll('[data-abiturients-import-action]'));
+        let submitted = false;
+        forms.forEach(function(form) {
+            form.addEventListener('submit', function(event) {
+                if (submitted) {
+                    event.preventDefault();
+                    return;
+                }
+                submitted = true;
+                preview.setAttribute('aria-busy', 'true');
+                preview.querySelectorAll('button').forEach(function(button) {
+                    button.disabled = true;
+                });
+                const action = form.querySelector('input[name="import_action"]');
+                const submitButton = form.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.textContent = action && action.value === 'cancel'
+                        ? 'Отмена…'
+                        : 'Импорт выполняется…';
+                }
+            });
+        });
+    }
+
+    const resultDownload = document.getElementById('abiturients-import-result-download');
+    if (resultDownload) {
+        resultDownload.click();
+    }
+})();
+</script>
 {% endblock %}

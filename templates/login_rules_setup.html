@@ -154,11 +154,19 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="mode" value="standard">
+                <input type="hidden" name="use_course_groups" value="0">
                 <label class="rules-switch">
                     <input type="checkbox" name="require_enrollment_order" value="1" {% if enrollment_order_required %}checked{% endif %}>
                     <span>
                         <strong>Требовать сверку по приказу перед переносом</strong>
                         <span>Если выключить, перенос в студенты будет доступен по почте и оплате, как раньше.</span>
+                    </span>
+                </label>
+                <label class="rules-switch">
+                    <input type="checkbox" name="use_course_groups" value="1" {% if course_groups_enabled %}checked{% endif %}>
+                    <span>
+                        <strong>Использовать глобальные группы курса</strong>
+                        <span>Если выключить, система не будет рассчитывать и показывать глобальную группу курса для студентов.</span>
                     </span>
                 </label>
                 <button type="submit" class="btn">Использовать стандартные правила</button>
@@ -177,12 +185,20 @@
             <form method="post">
                 {% include "_csrf_field.html" %}
                 <input type="hidden" name="mode" value="custom">
+                <input type="hidden" name="use_course_groups" value="0">
 
                 <label class="rules-switch">
                     <input type="checkbox" name="require_enrollment_order" value="1" {% if enrollment_order_required %}checked{% endif %}>
                     <span>
                         <strong>Требовать сверку по приказу перед переносом</strong>
                         <span>Если выключить, перенос в студенты будет доступен по почте и оплате, как раньше.</span>
+                    </span>
+                </label>
+                <label class="rules-switch">
+                    <input type="checkbox" name="use_course_groups" value="1" {% if course_groups_enabled %}checked{% endif %}>
+                    <span>
+                        <strong>Использовать глобальные группы курса</strong>
+                        <span>Если выключить, система не будет рассчитывать и показывать глобальную группу курса для студентов.</span>
                     </span>
                 </label>
 

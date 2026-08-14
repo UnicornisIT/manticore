@@ -1,14 +1,31 @@
 {% extends "base.html" %}
     {% block title %}Дублирующие записи абитуриентов{% endblock %}
+    {% block head %}
+    <style>
+        .duplicates-toolbar {
+            margin-bottom: 18px;
+        }
+        .duplicates-actions form {
+            display: inline-flex;
+            gap: 8px;
+            margin: 0;
+        }
+        .duplicates-empty {
+            margin: 18px 0;
+            color: #64748b;
+            text-align: center;
+        }
+    </style>
+    {% endblock %}
     {% block content %}
         <h1>Дублирующие записи абитуриентов</h1>
         {% include "_campaign_switcher.html" %}
-        <form method="post" style="margin-bottom:18px;">
+        <form method="post" class="duplicates-toolbar">
             {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
             <button type="submit" name="action" value="reject_all" class="btn btn-danger" onclick="return confirm('Отклонить все дублирующиеся записи?');">Отклонить все</button>
         </form>
-        <div style="overflow-x:auto;">
+        <div class="table-scroll">
             <table>
                 <tr>
                     <th>ФИО</th>
@@ -27,8 +44,8 @@
                     <td>{{ dup[3] }}</td>
                     <td>{{ dup[4] }}</td>
                     <td>{{ dup[5] }}</td>
-                    <td>
-                        <form method="post" style="display:inline;">
+                    <td class="duplicates-actions">
+                        <form method="post">
                             {% include "_csrf_field.html" %}
                             <input type="hidden" name="dup_id" value="{{ dup[0] }}">
                             <input type="hidden" name="campaign_year" value="{{ dup[6] }}">
@@ -40,7 +57,7 @@
                 {% endfor %}
             </table>
             {% if not duplicates %}
-                <div style="text-align:center; color:#888; margin-top:18px;">Нет дублирующихся абитуриентов.</div>
+                <div class="duplicates-empty">Нет дублирующихся абитуриентов.</div>
             {% endif %}
         </div>
     {% endblock %}

@@ -60,9 +60,18 @@
     .group-folder-form {
         margin-bottom: 18px;
         display: flex;
-        gap: 12px;
+        gap: 12px 14px;
         flex-wrap: wrap;
         align-items: flex-end;
+    }
+    .migration-controls > div,
+    .group-folder-form > div {
+        display: grid;
+        gap: 6px;
+    }
+    .migration-controls > div > label,
+    .group-folder-form > div > label {
+        margin-bottom: 0 !important;
     }
     .migration-controls select,
     .group-folder-form select,
@@ -90,6 +99,35 @@
         background: #fff;
         margin-top: 8px;
     }
+    .migration-table {
+        min-width: 1060px;
+    }
+    .migration-table th:first-child,
+    .migration-table td:first-child {
+        width: 44px;
+        text-align: center;
+    }
+    .migration-table td:nth-child(2) {
+        min-width: 220px;
+        white-space: normal;
+    }
+    .candidates-migration-table td:nth-child(3),
+    .login-preview-table td:nth-child(2) {
+        min-width: 250px;
+        white-space: normal;
+    }
+    .candidates-migration-table td:last-child,
+    .login-preview-table td:nth-child(7) {
+        min-width: 170px;
+    }
+    .candidates-migration-table td:last-child .status-badge,
+    .login-preview-table td:nth-child(7) .status-badge {
+        width: 100%;
+    }
+    .login-preview-table td:last-child {
+        min-width: 260px;
+        white-space: normal;
+    }
     .migration-actions {
         display: flex;
         gap: 10px;
@@ -112,6 +150,42 @@
         min-height: 38px;
         padding: 0 2px;
         font-weight: 500;
+    }
+    .migration-checkbox-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 0 2px;
+        font-weight: 500;
+    }
+    .group-folder-form label,
+    .migration-controls label,
+    .migration-table-title {
+        color: #111827;
+        font-weight: 600;
+    }
+    .group-folder-form select {
+        min-width: 150px;
+    }
+    .group-folder-form .specialty-select {
+        min-width: 320px;
+    }
+    .migration-controls .cohort-select {
+        min-width: 240px;
+    }
+    .cohort2-preview {
+        color: #475569;
+        font-size: 14px;
+        font-weight: 600;
+        margin: -8px 0 16px 0;
+        white-space: normal;
+    }
+    .cohort2-preview[hidden] {
+        display: none;
+    }
+    .cohort2-preview strong {
+        color: #2563eb;
     }
     .login-distribution-preview {
         margin-top: 22px;
@@ -152,6 +226,37 @@
         flex-wrap: wrap;
         margin-bottom: 16px;
     }
+    .login-preview-filter {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin: 0 0 12px 0;
+        padding: 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #fff;
+    }
+    .login-preview-filter label {
+        display: grid;
+        gap: 6px;
+        color: #374151;
+        font-weight: 600;
+    }
+    .login-preview-filter input,
+    .login-preview-filter select {
+        min-width: 170px;
+    }
+    .login-preview-filter .login-preview-search {
+        min-width: 280px;
+    }
+    .login-preview-filter-count {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        color: #475569;
+        font-weight: 600;
+    }
     .groups-empty {
         color: #64748b;
         margin: 0 0 18px 0;
@@ -178,6 +283,13 @@
         }
         .migration-table-wrapper {
             max-height: 320px;
+        }
+        .login-preview-filter,
+        .login-preview-filter label,
+        .login-preview-filter input,
+        .login-preview-filter select,
+        .login-preview-filter .btn {
+            width: 100%;
         }
     }
 </style>
@@ -213,16 +325,16 @@
     <form method="get" class="group-folder-form">
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <div>
-            <label for="group_year" style="font-weight: 500; display:block; margin-bottom:6px;">Папка групп:</label>
-            <select name="group_year" id="group_year" onchange="this.form.submit()" style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:150px;">
+            <label for="group_year">Папка групп:</label>
+            <select name="group_year" id="group_year" onchange="this.form.submit()">
                 {% for y in group_years %}
                 <option value="{{ y }}" {% if y == group_year %}selected{% endif %}>{{ y }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
-            <label for="specialty" style="font-weight: 500; display:block; margin-bottom:6px;">Специальность:</label>
-            <select name="specialty" id="specialty" onchange="this.form.submit()" style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:220px;">
+            <label for="specialty">Специальность:</label>
+            <select name="specialty" id="specialty" class="specialty-select" onchange="this.form.submit()">
                 <option value="">Все специальности</option>
                 {% for specialty in specialties %}
                 <option value="{{ specialty.key }}" {% if specialty.key == selected_specialty %}selected{% endif %}>{{ specialty.name }} ({{ specialty.count }})</option>
@@ -242,11 +354,11 @@
         <input type="hidden" name="specialty" value="{{ selected_specialty }}">
         <div class="migration-controls">
             <div>
-                <label for="cohort1" style="font-weight: 500; display:block; margin-bottom:6px;">Академическая группа:</label>
-                <select name="cohort1" id="cohort1" data-manual-control="1" {% if not login_distribution_enabled %}required{% endif %} {% if login_distribution_enabled %}disabled{% endif %} style="padding: 8px; border-radius: 6px; border:1px solid #cbd5e1; min-width:240px;">
+                <label for="cohort1">Академическая группа:</label>
+                <select name="cohort1" id="cohort1" class="cohort-select" data-manual-control="1" {% if not login_distribution_enabled %}required{% endif %} {% if login_distribution_enabled %}disabled{% endif %}>
                     <option value="">Выберите группу</option>
                     {% for group in suggested_groups %}
-                    <option value="{{ group.name }}" {% if group.is_full %}disabled{% endif %}>
+                    <option value="{{ group.name }}" data-cohort2="{{ group.cohort2 }}" {% if group.is_full %}disabled{% endif %}>
                         {{ group.name }} ({{ group.fill }}){% if group.is_full %} - заполнена{% endif %}
                     </option>
                     {% endfor %}
@@ -255,7 +367,7 @@
             {% if session.get('role') == 'admin' %}
                 <a href="{{ url_for('add_group', group_year=group_year) }}" class="btn">Справочник групп</a>
             {% endif %}
-            <label style="display:inline-flex; align-items:center; gap:8px; font-weight:500; min-height:38px;">
+            <label class="migration-checkbox-control">
                 <input type="checkbox" name="auto_split" value="1" data-manual-control="1" {% if login_distribution_enabled %}disabled{% endif %}>
                 Автораспределить по подгруппам
             </label>
@@ -264,14 +376,17 @@
                 Распределить по логинам
             </label>
         </div>
+        {% if course_groups_enabled %}
+        <div id="cohort2_preview" class="cohort2-preview" aria-live="polite" hidden></div>
+        {% endif %}
 
         <div class="migration-table-block">
-            <label style="font-weight: 500;">Кандидаты к зачислению:</label>
+            <label class="migration-table-title">Кандидаты к зачислению:</label>
             <div class="migration-table-wrapper">
-                <table style="min-width: 980px;">
+                <table class="migration-table candidates-migration-table">
                     <thead>
                         <tr>
-                            <th style="width:44px;">
+                            <th>
                                 <input type="checkbox" id="select_all_ready" title="Выбрать всех сверенных">
                             </th>
                             <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="abiturients_table_body">ФИО</button></th>
@@ -295,7 +410,7 @@
                             <td>
                                 <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" {% if candidate.id|string in selected_candidate_ids %}checked{% endif %} {% if not candidate.can_migrate %}disabled{% endif %}>
                             </td>
-                            <td style="white-space: normal; min-width:240px;">{{ candidate.fio }}</td>
+                            <td>{{ candidate.fio }}</td>
                             <td>{{ candidate.specialty }}</td>
                             <td>{{ candidate.login }}</td>
                             <td>
@@ -354,14 +469,42 @@
             </form>
             <a href="{{ url_for('abiturients_to_students', group_year=group_year, specialty=selected_specialty) }}" class="btn btn-danger">Отмена</a>
         </div>
+        <div class="login-preview-filter" data-login-preview-filter>
+            <label for="login_preview_search">
+                Фильтр
+                <input type="search" id="login_preview_search" class="login-preview-search" placeholder="ФИО, логин, группа, специальность">
+            </label>
+            <label for="login_preview_source">
+                Источник
+                <select id="login_preview_source">
+                    <option value="">Все источники</option>
+                    <option value="логин">Логин</option>
+                    <option value="приказ">Приказ</option>
+                    <option value="-">Не определён</option>
+                </select>
+            </label>
+            <label for="login_preview_status">
+                Статус
+                <select id="login_preview_status">
+                    <option value="">Все статусы</option>
+                    <option value="готов">Готов</option>
+                    <option value="проверить">Проверить</option>
+                </select>
+            </label>
+            <button type="button" class="btn btn-secondary" id="login_preview_filter_reset">Сбросить</button>
+            <span class="login-preview-filter-count" id="login_preview_filter_count" aria-live="polite"></span>
+        </div>
         <div class="migration-table-wrapper">
-            <table style="min-width: 1120px;">
+            <table class="migration-table login-preview-table">
                 <thead>
                     <tr>
                         <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="login_distribution_preview_body">ФИО</button></th>
                         <th><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="login_distribution_preview_body">Специальность</button></th>
                         <th><button type="button" class="sort-button" data-sort-key="login" data-sort-target="login_distribution_preview_body">Логин</button></th>
                         <th><button type="button" class="sort-button" data-sort-key="group" data-sort-target="login_distribution_preview_body">Группа</button></th>
+                        {% if course_groups_enabled %}
+                        <th>Глобальная группа курса</th>
+                        {% endif %}
                         <th><button type="button" class="sort-button" data-sort-key="source" data-sort-target="login_distribution_preview_body">Источник</button></th>
                         <th><button type="button" class="sort-button" data-sort-key="status" data-sort-target="login_distribution_preview_body">Статус</button></th>
                         <th>Комментарий</th>
@@ -377,13 +520,16 @@
                         data-source="{{ (row.source or '')|lower }}"
                         data-status="{{ (row.sort_status or '')|lower }}"
                     >
-                        <td style="white-space: normal; min-width:240px;">{{ row.fio }}</td>
+                        <td>{{ row.fio }}</td>
                         <td>{{ row.specialty }}</td>
                         <td>{{ row.login }}</td>
                         <td>{{ row.target_group }}</td>
+                        {% if course_groups_enabled %}
+                        <td>{{ row.cohort2 }}</td>
+                        {% endif %}
                         <td>{{ row.source }}</td>
                         <td><span class="status-badge {{ row.badge_class }}">{{ row.status_label }}</span></td>
-                        <td style="white-space: normal; min-width:260px;">{{ row.status_note or '-' }}</td>
+                        <td>{{ row.status_note or '-' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -445,10 +591,103 @@ sortButtons.forEach(function(button) {
     });
 });
 
+const loginPreviewSearch = document.getElementById('login_preview_search');
+const loginPreviewSource = document.getElementById('login_preview_source');
+const loginPreviewStatus = document.getElementById('login_preview_status');
+const loginPreviewReset = document.getElementById('login_preview_filter_reset');
+const loginPreviewCount = document.getElementById('login_preview_filter_count');
+const loginPreviewRows = Array.from(document.querySelectorAll('#login_distribution_preview_body tr'));
+
+function normalizeFilterText(value) {
+    return (value || '').toLocaleLowerCase('ru').trim();
+}
+
+function updateLoginPreviewFilter() {
+    if (!loginPreviewRows.length) {
+        return;
+    }
+    const query = normalizeFilterText(loginPreviewSearch ? loginPreviewSearch.value : '');
+    const source = normalizeFilterText(loginPreviewSource ? loginPreviewSource.value : '');
+    const status = normalizeFilterText(loginPreviewStatus ? loginPreviewStatus.value : '');
+    let visibleCount = 0;
+
+    loginPreviewRows.forEach(function(row) {
+        const rowText = normalizeFilterText(row.textContent);
+        const rowSource = normalizeFilterText(row.dataset.source);
+        const rowStatus = normalizeFilterText(row.dataset.status);
+        const matchesQuery = !query || rowText.includes(query);
+        const matchesSource = !source || rowSource === source;
+        const matchesStatus = !status || rowStatus === status;
+        const isVisible = matchesQuery && matchesSource && matchesStatus;
+
+        row.hidden = !isVisible;
+        if (isVisible) {
+            visibleCount += 1;
+        }
+    });
+
+    if (loginPreviewCount) {
+        loginPreviewCount.textContent = 'Показано: ' + visibleCount + ' из ' + loginPreviewRows.length;
+    }
+}
+
+if (loginPreviewRows.length) {
+    if (loginPreviewSearch) {
+        loginPreviewSearch.addEventListener('input', updateLoginPreviewFilter);
+    }
+    if (loginPreviewSource) {
+        loginPreviewSource.addEventListener('change', updateLoginPreviewFilter);
+    }
+    if (loginPreviewStatus) {
+        loginPreviewStatus.addEventListener('change', updateLoginPreviewFilter);
+    }
+    if (loginPreviewReset) {
+        loginPreviewReset.addEventListener('click', function() {
+            if (loginPreviewSearch) {
+                loginPreviewSearch.value = '';
+            }
+            if (loginPreviewSource) {
+                loginPreviewSource.value = '';
+            }
+            if (loginPreviewStatus) {
+                loginPreviewStatus.value = '';
+            }
+            updateLoginPreviewFilter();
+            if (loginPreviewSearch) {
+                loginPreviewSearch.focus();
+            }
+        });
+    }
+    updateLoginPreviewFilter();
+}
+
 const migrationForm = document.querySelector('.migration-form');
 const loginDistributionToggle = document.getElementById('use_login_distribution');
 const cohortSelect = document.getElementById('cohort1');
+const cohort2Preview = document.getElementById('cohort2_preview');
 const manualControls = document.querySelectorAll('[data-manual-control="1"]');
+
+function updateCohort2Preview() {
+    if (!cohort2Preview || !cohortSelect) {
+        return;
+    }
+    const selectedOption = cohortSelect.options[cohortSelect.selectedIndex];
+    const cohort2 = selectedOption ? selectedOption.dataset.cohort2 || '' : '';
+    let previewText = '';
+    if (loginDistributionToggle && loginDistributionToggle.checked) {
+        previewText = '';
+    } else if (cohort2) {
+        cohort2Preview.innerHTML = 'Глобальная группа курса: <strong>' + cohort2 + '</strong>';
+        cohort2Preview.hidden = false;
+        return;
+    } else if (cohortSelect.value) {
+        previewText = 'Глобальная группа курса не определяется автоматически для этой академической группы.';
+    } else {
+        previewText = '';
+    }
+    cohort2Preview.textContent = previewText;
+    cohort2Preview.hidden = !previewText;
+}
 
 function updateLoginDistributionMode() {
     const enabled = loginDistributionToggle && loginDistributionToggle.checked;
@@ -464,6 +703,12 @@ function updateLoginDistributionMode() {
     if (cohortSelect) {
         cohortSelect.required = !enabled;
     }
+    updateCohort2Preview();
+}
+
+if (cohortSelect) {
+    cohortSelect.addEventListener('change', updateCohort2Preview);
+    updateCohort2Preview();
 }
 
 if (loginDistributionToggle) {

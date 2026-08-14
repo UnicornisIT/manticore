@@ -4,11 +4,22 @@
     <meta charset="UTF-8">
     <title>{% block title %}manticore{% endblock %}</title>
     <style>
+        html {
+            box-sizing: border-box;
+        }
+        *,
+        *::before,
+        *::after {
+            box-sizing: inherit;
+        }
         body {
             margin: 0;
             padding: 0;
             background: #f8fafc;
+            color: #111827;
             font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.45;
         }
         body.home-page,
         body.login-page-body {
@@ -75,12 +86,16 @@
         }
         h1 {
             color: #2563eb;
+            margin-top: 0;
             margin-bottom: 24px;
             font-size: 2.2em;
+            line-height: 1.15;
         }
         h2 {
             color: #374151;
+            margin-top: 0;
             margin-bottom: 18px;
+            line-height: 1.2;
         }
         ul {
             list-style: none;
@@ -349,16 +364,65 @@
             width: 100%;
             min-width: 900px;
             border-collapse: collapse;
+            table-layout: auto;
         }
         th, td {
             border: 1px solid #e5e7eb;
             padding: 10px 8px;
             text-align: left;
+            vertical-align: middle;
+        }
+        th {
             white-space: nowrap;
+        }
+        td {
+            overflow-wrap: anywhere;
         }
         th {
             background: #f3f4f6;
             font-weight: 600;
+        }
+        td form {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 2px 0;
+            padding: 0;
+            vertical-align: middle;
+        }
+        .table-scroll {
+            max-width: 100%;
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+        }
+        .table-scroll > table {
+            margin: 0;
+        }
+        input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not(.nav-search-input),
+        select,
+        textarea,
+        .form-control {
+            max-width: 100%;
+            min-height: 38px;
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #fff;
+            color: #111827;
+            font: inherit;
+        }
+        textarea {
+            min-height: 96px;
+            resize: vertical;
+        }
+        input[type="checkbox"],
+        input[type="radio"] {
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            vertical-align: middle;
         }
         .btn, input[type="submit"] {
             --btn-bg: #3b82f6;
@@ -387,7 +451,7 @@
             line-height: 1.15;
             text-align: center;
             text-decoration: none;
-            white-space: nowrap;
+            white-space: normal;
             vertical-align: middle;
             transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.06s ease;
         }
@@ -633,12 +697,12 @@
             color: #1d4ed8;
         }
         .file-picker.has-file,
-        .file-picker:has(input[type="file"]:valid) {
+        .file-picker:has(input[type="file"][required]:valid) {
             border-color: #22c55e;
             background: #f0fdf4;
         }
         .file-picker.has-file::before,
-        .file-picker:has(input[type="file"]:valid)::before {
+        .file-picker:has(input[type="file"][required]:valid)::before {
             content: "✓";
             animation: uploadCheckPop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.3);
             background: linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%);
@@ -647,13 +711,13 @@
             font-size: 25px;
         }
         .file-picker.has-file .file-picker-name,
-        .file-picker:has(input[type="file"]:valid) .file-picker-name {
+        .file-picker:has(input[type="file"][required]:valid) .file-picker-name {
             color: #166534;
         }
         .file-picker.has-file:hover::before,
         .file-picker.has-file:focus-within::before,
-        .file-picker:has(input[type="file"]:valid):hover::before,
-        .file-picker:has(input[type="file"]:valid):focus-within::before {
+        .file-picker:has(input[type="file"][required]:valid):hover::before,
+        .file-picker:has(input[type="file"][required]:valid):focus-within::before {
             animation: uploadCheckPulse 1.2s ease-in-out infinite;
             color: #15803d;
         }
@@ -978,13 +1042,15 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            max-width: 100%;
             min-height: 26px;
             padding: 4px 10px;
             border-radius: 999px;
             font-size: 13px;
             font-weight: 700;
             line-height: 1.2;
-            white-space: nowrap;
+            text-align: center;
+            white-space: normal;
         }
         .status-success {
             color: #166534;
@@ -1175,9 +1241,11 @@
             .container {
                 padding: 8px;
             }
-            table, th, td {
-                font-size: 13px;
+            table {
                 min-width: 600px;
+            }
+            th, td {
+                font-size: 13px;
             }
             ul {
                 gap: 8px;
@@ -1185,7 +1253,8 @@
         }
         @media (max-width: 600px) {
             .container { padding: 8px 6px; }
-            table, th, td { font-size: 12px; min-width: 320px; }
+            table { min-width: 320px; }
+            th, td { font-size: 12px; }
             h1 { font-size: 1.1em; }
             ul:not(.main-nav) { flex-direction: column; align-items: center; }
             .main-nav {
@@ -1238,7 +1307,7 @@
                 width: 100%;
                 min-width: 0;
             }
-            form { padding: 12px; }
+            form { padding: 0; }
             .main-nav .nav-search-item {
                 grid-column: 1 / -1;
                 width: 100%;

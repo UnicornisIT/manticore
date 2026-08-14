@@ -2,8 +2,102 @@
 {% block title %}Редактирование абитуриента{% endblock %}
 {% block head %}
 <style>
-    .edit-abiturient-actions {
+    .edit-abiturient-header {
         display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 12px;
+        width: 100%;
+        max-width: 760px;
+        margin: 0 0 20px;
+    }
+    .edit-abiturient-header h1 {
+        margin: 0;
+    }
+    .edit-abiturient-navigation {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+    }
+    .edit-abiturient-position {
+        margin-left: 4px;
+        color: #64748b;
+        font-size: 14px;
+        white-space: nowrap;
+    }
+    .edit-abiturient-nav-button {
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #fff;
+        color: #1d4ed8;
+    }
+    .edit-abiturient-nav-button:hover,
+    .edit-abiturient-nav-button:focus {
+        border-color: #93c5fd;
+        background: #eff6ff;
+        color: #1e40af;
+    }
+    .edit-abiturient-nav-button.is-disabled {
+        cursor: default;
+        border-color: #e5e7eb;
+        background: #f8fafc;
+        color: #cbd5e1;
+    }
+    .edit-abiturient-nav-button svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    .edit-abiturient-form {
+        display: grid;
+        gap: 14px;
+        max-width: 520px;
+        padding: 24px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+    .edit-abiturient-meta {
+        display: grid;
+        gap: 6px;
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        color: #374151;
+    }
+    .edit-abiturient-field {
+        display: grid;
+        gap: 6px;
+    }
+    .edit-abiturient-field label,
+    .edit-abiturient-paid label {
+        color: #374151;
+        font-weight: 600;
+    }
+    .edit-abiturient-field input,
+    .edit-abiturient-field textarea {
+        width: 100%;
+    }
+    .edit-abiturient-paid {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .edit-abiturient-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, 1fr);
         gap: 12px;
         align-items: center;
         margin-top: 8px;
@@ -13,35 +107,99 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 112px;
         min-height: 38px;
         margin: 0;
+        padding-right: 10px;
+        padding-left: 10px;
+    }
+    @media (max-width: 560px) {
+        .edit-abiturient-header {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+        .edit-abiturient-navigation {
+            align-self: flex-start;
+        }
+        .edit-abiturient-form {
+            padding: 18px 16px;
+        }
+        .edit-abiturient-actions {
+            grid-template-columns: 1fr;
+        }
     }
 </style>
 {% endblock %}
 {% block content %}
-<h1>Редактирование абитуриента</h1>
-<form method="post" style="max-width:400px;">
+<div class="edit-abiturient-header">
+    <h1>Редактирование абитуриента</h1>
+    <nav class="edit-abiturient-navigation" aria-label="Навигация по списку абитуриентов">
+        {% if abiturient_navigation.previous %}
+        <a
+            id="edit-abiturient-previous"
+            class="edit-abiturient-nav-button"
+            href="{{ url_for('edit_abiturient', login=abiturient_navigation.previous['login'], campaign_year=abiturient_navigation.previous['campaign_year'], **abiturient_list_query) }}"
+            title="Предыдущий абитуриент"
+            aria-label="Предыдущий абитуриент"
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"></path></svg>
+        </a>
+        {% else %}
+        <span class="edit-abiturient-nav-button is-disabled" title="Это первый абитуриент в списке" aria-disabled="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"></path></svg>
+        </span>
+        {% endif %}
+        {% if abiturient_navigation.next %}
+        <a
+            id="edit-abiturient-next"
+            class="edit-abiturient-nav-button"
+            href="{{ url_for('edit_abiturient', login=abiturient_navigation.next['login'], campaign_year=abiturient_navigation.next['campaign_year'], **abiturient_list_query) }}"
+            title="Следующий абитуриент"
+            aria-label="Следующий абитуриент"
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+        </a>
+        {% else %}
+        <span class="edit-abiturient-nav-button is-disabled" title="Это последний абитуриент в списке" aria-disabled="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+        </span>
+        {% endif %}
+        {% if abiturient_navigation.position %}
+        <span class="edit-abiturient-position">{{ abiturient_navigation.position }} из {{ abiturient_navigation.total }}</span>
+        {% endif %}
+    </nav>
+</div>
+<form method="post" class="edit-abiturient-form">
     {% include "_csrf_field.html" %}
-    <div><b>Кампания:</b> {{ abiturient[7] }}</div>
-    <div><b>Договор:</b> {{ abiturient[1] }}</div>
-    <div><b>Логин:</b> {{ abiturient[2] }}</div>
-    <label for="fio">ФИО:</label>
-    <input type="text" name="fio" id="fio" value="{{ abiturient[0] or '' }}" required style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-    <label for="email">Email:</label>
-    <input type="hidden" name="campaign_year" value="{{ abiturient[7] }}">
-    <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-    <div style="margin-bottom:18px; display:flex; align-items:center; gap:10px;">
-        <input type="checkbox" id="paid" name="paid" value="1" {% if abiturient[8] == 1 %}checked{% endif %}>
-        <label for="paid" style="margin:0;">Договор оплачен</label>
+    <div class="edit-abiturient-meta">
+        <div><b>Кампания:</b> {{ abiturient[7] }}</div>
+        <div><b>Договор:</b> {{ abiturient[1] }}</div>
+        <div><b>Логин:</b> {{ abiturient[2] }}</div>
     </div>
-    <label for="login">Логин:</label>
-    <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}" style="width:100%;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">
-    <label for="comment">Комментарий:</label>
-    <textarea name="comment" id="comment" rows="6" style="width:100%;min-height:120px;margin-bottom:18px;padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;">{{ abiturient[6] or '' }}</textarea>
+    <div class="edit-abiturient-field">
+        <label for="fio">ФИО:</label>
+        <input type="text" name="fio" id="fio" value="{{ abiturient[0] or '' }}" required>
+    </div>
+    <input type="hidden" name="campaign_year" value="{{ abiturient[7] }}">
+    <div class="edit-abiturient-field">
+        <label for="email">Email:</label>
+        <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}">
+    </div>
+    <div class="edit-abiturient-paid">
+        <input type="checkbox" id="paid" name="paid" value="1" {% if abiturient[8] == 1 %}checked{% endif %}>
+        <label for="paid">Договор оплачен</label>
+    </div>
+    <div class="edit-abiturient-field">
+        <label for="login">Логин:</label>
+        <input type="text" name="login" id="login" value="{{ abiturient[2] or '' }}">
+    </div>
+    <div class="edit-abiturient-field">
+        <label for="comment">Комментарий:</label>
+        <textarea name="comment" id="comment" rows="6">{{ abiturient[6] or '' }}</textarea>
+    </div>
     <div class="edit-abiturient-actions">
-        <button type="submit" class="btn">Сохранить</button>
-        <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Отмена</a>
+        <button type="submit" name="save_action" value="stay" class="btn">Сохранить</button>
+        <button type="submit" name="save_action" value="exit" class="btn btn-secondary">Сохранить и выйти</button>
+        <a href="{{ url_for('abiturients', campaign_year=abiturient[7], **abiturient_list_query) }}" class="btn btn-danger">Отмена</a>
     </div>
 </form>
 {% endblock %}

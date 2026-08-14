@@ -191,5 +191,11 @@
         </div>
     </section>
     {% endfor %}
+    {% if record.kind == 'student' and transfer_orders %}
+    <section class="record-section">
+        <h2>История перемещений</h2>
+        {% include "_student_transfer_timeline.html" %}
+    </section>
+    {% endif %}
 </div>
 {% endblock %}

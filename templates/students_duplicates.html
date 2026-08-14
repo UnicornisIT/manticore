@@ -12,6 +12,9 @@
             <th>Имя</th>
             <th>Фамилия</th>
             <th>Группа</th>
+            {% if course_groups_enabled %}
+            <th>Глобальная группа курса</th>
+            {% endif %}
         </tr>
     </thead>
     <tbody>
@@ -23,6 +26,9 @@
             <td>{{ s[3] }}</td>
             <td>{{ s[4] }}</td>
             <td>{{ s[5] }}</td>
+            {% if course_groups_enabled %}
+            <td>{{ s[6] or '-' }}</td>
+            {% endif %}
         </tr>
         {% endfor %}
     </tbody>

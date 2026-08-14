@@ -1,0 +1,314 @@
+<style>
+    .student-movement-timeline {
+        position: relative;
+        min-height: 138px;
+        overflow-x: auto;
+        padding: 18px 12px 18px 40px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+    .student-movement-timeline::before {
+        content: "";
+        position: absolute;
+        top: 62px;
+        left: 20px;
+        right: 12px;
+        height: 13px;
+        border-radius: 999px;
+        background: #e2e8f0;
+    }
+    .student-movement-timeline::after {
+        content: "";
+        position: absolute;
+        top: 54px;
+        left: 10px;
+        width: 24px;
+        height: 24px;
+        border-left: 8px solid #e2e8f0;
+        border-bottom: 8px solid #e2e8f0;
+        transform: rotate(45deg);
+    }
+    .student-movement-items {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        gap: 72px;
+        min-width: max-content;
+        padding: 0 12px 8px 0;
+    }
+    .student-movement-item {
+        appearance: none;
+        width: min(340px, calc(100vw - 96px));
+        min-height: 106px;
+        padding: 17px 18px;
+        border: 1px solid #dbe3ec;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.18);
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.08s ease;
+    }
+    .student-movement-item:hover,
+    .student-movement-item:focus {
+        border-color: #93c5fd;
+        box-shadow: 0 12px 26px rgba(37, 99, 235, 0.18);
+    }
+    .student-movement-item:focus-visible {
+        outline: 0;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22), 0 12px 26px rgba(37, 99, 235, 0.18);
+    }
+    .student-movement-item:active {
+        transform: translateY(1px);
+    }
+    .student-movement-date {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #64748b;
+        font-weight: 800;
+    }
+    .student-movement-dot {
+        width: 23px;
+        height: 23px;
+        flex: 0 0 23px;
+        border-radius: 50%;
+        background: #d1d5db;
+    }
+    .student-movement-title {
+        display: block;
+        margin-top: 10px;
+        color: #1f2937;
+        font-size: 22px;
+        font-weight: 900;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-subtitle {
+        display: block;
+        margin-top: 6px;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-modal[hidden] {
+        display: none;
+    }
+    .student-movement-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+    }
+    .student-movement-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.34);
+    }
+    .student-movement-panel {
+        position: relative;
+        z-index: 1;
+        width: min(720px, 100%);
+        max-height: calc(100vh - 48px);
+        overflow-y: auto;
+        padding: 26px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 22px 48px rgba(15, 23, 42, 0.28);
+    }
+    .student-movement-panel h4 {
+        margin: 0 0 20px 0;
+        color: #1f2937;
+        font-size: 24px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-details {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px 52px;
+        margin: 0;
+    }
+    .student-movement-details div {
+        min-width: 0;
+    }
+    .student-movement-details dt {
+        margin: 0 0 3px 0;
+        color: #1f2937;
+        font-weight: 800;
+    }
+    .student-movement-details dd {
+        margin: 0;
+        color: #334155;
+        font-size: 16px;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 10px;
+        margin-top: 28px;
+        flex-wrap: wrap;
+    }
+    .student-movement-actions .btn {
+        min-width: 118px;
+    }
+    .student-movement-empty {
+        margin: 0;
+        color: #64748b;
+    }
+    @media (max-width: 720px) {
+        .student-movement-timeline {
+            padding-left: 24px;
+        }
+        .student-movement-items {
+            gap: 28px;
+        }
+        .student-movement-details {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        .student-movement-panel {
+            padding: 22px 18px;
+        }
+    }
+</style>
+
+{% if transfer_orders %}
+<div class="student-movement-timeline" aria-label="История перемещений">
+    <div class="student-movement-items">
+        {% for order in transfer_orders|reverse %}
+        <button type="button" class="student-movement-item" data-student-movement-open="student-movement-modal-{{ order.id }}" aria-haspopup="dialog">
+            <span class="student-movement-date">
+                <span class="student-movement-dot" aria-hidden="true"></span>
+                {{ order.timeline_date_text }}
+            </span>
+            <span class="student-movement-title">{{ order.to_group_text }}</span>
+            <span class="student-movement-subtitle">{{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}</span>
+        </button>
+        {% endfor %}
+    </div>
+</div>
+
+{% for order in transfer_orders %}
+<div class="student-movement-modal" id="student-movement-modal-{{ order.id }}" role="dialog" aria-modal="true" aria-labelledby="student-movement-title-{{ order.id }}" hidden>
+    <div class="student-movement-backdrop" data-student-movement-close></div>
+    <div class="student-movement-panel" role="document">
+        <h4 id="student-movement-title-{{ order.id }}">{{ order.to_group_text }}</h4>
+        <dl class="student-movement-details">
+            <div>
+                <dt>Дата перемещения:</dt>
+                <dd>{{ order.timeline_date_text }}</dd>
+            </div>
+            <div>
+                <dt>Дата приказа:</dt>
+                <dd>{{ order.order_date_text }}</dd>
+            </div>
+            <div>
+                <dt>Номер приказа:</dt>
+                <dd>{{ order.order_number or '-' }}</dd>
+            </div>
+            <div>
+                <dt>Из группы:</dt>
+                <dd>{{ order.from_group_text }}</dd>
+            </div>
+            <div>
+                <dt>В группу:</dt>
+                <dd>{{ order.to_group_text }}</dd>
+            </div>
+            {% if course_groups_enabled %}
+            <div>
+                <dt>Глобальная группа курса:</dt>
+                <dd>{{ order.cohort2_text }}</dd>
+            </div>
+            {% endif %}
+            <div>
+                <dt>Тип перемещения:</dt>
+                <dd>{{ order.movement_type_label }}</dd>
+            </div>
+            <div>
+                <dt>Источник:</dt>
+                <dd>{{ order.movement_source_label }}</dd>
+            </div>
+            <div>
+                <dt>Оформил:</dt>
+                <dd>{{ order.created_by or '-' }}</dd>
+            </div>
+            <div>
+                <dt>Файл приказа:</dt>
+                <dd>{{ order.order_file_text }}</dd>
+            </div>
+            <div>
+                <dt>Дата записи:</dt>
+                <dd>{{ order.created_at or '-' }}</dd>
+            </div>
+        </dl>
+        <div class="student-movement-actions">
+            {% if order.download_url %}
+            <a href="{{ order.download_url }}" class="btn btn-secondary btn-small">{{ order.download_label }}</a>
+            {% endif %}
+            <button type="button" class="btn btn-secondary" data-student-movement-close>Закрыть</button>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<script>
+(function() {
+    const openButtons = Array.from(document.querySelectorAll('[data-student-movement-open]'));
+    if (!openButtons.length) {
+        return;
+    }
+
+    function openModal(modal) {
+        if (!modal) {
+            return;
+        }
+        modal.hidden = false;
+        const closeButton = modal.querySelector('[data-student-movement-close]');
+        if (closeButton) {
+            closeButton.focus();
+        }
+    }
+
+    function closeModal(modal) {
+        if (modal) {
+            modal.hidden = true;
+        }
+    }
+
+    openButtons.forEach(function(button) {
+        button.addEventListener('click', function() {
+            openModal(document.getElementById(button.dataset.studentMovementOpen));
+        });
+    });
+
+    document.addEventListener('click', function(event) {
+        const closeTarget = event.target.closest('[data-student-movement-close]');
+        if (!closeTarget) {
+            return;
+        }
+        closeModal(closeTarget.closest('.student-movement-modal'));
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        document.querySelectorAll('.student-movement-modal:not([hidden])').forEach(closeModal);
+    });
+})();
+</script>
+{% else %}
+<p class="student-movement-empty">Перемещений пока нет.</p>
+{% endif %}

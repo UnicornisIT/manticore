@@ -184,7 +184,7 @@
         <div class="groups-layout">
             <form method="post" class="groups-tool">
                 {% include "_csrf_field.html" %}
-                <h3>Добавить</h3>
+                <h3>Добавить группу</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
                 <div class="groups-description">Новая группа.</div>
@@ -199,7 +199,7 @@
 
             <form method="post" class="groups-tool">
                 {% include "_csrf_field.html" %}
-                <h3>Подгруппа</h3>
+                <h3>Добавить подгруппу</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 <input type="hidden" name="group_action" value="force_subgroup">
                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
@@ -219,10 +219,10 @@
 
             <form method="post" enctype="multipart/form-data" class="groups-tool">
                 {% include "_csrf_field.html" %}
-                <h3>CSV</h3>
+                <h3>Импорт групп</h3>
                 <input type="hidden" name="group_year" value="{{ group_year }}">
                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-                <div class="groups-description">Загрузка из файла.</div>
+                <div class="groups-description">Загрузка из файла CSV-формата.</div>
                 <div class="groups-field">
                     <label for="groups_file">Файл CSV:</label>
                     <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите CSV-файл групп">
