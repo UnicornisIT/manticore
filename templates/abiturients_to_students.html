@@ -102,31 +102,24 @@
     .migration-table {
         min-width: 1060px;
     }
-    .migration-table th:first-child,
-    .migration-table td:first-child {
+    .candidates-migration-table th:first-child,
+    .candidates-migration-table td:first-child {
         width: 44px;
         text-align: center;
     }
-    .migration-table td:nth-child(2) {
+    .candidates-migration-table td:nth-child(2) {
         min-width: 220px;
         white-space: normal;
     }
-    .candidates-migration-table td:nth-child(3),
-    .login-preview-table td:nth-child(2) {
+    .candidates-migration-table td:nth-child(3) {
         min-width: 250px;
         white-space: normal;
     }
-    .candidates-migration-table td:last-child,
-    .login-preview-table td:nth-child(7) {
+    .candidates-migration-table td:last-child {
         min-width: 170px;
     }
-    .candidates-migration-table td:last-child .status-badge,
-    .login-preview-table td:nth-child(7) .status-badge {
+    .candidates-migration-table td:last-child .status-badge {
         width: 100%;
-    }
-    .login-preview-table td:last-child {
-        min-width: 260px;
-        white-space: normal;
     }
     .migration-actions {
         display: flex;
@@ -189,13 +182,16 @@
     }
     .login-distribution-preview {
         margin-top: 22px;
-        padding: 18px;
+        padding: 20px;
         border: 1px solid #bfdbfe;
-        border-radius: 8px;
-        background: #eff6ff;
+        border-radius: 14px;
+        background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+        box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
     }
     .login-distribution-preview h3 {
         margin: 0 0 14px 0;
+        color: #1e3a8a;
+        font-size: 20px;
     }
     .preview-stats {
         display: flex;
@@ -205,17 +201,21 @@
     }
     .preview-stat {
         min-width: 128px;
-        padding: 10px 12px;
-        border-radius: 8px;
+        padding: 11px 13px;
+        border-radius: 10px;
         background: #fff;
         border: 1px solid #dbeafe;
         color: #1f2937;
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
     }
     .preview-stat strong {
         display: block;
         color: #2563eb;
         font-size: 20px;
     }
+    .preview-stat:nth-child(2) strong { color: #15803d; }
+    .preview-stat:nth-child(3) strong { color: #b45309; }
+    .preview-stat:nth-child(4) strong { color: #7c3aed; }
     .preview-note {
         margin: 0 0 12px 0;
         color: #475569;
@@ -227,14 +227,14 @@
         margin-bottom: 16px;
     }
     .login-preview-filter {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) minmax(170px, 220px) minmax(170px, 220px) auto auto;
         gap: 10px;
         align-items: flex-end;
-        flex-wrap: wrap;
         margin: 0 0 12px 0;
-        padding: 12px;
+        padding: 14px;
         border: 1px solid #dbeafe;
-        border-radius: 8px;
+        border-radius: 10px;
         background: #fff;
     }
     .login-preview-filter label {
@@ -257,6 +257,69 @@
         color: #475569;
         font-weight: 600;
     }
+    .login-distribution-preview .migration-table-wrapper {
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: visible;
+        border-color: #cbd5e1;
+        border-radius: 10px;
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
+        scrollbar-color: #94a3b8 #eef2f7;
+        scrollbar-width: thin;
+    }
+    .login-distribution-preview .migration-table-wrapper::-webkit-scrollbar {
+        height: 11px;
+    }
+    .login-distribution-preview .migration-table-wrapper::-webkit-scrollbar-track {
+        background: #eef2f7;
+    }
+    .login-distribution-preview .migration-table-wrapper::-webkit-scrollbar-thumb {
+        border: 2px solid #eef2f7;
+        border-radius: 999px;
+        background: #94a3b8;
+    }
+    .login-preview-table {
+        width: max-content;
+        min-width: 1580px;
+        margin: 0;
+        table-layout: auto;
+    }
+    .login-preview-table th,
+    .login-preview-table td {
+        padding: 12px 11px;
+        overflow-wrap: normal;
+        word-break: normal;
+        hyphens: none;
+        line-height: 1.45;
+    }
+    .login-preview-table th {
+        background: #eaf2ff;
+        color: #334155;
+    }
+    .login-preview-table td {
+        vertical-align: top;
+        background: #fff;
+    }
+    .login-preview-table tbody tr:nth-child(even) td {
+        background: #f8fafc;
+    }
+    .login-preview-table tbody tr:hover td {
+        background: #eff6ff;
+    }
+    .login-preview-table .status-badge {
+        max-width: none;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .preview-col-fio { min-width: 270px; max-width: 310px; white-space: normal; }
+    .preview-col-specialty { min-width: 285px; max-width: 330px; white-space: normal; }
+    .preview-col-login { min-width: 135px; white-space: nowrap; }
+    .preview-col-group { min-width: 165px; white-space: nowrap; }
+    .preview-col-cohort2 { min-width: 225px; white-space: nowrap; }
+    .preview-col-source { min-width: 125px; white-space: nowrap; }
+    .preview-col-status { min-width: 165px; white-space: nowrap; }
+    .preview-col-note { min-width: 320px; max-width: 390px; white-space: normal; }
     .groups-empty {
         color: #64748b;
         margin: 0 0 18px 0;
@@ -290,6 +353,9 @@
         .login-preview-filter select,
         .login-preview-filter .btn {
             width: 100%;
+        }
+        .login-preview-filter {
+            grid-template-columns: 1fr;
         }
     }
 </style>
@@ -498,16 +564,16 @@
             <table class="migration-table login-preview-table">
                 <thead>
                     <tr>
-                        <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="login_distribution_preview_body">ФИО</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="login_distribution_preview_body">Специальность</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="login" data-sort-target="login_distribution_preview_body">Логин</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="group" data-sort-target="login_distribution_preview_body">Группа</button></th>
+                        <th class="preview-col-fio"><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="login_distribution_preview_body">ФИО</button></th>
+                        <th class="preview-col-specialty"><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="login_distribution_preview_body">Специальность</button></th>
+                        <th class="preview-col-login"><button type="button" class="sort-button" data-sort-key="login" data-sort-target="login_distribution_preview_body">Логин</button></th>
+                        <th class="preview-col-group"><button type="button" class="sort-button" data-sort-key="group" data-sort-target="login_distribution_preview_body">Группа</button></th>
                         {% if course_groups_enabled %}
-                        <th>Глобальная группа курса</th>
+                        <th class="preview-col-cohort2">Глобальная группа курса</th>
                         {% endif %}
-                        <th><button type="button" class="sort-button" data-sort-key="source" data-sort-target="login_distribution_preview_body">Источник</button></th>
-                        <th><button type="button" class="sort-button" data-sort-key="status" data-sort-target="login_distribution_preview_body">Статус</button></th>
-                        <th>Комментарий</th>
+                        <th class="preview-col-source"><button type="button" class="sort-button" data-sort-key="source" data-sort-target="login_distribution_preview_body">Источник</button></th>
+                        <th class="preview-col-status"><button type="button" class="sort-button" data-sort-key="status" data-sort-target="login_distribution_preview_body">Статус</button></th>
+                        <th class="preview-col-note">Комментарий</th>
                     </tr>
                 </thead>
                 <tbody id="login_distribution_preview_body">
@@ -520,16 +586,16 @@
                         data-source="{{ (row.source or '')|lower }}"
                         data-status="{{ (row.sort_status or '')|lower }}"
                     >
-                        <td>{{ row.fio }}</td>
-                        <td>{{ row.specialty }}</td>
-                        <td>{{ row.login }}</td>
-                        <td>{{ row.target_group }}</td>
+                        <td class="preview-col-fio">{{ row.fio }}</td>
+                        <td class="preview-col-specialty">{{ row.specialty }}</td>
+                        <td class="preview-col-login">{{ row.login }}</td>
+                        <td class="preview-col-group">{{ row.target_group }}</td>
                         {% if course_groups_enabled %}
-                        <td>{{ row.cohort2 }}</td>
+                        <td class="preview-col-cohort2">{{ row.cohort2 }}</td>
                         {% endif %}
-                        <td>{{ row.source }}</td>
-                        <td><span class="status-badge {{ row.badge_class }}">{{ row.status_label }}</span></td>
-                        <td>{{ row.status_note or '-' }}</td>
+                        <td class="preview-col-source">{{ row.source }}</td>
+                        <td class="preview-col-status"><span class="status-badge {{ row.badge_class }}">{{ row.status_label }}</span></td>
+                        <td class="preview-col-note">{{ row.status_note or '-' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

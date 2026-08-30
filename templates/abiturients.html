@@ -282,6 +282,11 @@
             <option value="1" {% if request.args.get('has_paid') == '1' %}selected{% endif %}>Оплачен</option>
             <option value="0" {% if request.args.get('has_paid') == '0' %}selected{% endif %}>Не оплачен</option>
         </select>
+        <select name="has_order">
+            <option value="">Все по приказу</option>
+            <option value="1" {% if request.args.get('has_order') == '1' %}selected{% endif %}>Есть приказ</option>
+            <option value="0" {% if request.args.get('has_order') == '0' %}selected{% endif %}>Нет приказа</option>
+        </select>
         <select name="withdrawn">
             <option value="">Все статусы документов</option>
             <option value="0" {% if request.args.get('withdrawn') == '0' %}selected{% endif %}>Документы не отозваны</option>
@@ -358,6 +363,7 @@
                                 <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
                                 <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
                                 <input type="hidden" name="has_paid" value="{{ request.args.get('has_paid', '') }}">
+                                <input type="hidden" name="has_order" value="{{ request.args.get('has_order', '') }}">
                                 <input type="hidden" name="withdrawn" value="{{ request.args.get('withdrawn', '') }}">
                                 <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                                 <input type="hidden" name="order_by" value="{{ order_by }}">
@@ -401,6 +407,7 @@
                                 <input type="hidden" name="is_i" value="{{ request.args.get('is_i', '') }}">
                                 <input type="hidden" name="has_email" value="{{ request.args.get('has_email', '') }}">
                                 <input type="hidden" name="has_paid" value="{{ request.args.get('has_paid', '') }}">
+                                <input type="hidden" name="has_order" value="{{ request.args.get('has_order', '') }}">
                                 <input type="hidden" name="withdrawn" value="{{ request.args.get('withdrawn', '') }}">
                                 <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                                 <input type="hidden" name="order_by" value="{{ order_by }}">

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from urllib.parse import unquote
+from unittest import mock
 
 import pandas as pd
 
@@ -171,6 +172,167 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(stored_dogovors, {'2026-СД-0001-11И', '2026-ЛД-0002-9И'})
         os.remove(result_path)
 
+    def test_manual_create_builds_login_from_full_contract_and_skips_used_login(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Занятый Логин Тестович',
+                    '2026-ФМ-0600-11',
+                    '26611001',
+                    '2026',
+                    'Занятый',
+                    'Логин Тестович',
+                ),
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/manual_create')
+        csrf_token = self.csrf_from_response(page)
+        response = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'contract',
+                'fio': 'Новый Абитуриент Тестович',
+                'dogovor': '2026-ФМ-0700-11',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('Логин успешно создан: 26611002', body)
+        self.assertIn('По номеру договора', body)
+        self.assertIn('Настроить вручную', body)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            created = conn.execute(
+                'SELECT fio, dogovor, login, campaign_year FROM abiturients WHERE dogovor=?',
+                ('2026-ФМ-0700-11',),
+            ).fetchone()
+        self.assertEqual(
+            created,
+            ('Новый Абитуриент Тестович', '2026-ФМ-0700-11', '26611002', '2026'),
+        )
+
+    def test_manual_create_can_use_selected_parameters_and_custom_login(self):
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/manual_create')
+        csrf_token = self.csrf_from_response(page)
+        response = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'manual',
+                'fio': 'Ручной Режим Тестович',
+                'year': '2026',
+                'spec': 'ФМ',
+                'base': '11',
+                'manual_login': 'custom_login_77',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('Логин успешно создан: custom_login_77', body)
+        self.assertIn('data-mode-panel="contract" hidden', body)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            created = conn.execute(
+                'SELECT dogovor, login, campaign_year FROM abiturients WHERE fio=?',
+                ('Ручной Режим Тестович',),
+            ).fetchone()
+        self.assertEqual(created, ('', 'custom_login_77', '2026'))
+
+    def test_manual_create_blocks_duplicate_contract_and_login_and_confirms_exact_fio(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients (fio, dogovor, login, campaign_year, fam, imotch)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Иванов Иван Иванович',
+                    '2026-ФМ-0701-11',
+                    'taken_manual',
+                    '2026',
+                    'Иванов',
+                    'Иван Иванович',
+                ),
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/manual_create')
+        csrf_token = self.csrf_from_response(page)
+
+        duplicate_contract = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'contract',
+                'fio': 'Другой Абитуриент Тестович',
+                'dogovor': '2026-ФМ-0701-11',
+            },
+        )
+        self.assertIn('Такой договор уже есть в базе.', duplicate_contract.get_data(as_text=True))
+
+        duplicate_login = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'manual',
+                'fio': 'Ещё Один Тестович',
+                'dogovor': 'ВНУТРЕННИЙ-78',
+                'year': '2026',
+                'spec': 'ФМ',
+                'base': '11',
+                'manual_login': 'TAKEN_MANUAL',
+            },
+        )
+        self.assertIn('Такой логин уже используется.', duplicate_login.get_data(as_text=True))
+
+        exact_fio = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'contract',
+                'fio': '  иванов   иван иванович ',
+                'dogovor': '2026-ФМ-0702-11',
+            },
+        )
+        exact_fio_body = exact_fio.get_data(as_text=True)
+        self.assertIn('В базе уже есть запись с точно таким ФИО.', exact_fio_body)
+        self.assertIn('name="confirm_fio_duplicate"', exact_fio_body)
+
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            count_before_confirmation = conn.execute(
+                'SELECT COUNT(*) FROM abiturients'
+            ).fetchone()[0]
+        self.assertEqual(count_before_confirmation, 1)
+
+        confirmed = client.post(
+            '/manual_create',
+            data={
+                'csrf_token': csrf_token,
+                'creation_mode': 'contract',
+                'fio': 'иванов иван иванович',
+                'dogovor': '2026-ФМ-0702-11',
+                'confirm_fio_duplicate': '1',
+            },
+        )
+        self.assertIn('Логин успешно создан:', confirmed.get_data(as_text=True))
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            rows = conn.execute(
+                'SELECT dogovor, login FROM abiturients ORDER BY id'
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][0], '2026-ФМ-0702-11')
+        self.assertNotEqual(rows[1][1].casefold(), 'taken_manual')
+
     def test_admin_is_redirected_to_setup_until_login_rules_are_saved(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             conn.execute('DELETE FROM login_generation_settings')
@@ -289,6 +451,16 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('Договор уже есть у студента', plan_df.iloc[3]['import_status'])
         self.assertIn('Договор уже ожидает проверки', plan_df.iloc[4]['import_status'])
         self.assertIn('Договор повторяется', plan_df.iloc[5]['import_status'])
+        self.assertIn('список абитуриентов', plan_df.iloc[1]['status_hint'])
+        self.assertIn('2026-ФМ-0001-11', plan_df.iloc[1]['status_hint'])
+        self.assertIn('26611001', plan_df.iloc[1]['status_hint'])
+        self.assertIn('список студентов', plan_df.iloc[3]['status_hint'])
+        self.assertIn('Сидоров Семен Семенович', plan_df.iloc[3]['status_hint'])
+        self.assertIn('раздел дублей', plan_df.iloc[4]['status_hint'])
+        self.assertIn('загруженный файл, строка 2', plan_df.iloc[5]['status_hint'])
+
+        preview_rows = manticore.dataframe_preview_rows(plan_df)
+        self.assertEqual(preview_rows[1]['status_hint'], plan_df.iloc[1]['status_hint'])
 
     def test_apply_abiturients_import_creates_backup_and_audit_log(self):
         file_path = self.make_abiturients_file([
@@ -338,6 +510,26 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertNotIn('visible-secret', body)
         self.assertIn('••••••', body)
 
+    def test_documentation_is_available_to_authenticated_users(self):
+        client = manticore.app.test_client()
+
+        anonymous_response = client.get('/documentation')
+        self.assertEqual(anonymous_response.status_code, 302)
+        self.assertIn('/login', anonymous_response.headers['Location'])
+
+        self.login_session(client, username='viewer', role='viewer')
+        response = client.get('/documentation')
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Как работает', body)
+        self.assertIn('Путь одной приёмной кампании', body)
+        self.assertIn('Снимки сделаны на изолированном тестовом стенде', body)
+        self.assertIn('dashboard-test-stand.png', body)
+        self.assertIn('Форматы файлов', body)
+        self.assertIn('documentation.css', body)
+        self.assertIn('documentation.js', body)
+
     def test_abiturients_sort_links_keep_current_filters(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             conn.execute(
@@ -364,6 +556,124 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('Петров Петр Петрович', body)
         self.assertNotIn('Иванов Иван Иванович', body)
         self.assertRegex(body, r'href="/abiturients\?[^"]*has_email=1[^"]*has_paid=1[^"]*order_by=fio')
+
+    def test_abiturients_search_is_case_insensitive_for_cyrillic(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.executemany(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, '2026', ?, ?, ?, 1)
+                ''',
+                [
+                    (
+                        'Хачатурян Нарина Герасимовна', '2026-СД-0241-11И', 'search001',
+                        'Хачатурян', 'Нарина Герасимовна', 'narina@example.test'
+                    ),
+                    (
+                        'Иванов Иван Иванович', '2026-ФМ-0242-11', 'search002',
+                        'Иванов', 'Иван Иванович', 'ivanov@example.test'
+                    ),
+                ]
+            )
+
+        lowercase_rows = manticore.get_all_abiturients(
+            campaign_year='2026',
+            q='хачатурян',
+        )
+        uppercase_rows = manticore.get_all_abiturients(
+            campaign_year='2026',
+            q='ХАЧАТУРЯН',
+        )
+        self.assertEqual([row['login'] for row in lowercase_rows], ['search001'])
+        self.assertEqual([row['login'] for row in uppercase_rows], ['search001'])
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        response = client.get('/abiturients', query_string={'q': 'хачатурян'})
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Хачатурян Нарина Герасимовна', body)
+        self.assertNotIn('Иванов Иван Иванович', body)
+
+        export_response = client.get(
+            '/abiturients/download',
+            query_string={'q': 'хачатурян'},
+        )
+        self.assertEqual(export_response.status_code, 200)
+        exported = pd.read_excel(io.BytesIO(export_response.data))
+        self.assertEqual(exported['login'].tolist(), ['search001'])
+
+    def test_abiturients_can_filter_and_export_by_enrollment_order_presence(self):
+        ordered_fio = 'Приказов Петр Петрович'
+        ordered_dogovor = '2026-ФМ-0250-11'
+        fio_key, specialty_key = manticore.make_abiturient_enrollment_match_key(
+            ordered_fio,
+            ordered_dogovor,
+        )
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.executemany(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, '2026', ?, ?, ?, 1)
+                ''',
+                [
+                    (
+                        ordered_fio, ordered_dogovor, 'order_yes', 'Приказов',
+                        'Петр Петрович', 'ordered@example.test'
+                    ),
+                    (
+                        'Безприказов Иван Иванович', '2026-ФМ-0251-11', 'order_no',
+                        'Безприказов', 'Иван Иванович', 'unordered@example.test'
+                    ),
+                ]
+            )
+            conn.execute(
+                '''
+                INSERT INTO enrollment_orders
+                    (campaign_year, fio, specialty, order_number, order_date,
+                     fio_key, specialty_key)
+                VALUES ('2026', ?, 'ФМ', '88-у', '2026-08-15', ?, ?)
+                ''',
+                (ordered_fio, fio_key, specialty_key)
+            )
+
+        with_order = manticore.get_all_abiturients(
+            campaign_year='2026',
+            has_order='1',
+        )
+        without_order = manticore.get_all_abiturients(
+            campaign_year='2026',
+            has_order='0',
+        )
+        self.assertEqual([row['login'] for row in with_order], ['order_yes'])
+        self.assertEqual([row['login'] for row in without_order], ['order_no'])
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        response = client.get(
+            '/abiturients',
+            query_string={'has_order': '1', 'order_by': 'fio', 'order_dir': 'asc'},
+        )
+        body = unquote(response.get_data(as_text=True).replace('&amp;', '&'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Есть приказ', body)
+        self.assertIn('value="1" selected', body)
+        self.assertIn(ordered_fio, body)
+        self.assertNotIn('Безприказов Иван Иванович', body)
+        self.assertRegex(body, r'href="/abiturients\?[^\"]*has_order=1[^\"]*order_by=dogovor')
+        self.assertIn('name="has_order" value="1"', body)
+
+        export_response = client.get(
+            '/abiturients/download',
+            query_string={'has_order': '1', 'order_by': 'fio', 'order_dir': 'asc'},
+        )
+        self.assertEqual(export_response.status_code, 200)
+        exported = pd.read_excel(io.BytesIO(export_response.data))
+        self.assertEqual(exported['login'].tolist(), ['order_yes'])
 
     def test_edit_abiturient_navigation_follows_filtered_list_order(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
@@ -622,6 +932,130 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertNotIn('Иванов', body)
         self.assertRegex(body, r'href="/students_list\?[^"]*cohort=26ФМ-11-1[^"]*lastname=П[^"]*order_by=lastname')
 
+    def test_students_can_filter_sort_and_export_by_enrollment_order(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            students = [
+                ('student_late', 'Поздний', 'Петр'),
+                ('student_early', 'Ранний', 'Иван'),
+                ('student_without_order', 'Безприказов', 'Семен'),
+            ]
+            for username, lastname, firstname in students:
+                conn.execute(
+                    '''
+                    INSERT INTO students (username, password, email, firstname, lastname, cohort1)
+                    VALUES (?, 'secret', ?, ?, ?, '26ФМ-11-1')
+                    ''',
+                    (username, f'{username}@example.test', firstname, lastname)
+                )
+            conn.execute(
+                '''
+                INSERT INTO student_group_transfers
+                    (username, movement_type, old_cohort1, new_cohort1,
+                     order_number, order_date, order_source)
+                VALUES (?, 'enrollment', 'Абитуриенты', '26ФМ-11-1', ?, ?, 'enrollment_order')
+                ''',
+                ('student_late', '10-у', '2026-08-20')
+            )
+            conn.execute(
+                '''
+                INSERT INTO student_group_transfers
+                    (username, movement_type, old_cohort1, new_cohort1,
+                     order_number, order_date, order_source)
+                VALUES (?, 'enrollment', 'Абитуриенты', '26ФМ-11-1', ?, ?, 'enrollment_order')
+                ''',
+                ('student_early', '2-у', '2026-08-10')
+            )
+
+        ascending = manticore.get_all_students('enrollment_order', 'asc')
+        descending = manticore.get_all_students('enrollment_order', 'desc')
+        self.assertEqual(
+            [row['username'] for row in ascending],
+            ['student_early', 'student_late', 'student_without_order']
+        )
+        self.assertEqual(
+            [row['username'] for row in descending],
+            ['student_late', 'student_early', 'student_without_order']
+        )
+
+        selected_order = manticore.make_enrollment_order_filter_value('10-у', '2026-08-20')
+        client = manticore.app.test_client()
+        self.login_session(client)
+        response = client.get(
+            '/students_list',
+            query_string={
+                'enrollment_order': selected_order,
+                'order_by': 'enrollment_order',
+                'order_dir': 'desc',
+            }
+        )
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Приказ о зачислении', body)
+        self.assertIn('№ 10-у', body)
+        self.assertIn('Поздний', body)
+        self.assertNotIn('Ранний', body)
+        self.assertNotIn('Безприказов', body)
+        self.assertIn('selected', body)
+        self.assertIn('class="btn action-icon-btn action-icon-edit"', body)
+        self.assertIn('class="btn action-icon-btn action-icon-delete"', body)
+
+        export_response = client.get(
+            '/students/download',
+            query_string={
+                'enrollment_order': selected_order,
+                'order_by': 'enrollment_order',
+                'order_dir': 'desc',
+            }
+        )
+        self.assertEqual(export_response.status_code, 200)
+        exported = pd.read_excel(io.BytesIO(export_response.data))
+        self.assertEqual(exported['username'].tolist(), ['student_late'])
+        self.assertEqual(exported.loc[0, 'enrollment_order_number'], '10-у')
+        self.assertEqual(exported.loc[0, 'enrollment_order_date'], '2026-08-20')
+
+    def test_students_list_backfills_enrollment_order_for_existing_student(self):
+        fio = 'Архивов Алексей Алексеевич'
+        dogovor = '2026-ФМ-0800-11'
+        fio_key, specialty_key = manticore.make_abiturient_enrollment_match_key(fio, dogovor)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO students
+                    (username, password, email, firstname, lastname, cohort1,
+                     source_campaign_year, source_dogovor, source_fio)
+                VALUES (?, 'secret', ?, ?, ?, ?, '2026', ?, ?)
+                ''',
+                (
+                    'student_from_old_version', 'archive@example.test', 'Алексей Алексеевич',
+                    'Архивов', '26ФМ-11-1', dogovor, fio
+                )
+            )
+            conn.execute(
+                '''
+                INSERT INTO enrollment_orders
+                    (campaign_year, fio, specialty, group_name, order_number, order_date,
+                     fio_key, specialty_key, group_key)
+                VALUES ('2026', ?, 'ФМ', '26ФМ-11-1', '77-у', '2026-08-01', ?, ?, ?)
+                ''',
+                (fio, fio_key, specialty_key, '')
+            )
+
+        rows = manticore.get_all_students(order_by='enrollment_order')
+
+        self.assertEqual(rows[0]['enrollment_order_number'], '77-у')
+        self.assertEqual(rows[0]['enrollment_order_date'], '2026-08-01')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            movement = conn.execute(
+                '''
+                SELECT order_number, order_date
+                FROM student_group_transfers
+                WHERE username=? AND movement_type='enrollment'
+                ''',
+                ('student_from_old_version',)
+            ).fetchone()
+        self.assertEqual(movement, ('77-у', '2026-08-01'))
+
     def test_admin_backup_and_audit_pages_render(self):
         backup_path = manticore.create_database_backup('page_render_test')
         self.assertTrue(os.path.exists(backup_path))
@@ -637,6 +1071,52 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(backups_response.status_code, 200)
         self.assertEqual(audit_response.status_code, 200)
         self.assertIn('page_render_test', backups_response.get_data(as_text=True))
+
+    def test_admin_panel_contains_server_update_controls(self):
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/admin_panel')
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Обновление панели', body)
+        self.assertIn('/admin/app-update/status', body)
+        self.assertIn('/admin/app-update/start', body)
+
+    @mock.patch.object(manticore.update_app, 'fetch_latest_release')
+    def test_admin_can_check_latest_release(self, fetch_latest_release):
+        fetch_latest_release.return_value = {
+            'tag_name': 'v9.9.9',
+            'name': 'manticore 9.9.9',
+            'html_url': 'https://github.com/UnicornisIT/manticore/releases/tag/v9.9.9',
+            'published_at': '2026-08-30T10:00:00Z',
+        }
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/admin/app-update/status')
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload['latest_version'], '9.9.9')
+        self.assertTrue(payload['update_available'])
+
+    def test_admin_can_queue_server_update_with_csrf_protection(self):
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/admin_panel')
+        csrf_token = self.csrf_from_response(page)
+
+        with mock.patch.object(manticore, 'get_app_update_status', return_value={'state': 'idle'}), \
+                mock.patch.object(manticore, 'queue_app_update') as queue_update:
+            response = client.post(
+                '/admin/app-update/start',
+                data={'csrf_token': csrf_token},
+            )
+
+        self.assertEqual(response.status_code, 303)
+        queue_update.assert_called_once_with('admin')
 
     def test_file_work_sections_render_individual_pages(self):
         client = manticore.app.test_client()
@@ -654,7 +1134,7 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('id="file-section-orders"', common_body)
         self.assertIn('id="file-section-students"', common_body)
         self.assertIn('/file_work/orders', common_body)
-        self.assertEqual(common_body.count('data-file-dropzone'), 4)
+        self.assertEqual(common_body.count('data-file-dropzone'), 5)
         self.assertIn('btn-download upload-template-link', common_body)
         self.assertIn('или перетащите сюда Excel/CSV/DOCX/PDF', common_body)
 
@@ -691,6 +1171,10 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('Предпросмотр импорта абитуриентов', body)
         self.assertIn('Подтвердить импорт', body)
+        self.assertIn('class="abiturients-preview-table"', body)
+        self.assertIn('import-status-badge', body)
+        self.assertIn('Наведите указатель на статус', body)
+        self.assertIn('Расхождений с существующими записями', body)
         with sqlite3.connect(manticore.DB_PATH) as conn:
             abiturients_count = conn.execute('SELECT COUNT(*) FROM abiturients').fetchone()[0]
         self.assertEqual(abiturients_count, 0)
@@ -1002,6 +1486,410 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('Иванов Иван Иванович', checks_body)
         self.assertIn('Кривец Анна', checks_body)
 
+    def test_enrollment_order_preliminary_roster_groups_logins_and_exports(self):
+        people = [
+            ('Нетпочты Анна Андреевна', '2026-ФМ-0401-11', '26ФМ-11-1'),
+            ('Готовов Петр Петрович', '2026-ФМ-0402-11', '26ФМ-11-1'),
+            ('Студентов Сергей Сергеевич', '2026-ФМ-0403-11', '26ФМ-11-2'),
+            ('Неизвестный Николай Николаевич', '2026-ФМ-0404-11', '26ФМ-11-2'),
+        ]
+        order_keys = {
+            fio: manticore.make_abiturient_enrollment_match_key(fio, dogovor)
+            for fio, dogovor, _group_name in people
+        }
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO enrollment_order_uploads
+                    (campaign_year, original_filename, uploaded_by, total_count,
+                     import_count, matched_count, unmatched_count, order_numbers, order_dates)
+                VALUES ('2026', 'приказ-список.xlsx', 'admin', 4, 4, 3, 1, '99-у', '2026-08-18')
+                '''
+            )
+            upload_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            for row_number, (fio, _dogovor, group_name) in enumerate(people, start=1):
+                fio_key, specialty_key = order_keys[fio]
+                conn.execute(
+                    '''
+                    INSERT INTO enrollment_order_upload_rows
+                        (upload_id, campaign_year, row_number, fio, specialty, group_name,
+                         order_number, order_date, fio_key, specialty_key, group_key,
+                         has_candidate, import_action, import_status)
+                    VALUES (?, '2026', ?, ?, 'ФМ', ?, '99-у', '2026-08-18', ?, ?, '', ?, 'import', ?)
+                    ''',
+                    (
+                        upload_id, row_number, fio, group_name, fio_key, specialty_key,
+                        0 if fio.startswith('Неизвестный') else 1,
+                        'Будет загружено'
+                    )
+                )
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, '26811041', '2026', 'Нетпочты', 'Анна Андреевна', '', 0)
+                ''',
+                (people[0][0], people[0][1])
+            )
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, '26811042', '2026', 'Готовов', 'Петр Петрович', 'ready@example.test', 1)
+                ''',
+                (people[1][0], people[1][1])
+            )
+            conn.execute(
+                '''
+                INSERT INTO students
+                    (username, password, email, firstname, lastname, cohort1, cohort2,
+                     source_campaign_year, source_dogovor, source_fio)
+                VALUES ('student_roster', 'cron', 'student@example.test', 'Сергей Сергеевич',
+                        'Студентов', '26ФМ-11-2', 'ФМ-11', '2026', ?, ?)
+                ''',
+                (people[2][1], people[2][0])
+            )
+
+        roster = manticore.build_enrollment_order_student_roster(upload_id)
+        self.assertEqual(roster['summary']['total_count'], 4)
+        self.assertEqual(roster['summary']['group_count'], 2)
+        self.assertEqual(roster['summary']['student_count'], 1)
+        self.assertEqual(roster['summary']['ready_count'], 1)
+        self.assertEqual(roster['summary']['missing_email_count'], 1)
+        self.assertEqual(roster['summary']['unpaid_count'], 1)
+        self.assertEqual(roster['summary']['not_found_count'], 1)
+        self.assertEqual(roster['summary']['attention_count'], 2)
+        self.assertEqual(
+            roster['summary']['virtual_group_count'],
+            len({row['group_name'] for row in roster['rows'] if row['group_is_virtual']})
+        )
+        self.assertEqual(roster['summary']['unassigned_count'], 0)
+        roster_by_fio = {row['fio']: row for row in roster['rows']}
+        self.assertEqual(roster_by_fio[people[0][0]]['login'], '26811041')
+        self.assertEqual(roster_by_fio[people[0][0]]['status'], 'Нет почты и оплаты')
+        self.assertEqual(roster_by_fio[people[0][0]]['group_name'], '26ФМ-11-1')
+        self.assertEqual(roster_by_fio[people[2][0]]['login'], 'student_roster')
+        self.assertEqual(roster_by_fio[people[2][0]]['status'], 'Перенесён в студенты')
+        self.assertEqual(roster_by_fio[people[2][0]]['group_source'], 'Фактическая группа')
+
+        with manticore.app.test_request_context('/data_checks?campaign_year=2026'):
+            report = manticore.get_data_quality_report('2026')
+        roster_section = next(
+            section for section in report['sections']
+            if section['title'] == 'Предварительные списки по приказам'
+        )
+        self.assertTrue(roster_section['informational'])
+        self.assertEqual(roster_section['checks'][0]['count'], 2)
+        self.assertTrue(roster_section['checks'][0]['expandable'])
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        checks_response = client.get('/data_checks?campaign_year=2026')
+        checks_body = checks_response.get_data(as_text=True)
+        self.assertEqual(checks_response.status_code, 200)
+        self.assertIn('Предварительные списки по приказам', checks_body)
+        self.assertIn('Предварительный список: № 99-у', checks_body)
+        self.assertIn('check-item expandable warning', checks_body)
+        self.assertIn(f'/enrollment_order_uploads/{upload_id}/student_roster', checks_body)
+        self.assertIn(f'/enrollment_order_uploads/{upload_id}/student_roster/download', checks_body)
+
+        roster_response = client.get(f'/enrollment_order_uploads/{upload_id}/student_roster')
+        roster_body = roster_response.get_data(as_text=True)
+        self.assertEqual(roster_response.status_code, 200)
+        self.assertIn('Предварительный список по приказу', roster_body)
+        self.assertIn('26ФМ-11-1', roster_body)
+        self.assertIn('26ФМ-11-2', roster_body)
+        self.assertIn('26811041', roster_body)
+        self.assertIn('student_roster', roster_body)
+        self.assertIn('Нет почты и оплаты', roster_body)
+        self.assertIn('Только в расчёте', roster_body)
+        self.assertIn('в базе они не создаются', roster_body)
+
+        download_response = client.get(
+            f'/enrollment_order_uploads/{upload_id}/student_roster/download'
+        )
+        self.assertEqual(download_response.status_code, 200)
+        exported = pd.read_excel(io.BytesIO(download_response.data))
+        self.assertEqual(len(exported), 4)
+        self.assertEqual(
+            exported.columns[:7].tolist(),
+            ['username', 'password', 'email', 'firstname', 'lastname', 'cohort1', 'cohort2']
+        )
+        exported_by_fio = exported.set_index('ФИО')
+        self.assertEqual(exported_by_fio.loc[people[0][0], 'username'], '26811041')
+        self.assertEqual(exported_by_fio.loc[people[0][0], 'cohort1'], '26ФМ-11-1')
+        self.assertEqual(exported_by_fio.loc[people[0][0], 'Состояние'], 'Нет почты и оплаты')
+        self.assertEqual(exported_by_fio.loc[people[2][0], 'username'], 'student_roster')
+
+    def test_enrollment_order_roster_simulates_next_group_without_database_writes(self):
+        people = [
+            ('Альфов Алексей Алексеевич', '2029-ФМ-0501-11', '29611001'),
+            ('Бетов Борис Борисович', '2029-ФМ-0502-11', '29611002'),
+        ]
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO groups (name, group_year) VALUES ('29ФМ-11-1', '2029')"
+            )
+            for index in range(24):
+                conn.execute(
+                    '''
+                    INSERT INTO students
+                        (username, password, firstname, lastname, cohort1, source_campaign_year)
+                    VALUES (?, 'cron', 'Занят', 'Студент', '29ФМ-11-1', '2029')
+                    ''',
+                    (f'occupied_{index:02d}',)
+                )
+            conn.execute(
+                '''
+                INSERT INTO enrollment_order_uploads
+                    (campaign_year, original_filename, uploaded_by, total_count,
+                     import_count, matched_count, unmatched_count, order_numbers, order_dates)
+                VALUES ('2029', 'приказ-без-групп.xlsx', 'admin', 2, 2, 2, 0,
+                        '100-у', '2029-08-19')
+                '''
+            )
+            upload_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            for row_number, (fio, dogovor, login) in enumerate(people, start=1):
+                fio_key, specialty_key = manticore.make_abiturient_enrollment_match_key(fio, dogovor)
+                conn.execute(
+                    '''
+                    INSERT INTO enrollment_order_upload_rows
+                        (upload_id, campaign_year, row_number, fio, specialty, group_name,
+                         order_number, order_date, fio_key, specialty_key, group_key,
+                         has_candidate, import_action, import_status)
+                    VALUES (?, '2029', ?, ?, 'ФМ', '', '100-у', '2029-08-19',
+                            ?, ?, '', 1, 'import', 'Будет загружено')
+                    ''',
+                    (upload_id, row_number, fio, fio_key, specialty_key)
+                )
+                lastname, firstname = manticore.split_fio_for_storage(fio)
+                conn.execute(
+                    '''
+                    INSERT INTO abiturients
+                        (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                    VALUES (?, ?, ?, '2029', ?, ?, '', 0)
+                    ''',
+                    (fio, dogovor, login, lastname, firstname)
+                )
+            group_count_before = conn.execute('SELECT COUNT(*) FROM groups').fetchone()[0]
+
+        roster = manticore.build_enrollment_order_student_roster(upload_id)
+        roster_by_fio = {row['fio']: row for row in roster['rows']}
+
+        self.assertEqual(roster_by_fio[people[0][0]]['group_name'], '29ФМ-11-1')
+        self.assertFalse(roster_by_fio[people[0][0]]['group_is_virtual'])
+        self.assertEqual(roster_by_fio[people[1][0]]['group_name'], '29ФМ-11-2')
+        self.assertTrue(roster_by_fio[people[1][0]]['group_is_virtual'])
+        self.assertEqual(roster['summary']['group_count'], 2)
+        self.assertEqual(roster['summary']['virtual_group_count'], 1)
+        self.assertEqual(roster['summary']['unassigned_count'], 0)
+
+        export = pd.DataFrame(manticore.enrollment_order_roster_export_rows(roster))
+        self.assertEqual(
+            export.columns[:7].tolist(),
+            ['username', 'password', 'email', 'firstname', 'lastname', 'cohort1', 'cohort2']
+        )
+        self.assertEqual(export['cohort1'].tolist(), ['29ФМ-11-1', '29ФМ-11-2'])
+
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM groups').fetchone()[0], group_count_before)
+            self.assertIsNone(
+                conn.execute("SELECT 1 FROM groups WHERE name='29ФМ-11-2'").fetchone()
+            )
+
+    def test_enrollment_order_roster_can_fix_or_skip_fio_review(self):
+        people = [
+            {
+                'order_fio': 'Опечаткин Иван Иванович',
+                'database_fio': 'Опечаткин Иван Иванвич',
+                'dogovor': '2027-ФМ-0601-11',
+                'login': '27611001',
+                'specialty': 'ФМ',
+            },
+            {
+                'order_fio': 'Пропускова Анна Сергеевна',
+                'database_fio': 'Пропускова Ана Сергеевна',
+                'dogovor': '2027-ФМ-0602-11',
+                'login': '27611002',
+                'specialty': 'ФМ',
+            },
+            {
+                'order_fio': 'Конфликтов Петр Петрович',
+                'database_fio': 'Конфликтов Петр Петрович',
+                'dogovor': '2027-ЛД-0603-11',
+                'login': '27111001',
+                'specialty': 'СД',
+            },
+            {
+                'order_fio': 'Приказов Павел Павлович',
+                'database_fio': 'Приказов Павел Павловч',
+                'dogovor': '2027-ФМ-0604-11',
+                'login': '27611004',
+                'specialty': 'ФМ',
+            },
+        ]
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO enrollment_order_uploads
+                    (campaign_year, original_filename, uploaded_by, total_count,
+                     import_count, matched_count, unmatched_count, order_numbers, order_dates)
+                VALUES ('2027', 'приказ-сверка-фио.xlsx', 'admin', 4, 4, 0, 4,
+                        '101-у', '2027-08-20')
+                '''
+            )
+            upload_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            row_ids = []
+            abiturient_ids = []
+            for row_number, person in enumerate(people, start=1):
+                fio_key = manticore.normalize_fio_key(person['order_fio'])
+                specialty_key = manticore.normalize_specialty_key(person['specialty'])
+                conn.execute(
+                    '''
+                    INSERT INTO enrollment_order_upload_rows
+                        (upload_id, campaign_year, row_number, fio, specialty, group_name,
+                         order_number, order_date, fio_key, specialty_key, group_key,
+                         has_candidate, import_action, import_status)
+                    VALUES (?, '2027', ?, ?, ?, '', '101-у', '2027-08-20',
+                            ?, ?, '', 0, 'import', 'Будет загружен, но кандидата пока нет')
+                    ''',
+                    (
+                        upload_id, row_number, person['order_fio'], person['specialty'],
+                        fio_key, specialty_key,
+                    )
+                )
+                row_ids.append(conn.execute('SELECT last_insert_rowid()').fetchone()[0])
+                fam, imotch = manticore.split_fio_for_storage(person['database_fio'])
+                conn.execute(
+                    '''
+                    INSERT INTO abiturients
+                        (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                    VALUES (?, ?, ?, '2027', ?, ?, ?, 1)
+                    ''',
+                    (
+                        person['database_fio'], person['dogovor'], person['login'], fam, imotch,
+                        f"{person['login']}@example.test",
+                    )
+                )
+                abiturient_ids.append(conn.execute('SELECT last_insert_rowid()').fetchone()[0])
+
+        roster = manticore.build_enrollment_order_student_roster(upload_id)
+        roster_by_row = {row['row_number']: row for row in roster['rows']}
+        self.assertEqual(roster_by_row[1]['fio_review_kind'], 'fio_typo')
+        self.assertEqual(roster_by_row[1]['suggested_abiturient_id'], abiturient_ids[0])
+        self.assertEqual(roster_by_row[2]['fio_review_kind'], 'fio_typo')
+        self.assertEqual(roster_by_row[3]['fio_review_kind'], 'specialty_conflict')
+        self.assertEqual(roster_by_row[4]['fio_review_kind'], 'fio_typo')
+        self.assertEqual(roster['summary']['fio_review_count'], 3)
+        self.assertEqual(roster['summary']['specialty_conflict_count'], 1)
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get(f'/enrollment_order_uploads/{upload_id}/student_roster')
+        body = page.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('Похоже на запись в базе', body)
+        self.assertIn('Исправить в базе', body)
+        self.assertIn('Пропустить без исправления', body)
+        self.assertIn('Пропустить и присвоить логин', body)
+        self.assertIn('ФИО совпадает, специальность отличается', body)
+
+        skip_response = client.post(
+            f'/enrollment_order_uploads/{upload_id}/student_roster/fio_review',
+            data={
+                'csrf_token': self.csrf_from_response(page),
+                'review_action': 'skip',
+                'row_id': row_ids[1],
+                'abiturient_id': abiturient_ids[1],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(skip_response.status_code, 200)
+        self.assertIn('Исправление ФИО пропущено', skip_response.get_data(as_text=True))
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            skipped_fio = conn.execute(
+                'SELECT fio FROM abiturients WHERE id=?',
+                (abiturient_ids[1],)
+            ).fetchone()[0]
+            review_status = conn.execute(
+                'SELECT fio_review_status FROM enrollment_order_upload_rows WHERE id=?',
+                (row_ids[1],)
+            ).fetchone()[0]
+        self.assertEqual(skipped_fio, people[1]['database_fio'])
+        self.assertEqual(review_status, 'skipped')
+
+        link_page = client.get(f'/enrollment_order_uploads/{upload_id}/student_roster')
+        link_response = client.post(
+            f'/enrollment_order_uploads/{upload_id}/student_roster/fio_review',
+            data={
+                'csrf_token': self.csrf_from_response(link_page),
+                'review_action': 'link',
+                'row_id': row_ids[3],
+                'abiturient_id': abiturient_ids[3],
+            },
+            follow_redirects=True,
+        )
+        link_body = link_response.get_data(as_text=True)
+        self.assertEqual(link_response.status_code, 200)
+        self.assertIn('Логин 27611004 присвоен строке', link_body)
+        self.assertIn('Опечатка в приказе — логин присвоен', link_body)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            linked_fio = conn.execute(
+                'SELECT fio FROM abiturients WHERE id=?',
+                (abiturient_ids[3],)
+            ).fetchone()[0]
+            linked_status = conn.execute(
+                'SELECT fio_review_status FROM enrollment_order_upload_rows WHERE id=?',
+                (row_ids[3],)
+            ).fetchone()[0]
+        self.assertEqual(linked_fio, people[3]['database_fio'])
+        self.assertEqual(linked_status, 'linked')
+
+        fix_page = client.get(f'/enrollment_order_uploads/{upload_id}/student_roster')
+        fix_response = client.post(
+            f'/enrollment_order_uploads/{upload_id}/student_roster/fio_review',
+            data={
+                'csrf_token': self.csrf_from_response(fix_page),
+                'review_action': 'fix',
+                'row_id': row_ids[0],
+                'abiturient_id': abiturient_ids[0],
+            },
+            follow_redirects=True,
+        )
+        fix_body = fix_response.get_data(as_text=True)
+        self.assertEqual(fix_response.status_code, 200)
+        self.assertIn('ФИО исправлено в базе абитуриентов', fix_body)
+        self.assertIn('ФИО исправлено по приказу', fix_body)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            fixed_abiturient = conn.execute(
+                'SELECT fio, fam, imotch FROM abiturients WHERE id=?',
+                (abiturient_ids[0],)
+            ).fetchone()
+        self.assertEqual(
+            fixed_abiturient,
+            ('Опечаткин Иван Иванович', 'Опечаткин', 'Иван Иванович'),
+        )
+
+        updated_roster = manticore.build_enrollment_order_student_roster(upload_id)
+        updated_by_row = {row['row_number']: row for row in updated_roster['rows']}
+        self.assertEqual(updated_by_row[1]['record_type'], 'Абитуриент')
+        self.assertEqual(updated_by_row[1]['login'], '27611001')
+        self.assertEqual(updated_by_row[1]['fio_review_status'], 'fixed')
+        self.assertEqual(updated_by_row[2]['fio_review_status'], 'skipped')
+        self.assertEqual(updated_by_row[4]['fio_review_status'], 'linked')
+        self.assertEqual(updated_by_row[4]['record_type'], 'Абитуриент')
+        self.assertEqual(updated_by_row[4]['login'], '27611004')
+        self.assertEqual(updated_roster['summary']['fio_review_linked_count'], 1)
+        export = pd.DataFrame(manticore.enrollment_order_roster_export_rows(updated_roster))
+        export_by_fio = export.set_index('ФИО')
+        self.assertEqual(export_by_fio.loc[people[0]['order_fio'], 'Сверка ФИО'], 'Исправлено по приказу')
+        self.assertEqual(export_by_fio.loc[people[1]['order_fio'], 'Сверка ФИО'], 'Пропущено без исправления')
+        self.assertEqual(
+            export_by_fio.loc[people[3]['order_fio'], 'Сверка ФИО'],
+            'Опечатка в приказе — логин присвоен',
+        )
+        self.assertEqual(export_by_fio.loc[people[3]['order_fio'], 'username'], '27611004')
+
     def test_data_checks_reports_missing_and_mismatched_cohort2(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             rows = [
@@ -1172,6 +2060,258 @@ class ManticoreAppTests(unittest.TestCase):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             row = conn.execute('SELECT email, paid FROM abiturients WHERE login=?', ('26611030',)).fetchone()
         self.assertEqual(row, (None, 0))
+
+    def test_email_source_updates_only_email_for_exact_full_name_matches(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Ёлкина Анна Сергеевна', '2026-СД-0400-11', '26311040',
+                    '2026', 'Ёлкина', 'Анна Сергеевна', 'old-applicant@example.test', 0
+                )
+            )
+            conn.execute(
+                '''
+                INSERT INTO students
+                    (username, password, email, firstname, lastname, cohort1,
+                     source_campaign_year, source_fio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'student040', 'cron', 'invalid-email', 'Анна Сергеевна', 'Ёлкина',
+                    '26СД-11-1', '2026', 'Ёлкина Анна Сергеевна'
+                )
+            )
+
+        source_path = os.path.join(TEST_UPLOAD_DIR, 'email_source.xlsx')
+        pd.DataFrame([{
+            'ID': 101,
+            'Фамилия': 'Елкина',
+            'Имя Отчество': 'Анна Сергеевна',
+            'Почта': 'anna@example.test',
+            'Телефон': '+70000000000',
+        }]).to_excel(source_path, index=False)
+
+        summary = manticore.process_email_source_updates(source_path, '2026')
+
+        self.assertEqual(summary['matched_rows'], 1)
+        self.assertEqual(summary['updated_abiturients'], 1)
+        self.assertEqual(summary['updated_students'], 1)
+        self.assertEqual(summary['corrected_invalid_student_emails'], 1)
+        self.assertEqual(summary['issues'], [])
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            abiturient = conn.execute(
+                'SELECT fio, email, paid FROM abiturients WHERE login=?',
+                ('26311040',)
+            ).fetchone()
+            student = conn.execute(
+                'SELECT firstname, lastname, email FROM students WHERE username=?',
+                ('student040',)
+            ).fetchone()
+        self.assertEqual(abiturient, ('Ёлкина Анна Сергеевна', 'anna@example.test', 0))
+        self.assertEqual(student, ('Анна Сергеевна', 'Ёлкина', 'anna@example.test'))
+
+    def test_email_source_warns_about_fio_typo_without_changes(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Сафонова Ольга Олеговна', '2026-ЛД-0401-11', '26111041',
+                    '2026', 'Сафонова', 'Ольга Олеговна', 'old@example.test', 1
+                )
+            )
+
+        source_path = os.path.join(TEST_UPLOAD_DIR, 'email_source_typo.csv')
+        pd.DataFrame([{
+            'Фамилия': 'Сафонова',
+            'Имя Отчество': 'Ольга Олговна',
+            'Почта': 'new@example.test',
+        }]).to_csv(source_path, index=False)
+
+        summary = manticore.process_email_source_updates(source_path, '2026')
+
+        self.assertEqual(summary['updated_abiturients'], 0)
+        self.assertEqual(summary['fio_warning_count'], 1)
+        self.assertIn('Похоже на «Сафонова Ольга Олеговна»', summary['issues'][0]['message'])
+        self.assertIn('почта не изменена', summary['issues'][0]['message'])
+        self.assertEqual(summary['preview_rows'][0]['action_label'], 'Проверить ФИО')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            row = conn.execute(
+                'SELECT fio, email FROM abiturients WHERE login=?',
+                ('26111041',)
+            ).fetchone()
+        self.assertEqual(row, ('Сафонова Ольга Олеговна', 'old@example.test'))
+
+    def test_email_source_requires_exact_questionnaire_column_names(self):
+        source_path = os.path.join(TEST_UPLOAD_DIR, 'email_source_wrong_columns.xlsx')
+        pd.DataFrame([{
+            'Фамилия': 'Иванов',
+            'Имя Отчество': 'Иван Иванович',
+            'Email': 'ivan@example.test',
+        }]).to_excel(source_path, index=False)
+
+        with self.assertRaisesRegex(ValueError, 'Фамилия, Имя Отчество, Почта'):
+            manticore.process_email_source_updates(source_path, '2026')
+
+    def test_email_source_upload_route_previews_before_confirmation(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Петрова Мария Ивановна', '2026-ФМ-0402-11', '26611042',
+                    '2026', 'Петрова', 'Мария Ивановна', '', 0
+                )
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/file_work/updates')
+        body = page.get_data(as_text=True)
+        self.assertIn('Дополнительная загрузка почты по ФИО', body)
+        self.assertIn('<b>Фамилия</b>, <b>Имя Отчество</b> и <b>Почта</b>', body)
+        csrf_token = self.csrf_from_response(page)
+        upload = io.BytesIO()
+        pd.DataFrame([{
+            'Фамилия': 'Петрова',
+            'Имя Отчество': 'Мария Ивановна',
+            'Почта': 'maria@example.test',
+        }]).to_excel(upload, index=False)
+        upload.seek(0)
+
+        preview_response = client.post(
+            '/abiturients_email_source_upload',
+            data={
+                'csrf_token': csrf_token,
+                'file_section': 'updates',
+                'email_source_import_action': 'preview',
+                'email_source_file': (upload, 'source.xlsx'),
+            },
+            content_type='multipart/form-data',
+        )
+        preview_body = preview_response.get_data(as_text=True)
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertIn('Предпросмотр обновления почты', preview_body)
+        self.assertIn('В базе ещё ничего не изменено', preview_body)
+        self.assertIn('Петрова Мария Ивановна', preview_body)
+        self.assertIn('maria@example.test', preview_body)
+        self.assertIn('Подтвердить обновление почты', preview_body)
+        self.assertIn('Отчет по дополнительному источнику почты', preview_body)
+        self.assertIn('Точно совпало по ФИО: 1', preview_body)
+        pending_match = re.search(
+            r'name="pending_email_source_import" value="([^"]+)"',
+            preview_body,
+        )
+        self.assertIsNotNone(pending_match)
+        pending_token = pending_match.group(1)
+        pending_path = os.path.join(TEST_UPLOAD_DIR, pending_token)
+        self.assertTrue(os.path.exists(pending_path))
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            preview_email = conn.execute(
+                'SELECT email FROM abiturients WHERE login=?',
+                ('26611042',)
+            ).fetchone()[0]
+        self.assertEqual(preview_email, '')
+
+        confirm_response = client.post(
+            '/abiturients_email_source_upload',
+            data={
+                'csrf_token': csrf_token,
+                'file_section': 'updates',
+                'email_source_import_action': 'confirm',
+                'pending_email_source_import': pending_token,
+            },
+            follow_redirects=True,
+        )
+        confirm_body = confirm_response.get_data(as_text=True)
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertIn('Источник почты применён', confirm_body)
+        self.assertIn('Обновлено почт абитуриентов: 1', confirm_body)
+        self.assertNotIn('Предпросмотр обновления почты', confirm_body)
+        self.assertFalse(os.path.exists(pending_path))
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            email = conn.execute(
+                'SELECT email FROM abiturients WHERE login=?',
+                ('26611042',)
+            ).fetchone()[0]
+        self.assertEqual(email, 'maria@example.test')
+
+    def test_email_source_preview_can_be_cancelled_without_changes(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO abiturients
+                    (fio, dogovor, login, campaign_year, fam, imotch, email, paid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    'Сидорова Анна Павловна', '2026-СД-0403-11', '26311043',
+                    '2026', 'Сидорова', 'Анна Павловна', 'old@example.test', 0
+                )
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/file_work/updates')
+        csrf_token = self.csrf_from_response(page)
+        upload = io.BytesIO()
+        pd.DataFrame([{
+            'Фамилия': 'Сидорова',
+            'Имя Отчество': 'Анна Павловна',
+            'Почта': 'new@example.test',
+        }]).to_excel(upload, index=False)
+        upload.seek(0)
+        preview_response = client.post(
+            '/abiturients_email_source_upload',
+            data={
+                'csrf_token': csrf_token,
+                'file_section': 'updates',
+                'email_source_import_action': 'preview',
+                'email_source_file': (upload, 'source.xlsx'),
+            },
+            content_type='multipart/form-data',
+        )
+        pending_match = re.search(
+            r'name="pending_email_source_import" value="([^"]+)"',
+            preview_response.get_data(as_text=True),
+        )
+        self.assertIsNotNone(pending_match)
+        pending_token = pending_match.group(1)
+        pending_path = os.path.join(TEST_UPLOAD_DIR, pending_token)
+
+        cancel_response = client.post(
+            '/abiturients_email_source_upload',
+            data={
+                'csrf_token': csrf_token,
+                'file_section': 'updates',
+                'email_source_import_action': 'cancel',
+                'pending_email_source_import': pending_token,
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        self.assertIn('Предпросмотр источника почты отменён', cancel_response.get_data(as_text=True))
+        self.assertFalse(os.path.exists(pending_path))
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            email = conn.execute(
+                'SELECT email FROM abiturients WHERE login=?',
+                ('26311043',)
+            ).fetchone()[0]
+        self.assertEqual(email, 'old@example.test')
 
     def test_two_stage_enrollment_requires_order_before_student_migration(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
@@ -2453,6 +3593,118 @@ class ManticoreAppTests(unittest.TestCase):
         abiturients_response = client.get('/abiturients')
         abiturients_body = abiturients_response.get_data(as_text=True)
         self.assertIn('<option value="2031" selected>2031</option>', abiturients_body)
+
+    def test_campaign_page_pins_and_restores_automatic_default(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO campaign_settings
+                    (campaign_year, is_archived, created_at, created_by)
+                VALUES (?, 0, datetime('now', 'localtime'), ?)
+                ''',
+                ('2031', 'admin')
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        get_response = client.get('/campaigns')
+        csrf_token = self.csrf_from_response(get_response)
+        pin_response = client.post(
+            '/campaigns',
+            data={
+                'csrf_token': csrf_token,
+                'campaign_action': 'set_active',
+                'campaign_year': '2026',
+            },
+            follow_redirects=True
+        )
+        pin_body = pin_response.get_data(as_text=True)
+
+        self.assertEqual(pin_response.status_code, 200)
+        self.assertIn('Кампания 2026 закреплена как активная', pin_body)
+        self.assertIn('По умолчанию', pin_body)
+        self.assertEqual(manticore.get_pinned_campaign_year(), '2026')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            active_rows = conn.execute(
+                'SELECT campaign_year FROM campaign_settings WHERE is_active=1'
+            ).fetchall()
+        self.assertEqual(active_rows, [('2026',)])
+
+        fresh_client = manticore.app.test_client()
+        self.login_session(fresh_client)
+        abiturients_response = fresh_client.get('/abiturients')
+        abiturients_body = abiturients_response.get_data(as_text=True)
+        self.assertIn('<option value="2026" selected>2026</option>', abiturients_body)
+        self.assertNotIn('<option value="2031" selected>2031</option>', abiturients_body)
+
+        switch_csrf_token = self.csrf_from_response(abiturients_response)
+        switch_response = fresh_client.post(
+            '/set_campaign',
+            data={
+                'csrf_token': switch_csrf_token,
+                'campaign_year': '2031',
+                'next': '/abiturients',
+            },
+            follow_redirects=True
+        )
+        self.assertIn(
+            '<option value="2031" selected>2031</option>',
+            switch_response.get_data(as_text=True)
+        )
+
+        another_client = manticore.app.test_client()
+        self.login_session(another_client)
+        another_body = another_client.get('/abiturients').get_data(as_text=True)
+        self.assertIn('<option value="2026" selected>2026</option>', another_body)
+
+        campaigns_response = client.get('/campaigns')
+        clear_csrf_token = self.csrf_from_response(campaigns_response)
+        clear_response = client.post(
+            '/campaigns',
+            data={
+                'csrf_token': clear_csrf_token,
+                'campaign_action': 'clear_active',
+            },
+            follow_redirects=True
+        )
+
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertIn('Теперь автоматически выбирается последняя кампания', clear_response.get_data(as_text=True))
+        self.assertIsNone(manticore.get_pinned_campaign_year())
+        automatic_client = manticore.app.test_client()
+        self.login_session(automatic_client)
+        automatic_body = automatic_client.get('/abiturients').get_data(as_text=True)
+        self.assertIn('<option value="2031" selected>2031</option>', automatic_body)
+
+    def test_pinned_campaign_cannot_be_archived(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO campaign_settings
+                    (campaign_year, is_archived, is_active, active_at, active_by)
+                VALUES (?, 0, 1, datetime('now', 'localtime'), ?)
+                ''',
+                ('2026', 'admin')
+            )
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        get_response = client.get('/campaigns')
+        csrf_token = self.csrf_from_response(get_response)
+        response = client.post(
+            '/campaigns',
+            data={
+                'csrf_token': csrf_token,
+                'campaign_action': 'toggle_archive',
+                'campaign_year': '2026',
+                'is_archived': '1',
+            },
+            follow_redirects=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Нельзя архивировать закрепленную активную кампанию', response.get_data(as_text=True))
+        self.assertFalse(manticore.is_campaign_archived('2026'))
 
     def test_bulk_abiturients_marks_selected_as_paid(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:

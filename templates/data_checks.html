@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui_macros.html" import disclosure_chevron %}
 {% block title %}Проверка данных{% endblock %}
 {% block head %}
 <style>
@@ -62,6 +63,28 @@
         background: #eff6ff;
         border-color: #bfdbfe;
     }
+    .check-item.expandable {
+        padding: 0;
+        overflow: hidden;
+    }
+    .check-item.expandable > summary {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px;
+        cursor: pointer;
+        list-style: none;
+    }
+    .check-expanded-content {
+        padding: 0 14px 14px 14px;
+        border-top: 1px solid rgba(148, 163, 184, 0.35);
+    }
+    .check-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
     .checks-section-title {
         display: flex;
         align-items: center;
@@ -77,6 +100,7 @@
     }
     .check-topline {
         display: flex;
+        flex: 1 1 auto;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
@@ -168,6 +192,49 @@
     </h2>
     <div class="checks-grid">
         {% for check in section.checks %}
+        {% if check.expandable %}
+        <details class="check-item expandable {{ check.tone }} has-disclosure-chevron" id="{{ check.id }}">
+            <summary>
+                <div class="check-topline">
+                    <h3>{{ check.title }}</h3>
+                    <span class="check-count">{{ check.count }}</span>
+                </div>
+                {{ disclosure_chevron() }}
+            </summary>
+            <div class="check-expanded-content">
+                <p class="check-description">{{ check.description }}</p>
+                {% if check.upload_filename %}
+                <p class="sample-detail">Файл: {{ check.upload_filename }}</p>
+                {% endif %}
+                {% if check.samples %}
+                <ul class="check-samples">
+                    {% for sample in check.samples %}
+                    <li>
+                        {% if sample.url %}
+                        <a href="{{ sample.url }}" class="sample-title">{{ sample.title }}</a>
+                        {% else %}
+                        <span class="sample-title">{{ sample.title }}</span>
+                        {% endif %}
+                        {% if sample.detail %}
+                        <span class="sample-detail">{{ sample.detail }}</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="check-ok">Проблем не найдено.</p>
+                {% endif %}
+                <div class="check-actions">
+                    {% if check.action_url %}
+                    <a href="{{ check.action_url }}" class="btn">{{ check.action_label }}</a>
+                    {% endif %}
+                    {% if check.download_url %}
+                    <a href="{{ check.download_url }}" class="btn btn-success btn-download">{{ check.download_label }}</a>
+                    {% endif %}
+                </div>
+            </div>
+        </details>
+        {% else %}
         <article class="check-item {{ check.tone }}" id="{{ check.id }}">
             <div class="check-topline">
                 <h3>{{ check.title }}</h3>
@@ -196,6 +263,7 @@
             <a href="{{ check.action_url }}" class="btn">{{ check.action_label }}</a>
             {% endif %}
         </article>
+        {% endif %}
         {% endfor %}
     </div>
 </section>

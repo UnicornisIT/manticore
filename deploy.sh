@@ -8,6 +8,9 @@ VENV_DIR="$APP_DIR/.venv"
 NGINX_AVAILABLE="/etc/nginx/sites-available/$SERVICE_NAME"
 NGINX_ENABLED="/etc/nginx/sites-enabled/$SERVICE_NAME"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+UPDATE_SERVICE_NAME="$SERVICE_NAME-update"
+UPDATE_SERVICE_FILE="/etc/systemd/system/$UPDATE_SERVICE_NAME.service"
+UPDATE_SUDOERS_FILE="/etc/sudoers.d/$UPDATE_SERVICE_NAME"
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_USER=${DEPLOY_USER:-www-data}
 
@@ -49,10 +52,9 @@ mkdir -p "$APP_DIR"
 
 if [[ "$CURRENT_DIR" != "$APP_DIR" ]]; then
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --exclude='.git' --exclude='.venv' --exclude='uploads/baze.db' --exclude='uploads/*.xlsx' "$CURRENT_DIR/" "$APP_DIR/"
+    rsync -a --exclude='.venv' --exclude='uploads/baze.db' --exclude='uploads/*.xlsx' "$CURRENT_DIR/" "$APP_DIR/"
   else
     cp -a "$CURRENT_DIR/." "$APP_DIR/"
-    rm -rf "$APP_DIR/.git"
     rm -rf "$APP_DIR/.venv"
     rm -f "$APP_DIR/uploads/baze.db"
   fi
@@ -74,6 +76,8 @@ FLASK_ENV=production
 APP_HOST=127.0.0.1
 APP_PORT=8000
 APP_DEBUG=false
+APP_UPDATE_ENABLED=true
+APP_UPDATE_SERVICE=$UPDATE_SERVICE_NAME.service
 EOF
   chmod 640 "$APP_DIR/.env"
   echo "Generated local admin password and saved it in $APP_DIR/.env."
@@ -86,8 +90,13 @@ python3 -m pip install --upgrade pip
 pip install -r requirements-prod.txt
 
 mkdir -p "$APP_DIR/uploads"
-chown -R "$RUN_USER":"$RUN_USER" "$APP_DIR"
+chown -R root:root "$APP_DIR"
+chown -R "$RUN_USER":"$RUN_USER" "$APP_DIR/uploads"
 chmod -R 750 "$APP_DIR/uploads"
+if [[ -f "$APP_DIR/.env" ]]; then
+  chown root:"$RUN_USER" "$APP_DIR/.env"
+  chmod 640 "$APP_DIR/.env"
+fi
 
 cat > "$SERVICE_FILE" <<'EOF'
 [Unit]
@@ -99,7 +108,7 @@ User=%RUN_USER%
 Group=%RUN_USER%
 WorkingDirectory=%APP_DIR%
 EnvironmentFile=-%APP_DIR%/.env
-Environment="PATH=%VENV_DIR%/bin"
+Environment="PATH=%VENV_DIR%/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=%VENV_DIR%/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
 Restart=on-failure
 
@@ -110,6 +119,38 @@ EOF
 sed -i "s|%RUN_USER%|$RUN_USER|g" "$SERVICE_FILE"
 sed -i "s|%APP_DIR%|$APP_DIR|g" "$SERVICE_FILE"
 sed -i "s|%VENV_DIR%|$VENV_DIR|g" "$SERVICE_FILE"
+
+BASH_BIN="$(command -v bash)"
+SYSTEMCTL_BIN="$(command -v systemctl)"
+cat > "$UPDATE_SERVICE_FILE" <<'EOF'
+[Unit]
+Description=manticore application update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=%APP_DIR%
+EnvironmentFile=-%APP_DIR%/.env
+Environment="UPDATE_LATEST_RELEASE=1"
+Environment="UPDATE_STATUS_FILE=%APP_DIR%/uploads/app_update_status.json"
+ExecStart=%BASH_BIN% %APP_DIR%/update.sh %APP_DIR%
+TimeoutStartSec=30min
+UMask=0022
+EOF
+
+sed -i "s|%APP_DIR%|$APP_DIR|g" "$UPDATE_SERVICE_FILE"
+sed -i "s|%BASH_BIN%|$BASH_BIN|g" "$UPDATE_SERVICE_FILE"
+
+cat > "$UPDATE_SUDOERS_FILE" <<EOF
+$RUN_USER ALL=(root) NOPASSWD: $SYSTEMCTL_BIN start --no-block $UPDATE_SERVICE_NAME.service
+EOF
+chmod 440 "$UPDATE_SUDOERS_FILE"
+if command -v visudo >/dev/null 2>&1; then
+  visudo -cf "$UPDATE_SUDOERS_FILE"
+fi
 
 if [[ ! -f "$NGINX_AVAILABLE" ]]; then
   cat > "$NGINX_AVAILABLE" <<EOF

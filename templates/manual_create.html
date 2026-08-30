@@ -2,82 +2,425 @@
 {% block title %}Ручное создание логина абитуриента{% endblock %}
 {% block head %}
 <style>
-    .manual-login-form {
-        max-width: 520px;
+    .manual-create-page {
+        max-width: 980px;
+    }
+    .manual-create-card {
+        padding: 24px;
+        border: 1px solid #dbe4f0;
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, .05);
+    }
+    .manual-create-subtitle {
+        max-width: 760px;
+        margin: -10px 0 22px;
+        color: #64748b;
+        line-height: 1.5;
+    }
+    .manual-mode-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+    }
+    .manual-mode {
+        position: relative;
+        display: flex;
+        gap: 12px;
+        min-height: 76px;
+        padding: 16px;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        background: #fff;
+        cursor: pointer;
+        transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+    .manual-mode:has(input:checked) {
+        border-color: #2563eb;
+        background: #eff6ff;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .1);
+    }
+    .manual-mode input {
+        width: 18px;
+        height: 18px;
+        margin: 2px 0 0;
+        accent-color: #2563eb;
+        flex: 0 0 auto;
+    }
+    .manual-mode-title {
+        display: block;
+        margin-bottom: 4px;
+        color: #0f172a;
+        font-weight: 700;
+    }
+    .manual-mode-description {
+        display: block;
+        color: #64748b;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+    .manual-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
     }
     .manual-field {
-        margin-bottom: 18px;
+        min-width: 0;
+    }
+    .manual-field--wide {
+        grid-column: 1 / -1;
     }
     .manual-field label {
         display: block;
-        font-weight: 500;
-        margin-bottom: 6px;
+        margin-bottom: 7px;
+        color: #1e293b;
+        font-weight: 600;
     }
     .manual-field input,
     .manual-field select {
         box-sizing: border-box;
         width: 100%;
-        height: 38px;
-        padding: 8px 10px;
+        min-height: 44px;
+        padding: 9px 12px;
         border: 1px solid #cbd5e1;
-        border-radius: 6px;
+        border-radius: 8px;
         background: #fff;
-        color: #111827;
+        color: #0f172a;
+        font: inherit;
+    }
+    .manual-field input:focus,
+    .manual-field select:focus {
+        border-color: #2563eb;
+        outline: 3px solid rgba(37, 99, 235, .12);
+    }
+    .manual-field-hint {
+        margin-top: 6px;
+        color: #64748b;
+        font-size: 13px;
+        line-height: 1.4;
+    }
+    .manual-settings {
+        margin-top: 18px;
+        padding: 18px;
+        border: 1px solid #dbeafe;
+        border-radius: 10px;
+        background: #f8fbff;
+    }
+    .manual-settings-title {
+        margin: 0 0 14px;
+        color: #1e3a8a;
         font-size: 15px;
+        font-weight: 700;
     }
-    .manual-field select {
-        max-width: 220px;
+    .manual-contract-note {
+        margin: 18px 0 0;
+        padding: 14px 16px;
+        border-radius: 10px;
+        background: #eff6ff;
+        color: #1e40af;
+        line-height: 1.5;
     }
-    .manual-login-form .btn {
-        height: 38px;
-        margin: 0;
-        padding: 0 18px;
+    .manual-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 20px;
+    }
+    .manual-actions .btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        min-height: 42px;
+        margin: 0;
+        padding: 0 20px;
+    }
+    .manual-message {
+        margin-bottom: 18px;
+        padding: 14px 16px;
+        border: 1px solid;
+        border-radius: 10px;
+        line-height: 1.45;
+    }
+    .manual-message--success { border-color: #86efac; background: #f0fdf4; color: #166534; }
+    .manual-message--warning { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+    .manual-message--error { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+    .manual-message--info { border-color: #93c5fd; background: #eff6ff; color: #1e40af; }
+    .manual-result {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 0 0 18px;
+        padding: 16px;
+        border: 1px solid #86efac;
+        border-radius: 12px;
+        background: #f0fdf4;
+    }
+    .manual-result-item {
+        min-width: 0;
+    }
+    .manual-result-label {
+        display: block;
+        margin-bottom: 3px;
+        color: #64748b;
+        font-size: 12px;
+    }
+    .manual-result-value {
+        display: block;
+        overflow-wrap: anywhere;
+        color: #14532d;
+        font-weight: 700;
+    }
+    .manual-collisions {
+        margin: 0 0 18px;
+        overflow-x: auto;
+        border: 1px solid #fcd34d;
+        border-radius: 10px;
+    }
+    .manual-collisions table {
+        width: 100%;
+        min-width: 680px;
+        border-collapse: collapse;
+        background: #fff;
+    }
+    .manual-collisions th,
+    .manual-collisions td {
+        padding: 11px 12px;
+        border-bottom: 1px solid #e2e8f0;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: break-word;
+    }
+    .manual-collisions th {
+        background: #fffbeb;
+        color: #78350f;
+        font-size: 13px;
+    }
+    .manual-collisions tr:last-child td {
+        border-bottom: 0;
+    }
+    .manual-confirm {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        margin-top: 18px;
+        padding: 13px 14px;
+        border: 1px solid #fcd34d;
+        border-radius: 9px;
+        background: #fffbeb;
+        color: #78350f;
+        cursor: pointer;
+    }
+    .manual-confirm input {
+        width: 18px;
+        height: 18px;
+        margin: 1px 0 0;
+        accent-color: #d97706;
+        flex: 0 0 auto;
+    }
+    [hidden] { display: none !important; }
+    @media (max-width: 720px) {
+        .manual-mode-grid,
+        .manual-fields,
+        .manual-result {
+            grid-template-columns: 1fr;
+        }
+        .manual-field--wide {
+            grid-column: auto;
+        }
+        .manual-create-card {
+            padding: 18px;
+        }
     }
 </style>
 {% endblock %}
 {% block content %}
-    <h1>Ручное создание логина абитуриента</h1>
-    <form method="post" class="manual-login-form">
-        {% include "_csrf_field.html" %}
-        <div class="manual-field">
-            <label>Год поступления:</label>
-            <select name="year" required>
-                {% for y in years %}
-                <option value="{{ y }}" {% if y == campaign_year %}selected{% endif %}>{{ y }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="manual-field">
-            <label>Специальность:</label>
-            <select name="spec" required>
-                {% for s in specs %}
-                <option value="{{ s }}">{{ s }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="manual-field">
-            <label>Уровень образования:</label>
-            <select name="base" required>
-                {% for b in bases %}
-                <option value="{{ b }}">{{ b }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="manual-field">
-            <label>ФИО абитуриента (через пробел):</label>
-            <input type="text" name="fio" required placeholder="Фамилия Имя Отчество">
-        </div>
-        <button type="submit" class="btn">Создать логин</button>
-    </form>
+<div class="manual-create-page">
+    <h1>Создание логина абитуриента</h1>
+    <p class="manual-create-subtitle">
+        Вставьте полный номер договора — параметры и свободный логин будут определены автоматически.
+        При необходимости все параметры можно указать вручную.
+    </p>
+
     {% if message %}
-        <div style="margin-top:20px; color:#2563eb; font-weight:500;">{{ message }}</div>
-        {% if conflict_info %}
-            <div style="margin-top:10px; color:#ef4444;">
-                Конфликт с записью: ФИО: {{ conflict_info[0] }}, Договор: {{ conflict_info[1] }}
-            </div>
-        {% endif %}
+        <div class="manual-message manual-message--{{ message_tone|default('info') }}" role="alert">{{ message }}</div>
     {% endif %}
+
+    {% if created_record %}
+        <div class="manual-result" aria-label="Созданная запись">
+            <div class="manual-result-item">
+                <span class="manual-result-label">ФИО</span>
+                <span class="manual-result-value">{{ created_record.fio }}</span>
+            </div>
+            {% if created_record.dogovor %}
+                <div class="manual-result-item">
+                    <span class="manual-result-label">Договор</span>
+                    <span class="manual-result-value">{{ created_record.dogovor }}</span>
+                </div>
+            {% endif %}
+            <div class="manual-result-item">
+                <span class="manual-result-label">Логин</span>
+                <span class="manual-result-value">{{ created_record.login }}</span>
+            </div>
+            <div class="manual-result-item">
+                <span class="manual-result-label">Кампания</span>
+                <span class="manual-result-value">{{ created_record.campaign_year }}</span>
+            </div>
+            <div class="manual-result-item">
+                <span class="manual-result-label">Специальность</span>
+                <span class="manual-result-value">{{ created_record.specialty }}</span>
+            </div>
+            <div class="manual-result-item">
+                <span class="manual-result-label">База образования</span>
+                <span class="manual-result-value">{{ created_record.base }}</span>
+            </div>
+        </div>
+    {% endif %}
+
+    {% if collision_records %}
+        <div class="manual-collisions">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Где найдено</th>
+                        <th>ФИО</th>
+                        <th>Договор</th>
+                        <th>Логин</th>
+                        <th>Кампания</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in collision_records %}
+                    <tr>
+                        <td>{{ record.source }}</td>
+                        <td>{{ record.fio or '—' }}</td>
+                        <td>{{ record.dogovor or '—' }}</td>
+                        <td>{{ record.login or '—' }}</td>
+                        <td>{{ record.campaign_year or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+
+    <form method="post" class="manual-create-card" id="manual-create-form">
+        {% include "_csrf_field.html" %}
+
+        <div class="manual-mode-grid" role="radiogroup" aria-label="Способ создания логина">
+            <label class="manual-mode">
+                <input type="radio" name="creation_mode" value="contract"
+                       {% if form_data.creation_mode != 'manual' %}checked{% endif %}>
+                <span>
+                    <span class="manual-mode-title">По номеру договора</span>
+                    <span class="manual-mode-description">Год, специальность, база и свободный логин определятся автоматически.</span>
+                </span>
+            </label>
+            <label class="manual-mode">
+                <input type="radio" name="creation_mode" value="manual"
+                       {% if form_data.creation_mode == 'manual' %}checked{% endif %}>
+                <span>
+                    <span class="manual-mode-title">Настроить вручную</span>
+                    <span class="manual-mode-description">Выберите параметры логина самостоятельно или укажите готовый логин.</span>
+                </span>
+            </label>
+        </div>
+
+        <div class="manual-fields">
+            <div class="manual-field manual-field--wide">
+                <label for="manual-fio">ФИО абитуриента</label>
+                <input id="manual-fio" type="text" name="fio" value="{{ form_data.fio }}"
+                       required autocomplete="off" placeholder="Фамилия Имя Отчество">
+                <div class="manual-field-hint">Полное совпадение ФИО не блокирует создание, но потребует подтверждения.</div>
+            </div>
+        </div>
+
+        <div data-mode-panel="contract" {% if form_data.creation_mode == 'manual' %}hidden{% endif %}>
+            <div class="manual-field" style="margin-top:16px;">
+                <label for="manual-dogovor">Полный номер договора</label>
+                <input id="manual-dogovor" type="text" name="dogovor" value="{{ form_data.dogovor }}"
+                       required autocomplete="off" placeholder="Например: 2026-ФМ-0123-11"
+                       {% if form_data.creation_mode == 'manual' %}disabled{% endif %}>
+                <div class="manual-field-hint">Договор должен быть уникальным. Повторная запись будет остановлена.</div>
+            </div>
+            <div class="manual-contract-note">
+                После проверки договора будет выбран первый свободный логин по действующим правилам. Уже занятые логины будут пропущены.
+            </div>
+        </div>
+
+        <div data-mode-panel="manual" class="manual-settings"
+             {% if form_data.creation_mode != 'manual' %}hidden{% endif %}>
+            <p class="manual-settings-title">Параметры логина</p>
+            <div class="manual-fields">
+                <div class="manual-field">
+                    <label for="manual-year">Год поступления</label>
+                    <select id="manual-year" name="year" required>
+                        {% for y in years %}
+                        <option value="{{ y }}" {% if y|string == form_data.year|string %}selected{% endif %}>{{ y }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="manual-field">
+                    <label for="manual-spec">Специальность</label>
+                    <select id="manual-spec" name="spec" required>
+                        {% for s in specs %}
+                        <option value="{{ s }}" {% if s == form_data.spec %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="manual-field">
+                    <label for="manual-base">База образования</label>
+                    <select id="manual-base" name="base" required>
+                        {% for b in bases %}
+                        <option value="{{ b }}" {% if b == form_data.base %}selected{% endif %}>{{ b }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="manual-field">
+                    <label for="manual-login">Готовый логин <span style="font-weight:400;color:#64748b;">(необязательно)</span></label>
+                    <input id="manual-login" type="text" name="manual_login" value="{{ form_data.manual_login }}"
+                           autocomplete="off" placeholder="Оставьте пустым для автоподбора">
+                    <div class="manual-field-hint">Если логин уже занят, запись не будет создана.</div>
+                </div>
+            </div>
+        </div>
+
+        {% if fio_confirmation_required %}
+            <label class="manual-confirm">
+                <input type="checkbox" name="confirm_fio_duplicate" value="1" required>
+                <span>Я проверил совпадение ФИО и подтверждаю создание отдельной записи.</span>
+            </label>
+        {% endif %}
+
+        <div class="manual-actions">
+            <button type="submit" class="btn">
+                {% if fio_confirmation_required %}Создать после проверки{% else %}Создать логин{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+(function () {
+    const form = document.getElementById('manual-create-form');
+    if (!form) return;
+    const radios = Array.from(form.querySelectorAll('input[name="creation_mode"]'));
+    const panels = Array.from(form.querySelectorAll('[data-mode-panel]'));
+
+    function updateMode() {
+        const selected = radios.find(function (radio) { return radio.checked; });
+        const mode = selected ? selected.value : 'contract';
+        panels.forEach(function (panel) {
+            const isActive = panel.dataset.modePanel === mode;
+            panel.hidden = !isActive;
+            panel.querySelectorAll('input, select').forEach(function (control) {
+                control.disabled = !isActive;
+            });
+        });
+    }
+
+    radios.forEach(function (radio) { radio.addEventListener('change', updateMode); });
+    updateMode();
+})();
+</script>
 {% endblock %}

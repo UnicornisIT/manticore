@@ -124,14 +124,76 @@
     }
     .preview-table-wrap {
         overflow-x: auto;
-        border-radius: 6px;
+        border: 1px solid #dbe4f0;
+        border-radius: 8px;
         background: #fff;
+        scrollbar-color: #94a3b8 #eef2f7;
+        scrollbar-width: thin;
+    }
+    .preview-table-wrap::-webkit-scrollbar {
+        height: 10px;
+    }
+    .preview-table-wrap::-webkit-scrollbar-track {
+        background: #eef2f7;
+    }
+    .preview-table-wrap::-webkit-scrollbar-thumb {
+        border: 2px solid #eef2f7;
+        border-radius: 999px;
+        background: #94a3b8;
     }
     .preview-table-wrap table {
         min-width: 920px;
     }
     .students-preview-table table {
         min-width: 1120px;
+    }
+    .abiturients-preview-table {
+        width: max-content;
+        min-width: 1480px !important;
+        table-layout: auto;
+        margin: 0;
+    }
+    .abiturients-preview-table th,
+    .abiturients-preview-table td {
+        padding: 11px 12px;
+        vertical-align: middle;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+        hyphens: none;
+    }
+    .abiturients-preview-table th {
+        background: #f1f5f9;
+        color: #334155;
+    }
+    .abiturients-preview-table th:nth-child(1),
+    .abiturients-preview-table td:nth-child(1) { min-width: 100px; }
+    .abiturients-preview-table th:nth-child(2),
+    .abiturients-preview-table td:nth-child(2) { min-width: 260px; }
+    .abiturients-preview-table th:nth-child(3),
+    .abiturients-preview-table td:nth-child(3) { min-width: 210px; }
+    .abiturients-preview-table th:nth-child(4),
+    .abiturients-preview-table td:nth-child(4) { min-width: 135px; }
+    .abiturients-preview-table th:nth-child(5),
+    .abiturients-preview-table td:nth-child(5) { min-width: 180px; }
+    .abiturients-preview-table th:nth-child(6),
+    .abiturients-preview-table td:nth-child(6) { min-width: 240px; }
+    .abiturients-preview-table th:nth-child(7),
+    .abiturients-preview-table td:nth-child(7) { min-width: 155px; text-align: center; }
+    .abiturients-preview-table th:nth-child(8),
+    .abiturients-preview-table td:nth-child(8) { min-width: 360px; text-align: center; }
+    .abiturients-preview-table .status-badge {
+        max-width: none;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .import-status-badge {
+        cursor: help;
+    }
+    .import-status-badge:focus-visible {
+        outline: 3px solid rgba(37, 99, 235, .25);
+        outline-offset: 2px;
     }
     .preview-note {
         margin: 0 0 12px 0;
@@ -260,6 +322,48 @@
         color: #475569;
         line-height: 1.45;
     }
+    .email-source-block {
+        max-width: 900px;
+        margin-top: 26px;
+        padding-top: 22px;
+        border-top: 1px solid #dbeafe;
+    }
+    .email-source-block h3 {
+        margin: 0 0 10px 0;
+        color: #1f2937;
+    }
+    .email-source-preview-table {
+        width: max-content;
+        min-width: 1320px !important;
+        table-layout: auto;
+        margin: 0;
+    }
+    .email-source-preview-table th,
+    .email-source-preview-table td {
+        padding: 11px 12px;
+        vertical-align: middle;
+    }
+    .email-source-preview-table th:nth-child(1),
+    .email-source-preview-table td:nth-child(1) { min-width: 85px; }
+    .email-source-preview-table th:nth-child(2),
+    .email-source-preview-table td:nth-child(2) { min-width: 250px; }
+    .email-source-preview-table th:nth-child(3),
+    .email-source-preview-table td:nth-child(3) { min-width: 220px; }
+    .email-source-preview-table th:nth-child(4),
+    .email-source-preview-table td:nth-child(4),
+    .email-source-preview-table th:nth-child(5),
+    .email-source-preview-table td:nth-child(5) { min-width: 220px; }
+    .email-source-preview-table th:nth-child(6),
+    .email-source-preview-table td:nth-child(6) { min-width: 175px; }
+    .email-source-preview-table th:nth-child(7),
+    .email-source-preview-table td:nth-child(7) {
+        min-width: 360px;
+        white-space: normal;
+    }
+    .email-source-current-email {
+        color: #334155;
+        overflow-wrap: anywhere;
+    }
     @media (max-width: 640px) {
         .upload-row .btn {
             width: 100%;
@@ -341,7 +445,7 @@
             <div class="preview-stat"><strong>{{ abiturients_preview.conflict_count }}</strong>Конфликты</div>
             <div class="preview-stat"><strong>{{ abiturients_preview.warning_count }}</strong>Возможные тёзки</div>
         </div>
-        <p class="preview-note">В таблице показаны все строки файла. Запись в базу начнётся только после подтверждения.</p>
+        <p class="preview-note">В таблице показаны все строки файла. Запись в базу начнётся только после подтверждения. Наведите указатель на статус, чтобы увидеть источник расхождения.</p>
         <div class="preview-actions">
             <form method="post" data-abiturients-import-action>
                 {% include "_csrf_field.html" %}
@@ -360,7 +464,7 @@
             </form>
         </div>
         <div class="preview-table-wrap">
-            <table>
+            <table class="abiturients-preview-table">
                 <thead>
                     <tr>
                         <th>Кампания</th>
@@ -393,14 +497,17 @@
             </td>
             <td>
                 {% if row.import_action == 'create' and not row.has_warning %}
-                    <span class="status-badge status-success">{{ row.import_status }}</span>
+                    {% set import_status_class = 'status-success' %}
                 {% elif row.import_action == 'create' and row.has_warning %}
-                    <span class="status-badge status-warning">{{ row.import_status }}</span>
+                    {% set import_status_class = 'status-warning' %}
                 {% elif row.import_action == 'duplicate' %}
-                    <span class="status-badge status-warning">{{ row.import_status }}</span>
+                    {% set import_status_class = 'status-warning' %}
                 {% else %}
-                    <span class="status-badge status-danger">{{ row.import_status }}</span>
+                    {% set import_status_class = 'status-danger' %}
                 {% endif %}
+                <span class="status-badge {{ import_status_class }} import-status-badge"
+                      title="{{ row.status_hint }}" tabindex="0"
+                      aria-label="{{ row.import_status }}. {{ row.status_hint }}">{{ row.import_status }}</span>
             </td>
         </tr>
         {% endfor %}
@@ -436,6 +543,110 @@
         </div>
     </form>
     {{ render_upload_report(updates_report) }}
+
+    <div class="email-source-block">
+        <h3>Дополнительная загрузка почты по ФИО</h3>
+        <p class="file-hint"><b>Обязательный формат для любой анкеты:</b> исходный Excel/CSV должен содержать столбцы с названиями <b>Фамилия</b>, <b>Имя Отчество</b> и <b>Почта</b>.</p>
+        <p class="file-hint">ФИО сверяется с абитуриентами активной кампании и студентами. Только точное совпадение фамилии, имени и отчества позволяет обновить email. При похожем, неполном или неоднозначном ФИО приложение покажет предупреждение и ничего не изменит. ФИО и оплата этим файлом не меняются.</p>
+        <form action="{{ url_for('abiturients_email_source_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+            {% include "_csrf_field.html" %}
+            <input type="hidden" name="file_section" value="updates">
+            <input type="hidden" name="email_source_import_action" value="preview">
+            <div class="upload-row">
+                <label for="email_source_file">Загрузить дополнительный источник почты:</label>
+                <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите источник почты">
+                    <input type="file" name="email_source_file" id="email_source_file" accept=".xlsx,.xls,.csv" required data-file-name-target="email_source_file_name">
+                    <label for="email_source_file" class="file-picker-button">Выберите файл</label>
+                    <span class="file-picker-drop-text">или перетащите сюда Excel/CSV</span>
+                    <span id="email_source_file_name" class="file-picker-name">Файл не выбран</span>
+                </span>
+                <button type="submit" class="btn">Проверить файл</button>
+            </div>
+        </form>
+        {{ render_upload_report(email_source_report) }}
+        {% if email_source_preview %}
+        <div class="import-preview" data-email-source-preview>
+            <h3>Предпросмотр обновления почты</h3>
+            <div class="preview-stats">
+                <div class="preview-stat"><strong>{{ email_source_preview.total }}</strong>Всего строк</div>
+                <div class="preview-stat"><strong>{{ email_source_preview.matched_rows }}</strong>Точно совпало</div>
+                <div class="preview-stat"><strong>{{ email_source_preview.updated_abiturients }}</strong>Почт абитуриентов</div>
+                <div class="preview-stat"><strong>{{ email_source_preview.updated_students }}</strong>Почт студентов</div>
+                <div class="preview-stat"><strong>{{ email_source_preview.unchanged_email_count }}</strong>Уже совпадают</div>
+                <div class="preview-stat"><strong>{{ email_source_preview['issues']|length }}</strong>Замечаний</div>
+            </div>
+            <p class="preview-note">В базе ещё ничего не изменено. Проверьте найденные записи, текущие адреса и результат каждой строки. Почта обновится только после подтверждения.</p>
+            <div class="preview-actions">
+                <form method="post" action="{{ url_for('abiturients_email_source_upload') }}">
+                    {% include "_csrf_field.html" %}
+                    <input type="hidden" name="file_section" value="updates">
+                    <input type="hidden" name="email_source_import_action" value="confirm">
+                    <input type="hidden" name="pending_email_source_import" value="{{ pending_email_source_import_token }}">
+                    <button type="submit" class="btn" {% if email_source_preview.planned_update_count == 0 %}disabled{% endif %}>Подтвердить обновление почты</button>
+                </form>
+                <form method="post" action="{{ url_for('abiturients_email_source_upload') }}">
+                    {% include "_csrf_field.html" %}
+                    <input type="hidden" name="file_section" value="updates">
+                    <input type="hidden" name="email_source_import_action" value="cancel">
+                    <input type="hidden" name="pending_email_source_import" value="{{ pending_email_source_import_token }}">
+                    <button type="submit" class="btn btn-danger">Отменить</button>
+                </form>
+            </div>
+            <div class="preview-table-wrap">
+                <table class="email-source-preview-table">
+                    <thead>
+                        <tr>
+                            <th>Строка</th>
+                            <th>ФИО из файла</th>
+                            <th>Новая почта</th>
+                            <th>Абитуриент: текущая почта</th>
+                            <th>Студент: текущая почта</th>
+                            <th>Действие</th>
+                            <th>Результат проверки</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in email_source_preview_rows %}
+                        <tr>
+                            <td>{{ row.row }}</td>
+                            <td>{{ row.fio or '—' }}</td>
+                            <td class="email-source-current-email">{{ row.new_email or '—' }}</td>
+                            <td class="email-source-current-email">
+                                {% if not row.match_checked %}
+                                    <span class="status-badge status-warning">Не проверялось</span>
+                                {% elif row.abiturient_match_count == 0 %}
+                                    <span class="status-badge status-warning">Не найден</span>
+                                {% elif row.abiturient_match_count > 1 %}
+                                    <span class="status-badge status-warning">{{ row.abiturient_match_count }} записей</span>
+                                {% elif row.abiturient_current_email %}
+                                    {{ row.abiturient_current_email }}
+                                {% else %}
+                                    <span class="status-badge status-danger">Нет почты</span>
+                                {% endif %}
+                            </td>
+                            <td class="email-source-current-email">
+                                {% if not row.match_checked %}
+                                    <span class="status-badge status-warning">Не проверялось</span>
+                                {% elif row.student_match_count == 0 %}
+                                    <span class="status-badge status-warning">Не найден</span>
+                                {% elif row.student_match_count > 1 %}
+                                    <span class="status-badge status-warning">{{ row.student_match_count }} записей</span>
+                                {% elif row.student_current_email %}
+                                    {{ row.student_current_email }}
+                                {% else %}
+                                    <span class="status-badge status-danger">Нет почты</span>
+                                {% endif %}
+                            </td>
+                            <td><span class="status-badge {{ row.badge_class }}">{{ row.action_label }}</span></td>
+                            <td>{{ row.status }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
 </div>
 {% endif %}
 

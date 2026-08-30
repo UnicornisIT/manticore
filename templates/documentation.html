@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% from "_ui_macros.html" import disclosure_chevron %}
+
+{% block title %}Документация — manticore{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='documentation.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="docs-app" data-docs-app>
+    <aside class="docs-sidebar" aria-label="Навигация по документации">
+        <div class="docs-sidebar-top">
+            <div class="docs-eyebrow">Центр знаний</div>
+            <div class="docs-title-row">
+                <span class="docs-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"></path><path d="M15 3v4h4M9 11h6M9 15h6"></path></svg>
+                </span>
+                <div>
+                    <strong>Документация</strong>
+                    <span>manticore v{{ app_version }}</span>
+                </div>
+            </div>
+            <label class="docs-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+                <span class="sr-only">Поиск по документации</span>
+                <input class="docs-search-input" type="search" placeholder="Найти в документации" autocomplete="off" data-docs-search>
+                <kbd>Ctrl K</kbd>
+            </label>
+            <p class="docs-search-status" data-docs-search-status aria-live="polite"></p>
+        </div>
+
+        <nav class="docs-nav" data-docs-nav>
+            <div class="docs-nav-group">
+                <span class="docs-nav-caption">Начало работы</span>
+                <a href="#overview" class="active"><span>Обзор системы</span></a>
+                <a href="#interface"><span>Интерфейс приложения</span></a>
+                <a href="#quick-start"><span>Быстрый старт</span></a>
+                <a href="#roles"><span>Роли и доступ</span></a>
+            </div>
+            <div class="docs-nav-group">
+                <span class="docs-nav-caption">Рабочий процесс</span>
+                <a href="#campaigns"><span>Приёмные кампании</span></a>
+                <a href="#applicants"><span>Абитуриенты</span></a>
+                <a href="#enrollment"><span>Зачисление</span></a>
+                <a href="#students"><span>Студенты и группы</span></a>
+            </div>
+            <div class="docs-nav-group">
+                <span class="docs-nav-caption">Контроль</span>
+                <a href="#quality"><span>Проверка данных</span></a>
+                <a href="#conflicts"><span>Дубли и конфликты</span></a>
+                <a href="#search"><span>Глобальный поиск</span></a>
+            </div>
+            <div class="docs-nav-group">
+                <span class="docs-nav-caption">Администрирование</span>
+                <a href="#admin"><span>Панель администратора</span></a>
+                <a href="#files"><span>Форматы файлов</span></a>
+                <a href="#safety"><span>Безопасная работа</span></a>
+                <a href="#faq"><span>Частые вопросы</span></a>
+            </div>
+        </nav>
+
+        <div class="docs-sidebar-note">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"></path><path d="M12 16v-4M12 8h.01"></path></svg>
+            <p><strong>Важно</strong><span>Доступные действия зависят от вашей роли и активной кампании.</span></p>
+        </div>
+    </aside>
+
+    <main class="docs-content" id="docs-content">
+        <div class="docs-mobile-bar">
+            <button type="button" class="docs-menu-button" data-docs-menu aria-expanded="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+                Разделы
+            </button>
+            <span>Документация</span>
+        </div>
+
+        <article class="docs-article">
+            <section id="overview" class="docs-section docs-hero" data-docs-section data-search-terms="назначение возможности система обзор">
+                <div class="docs-hero-copy">
+                    <span class="docs-pill"><i></i> Руководство пользователя</span>
+                    <h1>Как работает <span>manticore</span></h1>
+                    <p class="docs-lead">Единое рабочее пространство для приёмной кампании: от загрузки абитуриентов и проверки данных до зачисления, формирования академических групп и выгрузки учётных записей для Moodle.</p>
+                    <div class="docs-hero-actions">
+                        <a class="docs-primary-action" href="#quick-start">Начать работу <span>→</span></a>
+                        <a class="docs-secondary-action" href="#files">Требования к файлам</a>
+                    </div>
+                    <div class="docs-hero-meta">
+                        <span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg>Пошаговые сценарии</span>
+                        <span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg>Актуально для v{{ app_version }}</span>
+                    </div>
+                </div>
+                <div class="docs-hero-visual" aria-label="Схема движения данных">
+                    <div class="hero-orbit hero-orbit-one"></div>
+                    <div class="hero-orbit hero-orbit-two"></div>
+                    <div class="hero-center">
+                        <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path></svg>
+                        <strong>manticore</strong>
+                        <span>приёмная кампания</span>
+                    </div>
+                    <div class="hero-node hero-node-a"><b>01</b><span>Абитуриенты</span></div>
+                    <div class="hero-node hero-node-b"><b>02</b><span>Проверка</span></div>
+                    <div class="hero-node hero-node-c"><b>03</b><span>Зачисление</span></div>
+                    <div class="hero-node hero-node-d"><b>04</b><span>Moodle</span></div>
+                </div>
+            </section>
+
+            <section class="docs-summary-grid" aria-label="Ключевые возможности">
+                <article><span class="summary-icon is-blue"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"></path></svg></span><div><strong>Импорт с предпросмотром</strong><p>Данные записываются только после проверки отчёта и подтверждения.</p></div></article>
+                <article><span class="summary-icon is-violet"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8 8 9 4.6-1 8-4 8-9V7z"></path><path d="m9 12 2 2 4-4"></path></svg></span><div><strong>Защищённая миграция</strong><p>В студенты переходят только кандидаты, сверенные с приказом.</p></div></article>
+                <article><span class="summary-icon is-green"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg></span><div><strong>Контроль качества</strong><p>Проблемы собраны в одном центре задач и сгруппированы по типам.</p></div></article>
+            </section>
+
+            <section id="interface" class="docs-section docs-interface" data-docs-section data-search-terms="интерфейс скриншоты экран панель работа с файлами мастер миграции">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Интерфейс</span>
+                    <h2>Основные рабочие экраны</h2>
+                    <p>Снимки сделаны на изолированном тестовом стенде с отдельной демо-базой. Нажмите на изображение, чтобы рассмотреть экран целиком.</p>
+                </div>
+                <div class="docs-screen-gallery">
+                    <button class="docs-screen-card docs-screen-card-wide" type="button" data-docs-lightbox data-image="{{ url_for('static', filename='documentation/dashboard-test-stand.png') }}" data-title="Панель состояния">
+                        <span class="docs-screen-image"><img src="{{ url_for('static', filename='documentation/dashboard-test-stand.png') }}" alt="Панель состояния на тестовом стенде" loading="lazy"><i>Увеличить</i></span>
+                        <span class="docs-screen-copy"><b>Панель состояния</b><small>Сводка кампании, готовность этапов и центр задач</small></span>
+                    </button>
+                    <button class="docs-screen-card" type="button" data-docs-lightbox data-image="{{ url_for('static', filename='documentation/file-work-test-stand.png') }}" data-title="Работа с файлами">
+                        <span class="docs-screen-image"><img src="{{ url_for('static', filename='documentation/file-work-test-stand.png') }}" alt="Работа с файлами на тестовом стенде" loading="lazy"><i>Увеличить</i></span>
+                        <span class="docs-screen-copy"><b>Работа с файлами</b><small>Импорт, обновления, приказ и загрузка студентов</small></span>
+                    </button>
+                    <button class="docs-screen-card" type="button" data-docs-lightbox data-image="{{ url_for('static', filename='documentation/migration-test-stand.png') }}" data-title="Мастер миграции">
+                        <span class="docs-screen-image"><img src="{{ url_for('static', filename='documentation/migration-test-stand.png') }}" alt="Мастер миграции на тестовом стенде" loading="lazy"><i>Увеличить</i></span>
+                        <span class="docs-screen-copy"><b>Мастер миграции</b><small>Три этапа переноса и быстрые проверки</small></span>
+                    </button>
+                </div>
+            </section>
+
+            <section id="quick-start" class="docs-section" data-docs-section data-search-terms="быстрый старт порядок шаги рабочий процесс">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Начало работы</span>
+                    <h2>Путь одной приёмной кампании</h2>
+                    <p>Работа строится последовательно. Каждый этап подготавливает данные для следующего и оставляет возможность проверить результат.</p>
+                </div>
+                <div class="docs-flow">
+                    <article><span>1</span><div><strong>Настройте кампанию</strong><p>Администратор выбирает активный год, сохраняет правила логинов и создаёт группы.</p></div><a href="#campaigns" aria-label="Подробнее о кампаниях">→</a></article>
+                    <article><span>2</span><div><strong>Загрузите абитуриентов</strong><p>Проверьте предпросмотр, обработайте ошибки и подтвердите импорт.</p></div><a href="#applicants" aria-label="Подробнее об абитуриентах">→</a></article>
+                    <article><span>3</span><div><strong>Подготовьте зачисление</strong><p>Добавьте почту и оплату, сформируйте кандидатов, затем загрузите приказ.</p></div><a href="#enrollment" aria-label="Подробнее о зачислении">→</a></article>
+                    <article><span>4</span><div><strong>Сформируйте студентов</strong><p>Перенесите сверенных кандидатов в группы и скачайте итоговый Excel.</p></div><a href="#students" aria-label="Подробнее о студентах">→</a></article>
+                </div>
+                <div class="docs-callout is-info">
+                    <svg viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"></path><path d="M12 16v-4M12 8h.01"></path></svg>
+                    <div><strong>Главный принцип</strong><p>Импорт и перенос выполняются в два шага: сначала предпросмотр, затем подтверждение. До подтверждения рабочие данные не изменяются.</p></div>
+                </div>
+            </section>
+
+            <section id="roles" class="docs-section" data-docs-section data-search-terms="роли права admin manager operator assistant viewer администратор менеджер оператор ассистент просмотр">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Доступ</span>
+                    <h2>Роли пользователей</h2>
+                    <p>Интерфейс автоматически скрывает недоступные операции. Администратор назначает роль при создании или одобрении пользователя.</p>
+                </div>
+                <div class="role-table-wrap">
+                    <table class="docs-table role-table">
+                        <thead><tr><th>Роль</th><th>Основное назначение</th><th>Доступ</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="role-badge role-admin">Администратор</span></td><td>Настройка и полный контроль</td><td>Все данные, пользователи, группы, резервные копии и журнал</td></tr>
+                            <tr><td><span class="role-badge role-manager">Куратор</span></td><td>Координация процесса</td><td>Расширенные рабочие операции, разрешённые ассистенту</td></tr>
+                            <tr><td><span class="role-badge role-operator">Оператор</span></td><td>Массовая обработка</td><td>Импорт и обновление данных в доступных разделах</td></tr>
+                            <tr><td><span class="role-badge role-assistant">Ассистент</span></td><td>Работа с кампанией</td><td>Подготовка кандидатов, сверка и разрешённые операции</td></tr>
+                            <tr><td><span class="role-badge role-viewer">Просмотр</span></td><td>Контроль без изменений</td><td>Просмотр списков, карточек, поиска и документации</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="docs-caption">Новая самостоятельная регистрация создаёт заявку с ролью ассистента. Вход станет доступен после одобрения администратором.</p>
+            </section>
+
+            <section id="campaigns" class="docs-section" data-docs-section data-search-terms="кампания год активная архив настройка логинов правила">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Рабочий контекст</span>
+                    <h2>Приёмные кампании</h2>
+                    <p>Кампания изолирует данные разных лет. Выбранный год применяется к спискам, импортам, проверкам и миграции.</p>
+                </div>
+                <div class="docs-two-column">
+                    <div class="docs-prose-card">
+                        <h3>Активная кампания</h3>
+                        <ol class="docs-number-list">
+                            <li><span>1</span><p>Откройте панель администратора и раздел <strong>«Приёмные кампании»</strong>.</p></li>
+                            <li><span>2</span><p>Добавьте новый четырёхзначный год или выберите существующий.</p></li>
+                            <li><span>3</span><p>Убедитесь, что выбранный год отображается в переключателе кампаний.</p></li>
+                        </ol>
+                    </div>
+                    <div class="docs-prose-card has-accent">
+                        <h3>Архивная кампания</h3>
+                        <p>Архивирование защищает завершённый год от случайных изменений. Списки остаются доступными для просмотра, но изменяющие операции блокируются.</p>
+                        <span class="inline-status"><i></i> Рекомендуется после завершения набора</span>
+                    </div>
+                </div>
+            </section>
+
+            <section id="applicants" class="docs-section" data-docs-section data-search-terms="абитуриенты импорт файл ФИО договор логин почта оплата ручное создание">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Контингент</span>
+                    <h2>Работа с абитуриентами</h2>
+                    <p>Основной источник — таблица с ФИО и договорами. На её основе приложение генерирует логины и распределяет проблемные строки.</p>
+                </div>
+                <div class="docs-tabs" data-docs-tabs>
+                    <div class="docs-tab-list" role="tablist" aria-label="Операции с абитуриентами">
+                        <button role="tab" aria-selected="true" aria-controls="tab-import" id="tab-import-button">Импорт</button>
+                        <button role="tab" aria-selected="false" aria-controls="tab-update" id="tab-update-button">Почта и оплата</button>
+                        <button role="tab" aria-selected="false" aria-controls="tab-manual" id="tab-manual-button">Ручное создание</button>
+                    </div>
+                    <div class="docs-tab-panel" id="tab-import" role="tabpanel" aria-labelledby="tab-import-button">
+                        <div class="operation-grid">
+                            <div><span class="operation-step">01</span><strong>Выберите файл</strong><p>Формат XLSX, XLS или CSV. Обязательны столбцы «ФИО» и «Договор».</p></div>
+                            <div><span class="operation-step">02</span><strong>Проверьте отчёт</strong><p>Система покажет готовые строки, возможных тёзок, дубли и конфликты.</p></div>
+                            <div><span class="operation-step">03</span><strong>Подтвердите</strong><p>Будет создана резервная копия, а результат можно скачать в Excel.</p></div>
+                        </div>
+                    </div>
+                    <div class="docs-tab-panel" id="tab-update" role="tabpanel" aria-labelledby="tab-update-button" hidden>
+                        <div class="docs-split-copy">
+                            <div><h3>Обновление по договору</h3><p>Скачайте шаблон, заполните договор и одно или оба поля: Email и Оплата. Обновятся только найденные абитуриенты активной кампании.</p><ul class="docs-check-list"><li>Пустое поле не стирает существующее значение</li><li>Ненайденные договоры попадут в отчёт</li><li>Перед применением создаётся бэкап</li></ul></div>
+                            <div><h3>Дополнительная почта по ФИО</h3><p>Для собственной анкеты любого учебного заведения обязательны столбцы с точными названиями <strong>Фамилия</strong>, <strong>Имя Отчество</strong> и <strong>Почта</strong>. Остальные столбцы игнорируются.</p><ul class="docs-check-list"><li>Сверяется полное ФИО абитуриента или студента</li><li>До записи показывается предпросмотр текущей и новой почты</li><li>Только точное совпадение обновляет email после подтверждения</li><li>Опечатки показываются в отчёте без изменений</li><li>ФИО и оплата не меняются</li></ul></div>
+                        </div>
+                    </div>
+                    <div class="docs-tab-panel" id="tab-manual" role="tabpanel" aria-labelledby="tab-manual-button" hidden>
+                        <div class="docs-split-copy"><div><h3>Одна новая запись</h3><p>Используйте «Ручное создание логина», когда не нужен массовый файл. Укажите кампанию, ФИО и договор — правила генерации применятся автоматически.</p></div><div class="mini-form" aria-hidden="true"><span>ФИО</span><i>Иванов Иван Иванович</i><span>Договор</span><i>2026-ФМ-0001-11</i><b>Создать логин</b></div></div>
+                    </div>
+                </div>
+                <div class="docs-callout is-warning">
+                    <svg viewBox="0 0 24 24"><path d="M12 3 2 21h20z"></path><path d="M12 9v5M12 18h.01"></path></svg>
+                    <div><strong>Не исправляйте проблемные строки вслепую</strong><p>Откройте статус строки: приложение указывает, где уже найден такой договор и почему безопасный логин создать нельзя.</p></div>
+                </div>
+            </section>
+
+            <section id="enrollment" class="docs-section" data-docs-section data-search-terms="зачисление кандидаты приказ сверка миграция перенос">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Миграция</span>
+                    <h2>От абитуриента к студенту</h2>
+                    <p>Двухэтапная сверка предотвращает создание учётных записей для тех, кто не вошёл в итоговый приказ.</p>
+                </div>
+                <div class="enrollment-pipeline">
+                    <article class="pipeline-card"><div class="pipeline-icon"><svg viewBox="0 0 24 24"><path d="M8 7a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z"></path><path d="M4 21c.5-4 3-6 8-6s7.5 2 8 6"></path></svg></div><span>Шаг 1</span><h3>Готовый абитуриент</h3><p>Заполнена корректная почта, отмечена оплата, договор позволяет определить специальность.</p></article>
+                    <div class="pipeline-arrow">→</div>
+                    <article class="pipeline-card"><div class="pipeline-icon is-violet"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"></path><path d="m8 12 2 2 5-5"></path></svg></div><span>Шаг 2</span><h3>Кандидат и приказ</h3><p>Кандидат сопоставлен с приказом по ФИО, специальности и группе, если она указана.</p></article>
+                    <div class="pipeline-arrow">→</div>
+                    <article class="pipeline-card"><div class="pipeline-icon is-green"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V9l7-5 7 5v12M9 21v-6h6v6"></path></svg></div><span>Шаг 3</span><h3>Студент в группе</h3><p>Создана запись Moodle, исходный абитуриент удалён, происхождение данных сохранено.</p></article>
+                </div>
+                <details class="docs-details has-disclosure-chevron">
+                    <summary><span>Условия успешного переноса</span>{{ disclosure_chevron() }}</summary>
+                    <div><ul class="docs-check-list"><li>Кандидат успешно сверен с приказом</li><li>Логин ещё не существует среди студентов</li><li>Кампания не архивирована</li><li>Группа существует, видима и подходит специальности</li><li>Если в приказе указана группа, выбрана именно она</li></ul></div>
+                </details>
+            </section>
+
+            <section id="students" class="docs-section" data-docs-section data-search-terms="студенты Moodle группы cohort перевод приказ вместимость 25 выгрузка Excel">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Итоговый контингент</span>
+                    <h2>Студенты и академические группы</h2>
+                    <p>Список студентов готов для выгрузки в Moodle. Администратор может редактировать записи и оформлять перевод между группами.</p>
+                </div>
+                <div class="docs-feature-grid">
+                    <article><span>01</span><h3>Формат группы</h3><code>26ФМ-11-1</code><p>Год · специальность · база · подгруппа</p></article>
+                    <article><span>02</span><h3>Вместимость</h3><strong class="big-number">25</strong><p>При заполнении предлагается следующая подгруппа.</p></article>
+                    <article><span>03</span><h3>Группы Moodle</h3><p><code>cohort1</code> — академическая<br><code>cohort2</code> — глобальная группа курса</p></article>
+                    <article><span>04</span><h3>Перевод</h3><p>Новая группа, дата, номер приказа и PDF сохраняются в истории студента.</p></article>
+                </div>
+                <div class="docs-callout is-success">
+                    <svg viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"></path><path d="m7 12 3 3 7-7"></path></svg>
+                    <div><strong>Итоговый результат</strong><p>На странице списка студентов нажмите «Скачать Excel», чтобы получить файл с логинами, почтой, ФИО и группами для дальнейшей работы.</p></div>
+                </div>
+            </section>
+
+            <section id="quality" class="docs-section" data-docs-section data-search-terms="качество проверка данных ошибки задачи готовность">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Контроль</span>
+                    <h2>Проверка качества данных</h2>
+                    <p>Раздел показывает не просто статистику, а конкретные задачи, которые мешают безопасно завершить миграцию.</p>
+                </div>
+                <div class="quality-dashboard">
+                    <div class="quality-score"><div class="score-ring"><span>92<small>%</small></span></div><div><span>Пример состояния</span><strong>Данные почти готовы</strong><p>Индикатор зависит от найденных проблем активной кампании.</p></div></div>
+                    <div class="quality-items">
+                        <article><span class="quality-dot is-red"></span><div><strong>Критические</strong><p>Конфликты, несверенные кандидаты, строки приказа без пары</p></div></article>
+                        <article><span class="quality-dot is-amber"></span><div><strong>Требуют внимания</strong><p>Нет почты, оплаты, договора или академической группы</p></div></article>
+                        <article><span class="quality-dot is-blue"></span><div><strong>Информационные</strong><p>Возможные тёзки и готовые к следующему этапу записи</p></div></article>
+                    </div>
+                </div>
+            </section>
+
+            <section id="conflicts" class="docs-section" data-docs-section data-search-terms="дубли конфликты исправить договор логин повтор">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Очереди проверки</span>
+                    <h2>Дубли и конфликты</h2>
+                    <p>Сомнительные записи не смешиваются с рабочим списком и ожидают отдельного решения.</p>
+                </div>
+                <div class="compare-grid">
+                    <article><span class="compare-label is-amber">Дубль</span><h3>Запись требует решения</h3><p>Договор уже ожидает проверки в очереди дублей.</p><ul class="docs-check-list"><li>Подтвердить и перенести в абитуриенты</li><li>Отклонить одну или все записи</li></ul></article>
+                    <article><span class="compare-label is-red">Конфликт</span><h3>Логин нельзя создать безопасно</h3><p>Ошибка договора, пустое ФИО, занятый договор или повтор внутри файла.</p><ul class="docs-check-list"><li>Открыть причину конфликта</li><li>Указать корректный логин вручную</li></ul></article>
+                </div>
+            </section>
+
+            <section id="search" class="docs-section" data-docs-section data-search-terms="глобальный поиск ФИО договор логин email группа карточка">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Навигация</span>
+                    <h2>Глобальный поиск</h2>
+                    <p>Значок лупы в верхней панели ищет одновременно среди абитуриентов и студентов активной кампании.</p>
+                </div>
+                <div class="search-demo">
+                    <div class="search-demo-input"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><span>Иванов</span><kbd>Enter</kbd></div>
+                    <div class="search-demo-results">
+                        <article><span class="avatar">ИИ</span><div><strong>Иванов Иван Иванович</strong><p>Абитуриент · 2026-ФМ-0001-11</p></div><b>Открыть →</b></article>
+                        <article><span class="avatar is-green">АП</span><div><strong>Иванова Анна Петровна</strong><p>Студент · 26ФМ-11-1</p></div><b>Открыть →</b></article>
+                    </div>
+                </div>
+                <p class="docs-caption">Можно искать по ФИО, договору, логину, email или академической группе. Из результатов открывается единая карточка человека.</p>
+            </section>
+
+            <section id="admin" class="docs-section" data-docs-section data-search-terms="администратор пользователи одобрение настройки резервные копии бэкап журнал аудит группы">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Администрирование</span>
+                    <h2>Панель администратора</h2>
+                    <p>Раздел доступен только роли администратора и объединяет системные настройки и чувствительные операции.</p>
+                </div>
+                <div class="admin-grid">
+                    <article><svg viewBox="0 0 24 24"><path d="M8 7a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM4 21c.5-4 3-6 8-6s7.5 2 8 6"></path></svg><h3>Пользователи</h3><p>Создание, одобрение, роли и блокировка доступа.</p></article>
+                    <article><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"></path></svg><h3>Правила логинов</h3><p>Шаблон, длина номера, коды специальностей и базы.</p></article>
+                    <article><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V9l7-5 7 5v12"></path></svg><h3>Группы</h3><p>Создание, импорт CSV, вместимость и скрытие групп.</p></article>
+                    <article><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM8 7V4h8v3M8 12h8"></path></svg><h3>Резервные копии</h3><p>Список, скачивание и восстановление состояния базы.</p></article>
+                    <article><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h4"></path></svg><h3>Журнал действий</h3><p>Пользователь, операция, сущность, IP и время.</p></article>
+                    <article><svg viewBox="0 0 24 24"><path d="M7 3v4M17 3v4M4 9h16M5 5h14v16H5z"></path></svg><h3>Кампании</h3><p>Активный год, новые периоды и архивирование.</p></article>
+                </div>
+            </section>
+
+            <section id="files" class="docs-section" data-docs-section data-search-terms="файлы форматы xlsx xls csv pdf docx столбцы шаблон">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Справочник</span>
+                    <h2>Форматы файлов</h2>
+                    <p>Перед заполнением лучше скачать актуальный шаблон прямо из нужного блока «Работы с файлами».</p>
+                </div>
+                <div class="file-table-wrap">
+                    <table class="docs-table">
+                        <thead><tr><th>Операция</th><th>Форматы</th><th>Обязательные данные</th></tr></thead>
+                        <tbody>
+                            <tr><td><strong>Абитуриенты</strong></td><td><code>XLSX</code> <code>XLS</code> <code>CSV</code></td><td>ФИО, Договор</td></tr>
+                            <tr><td><strong>Почта и оплата</strong></td><td><code>XLSX</code> <code>XLS</code> <code>CSV</code></td><td>Договор + Email и/или Оплата</td></tr>
+                            <tr><td><strong>Дополнительная почта по ФИО</strong></td><td><code>XLSX</code> <code>XLS</code> <code>CSV</code></td><td>Фамилия, Имя Отчество, Почта</td></tr>
+                            <tr><td><strong>Приказ о зачислении</strong></td><td><code>XLSX</code> <code>XLS</code> <code>CSV</code> <code>DOCX</code> <code>PDF</code></td><td>ФИО, Специальность; группа при наличии</td></tr>
+                            <tr><td><strong>Студенты</strong></td><td><code>XLSX</code> <code>XLS</code> <code>CSV</code></td><td>username, password, email, firstname, lastname, cohort1</td></tr>
+                            <tr><td><strong>Группы</strong></td><td><code>CSV</code></td><td>Название академической группы</td></tr>
+                            <tr><td><strong>Приказ о переводе</strong></td><td><code>PDF</code></td><td>Файл прикрепляется к истории перевода</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="safety" class="docs-section" data-docs-section data-search-terms="безопасность бэкап резервная копия архив подтверждение пароли csrf">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Безопасность</span>
+                    <h2>Как работать без риска</h2>
+                    <p>Приложение создаёт страховочные копии перед ключевыми изменениями, но важные действия всё равно требуют внимательной проверки.</p>
+                </div>
+                <div class="safety-list">
+                    <article><span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span><div><strong>Всегда проверяйте предпросмотр</strong><p>Количество готовых строк, дублей и конфликтов должно совпадать с ожиданиями.</p></div></article>
+                    <article><span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span><div><strong>Следите за активным годом</strong><p>Перед импортом или редактированием проверьте выбранную приёмную кампанию.</p></div></article>
+                    <article><span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span><div><strong>Не храните рабочие пароли в файлах</strong><p>Передавайте доступ только назначенным сотрудникам и используйте роли.</p></div></article>
+                    <article><span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span><div><strong>Проверяйте резервные копии</strong><p>Администратор может скачать бэкап перед крупной операцией или восстановлением.</p></div></article>
+                </div>
+            </section>
+
+            <section id="faq" class="docs-section docs-faq" data-docs-section data-search-terms="частые вопросы помощь проблема ошибка не получается">
+                <div class="docs-section-heading">
+                    <span class="docs-kicker">Помощь</span>
+                    <h2>Частые вопросы</h2>
+                </div>
+                <details class="docs-details has-disclosure-chevron" open><summary><span>Почему строка ушла в конфликт?</span>{{ disclosure_chevron() }}</summary><div><p>Чаще всего договор не соответствует правилам, уже занят, повторяется в файле или не заполнено ФИО. Точная причина указана в статусе строки и в разделе конфликтов.</p></div></details>
+                <details class="docs-details has-disclosure-chevron"><summary><span>Почему кандидат не переносится в студенты?</span>{{ disclosure_chevron() }}</summary><div><p>Проверьте почту, оплату, статус сверки с приказом, выбранную группу, существование логина и то, что кампания не архивирована.</p></div></details>
+                <details class="docs-details has-disclosure-chevron"><summary><span>Что делать, если группа заполнена?</span>{{ disclosure_chevron() }}</summary><div><p>Создайте следующую подгруппу или включите автоматическое распределение при массовом переносе. Заполненной считается группа с 25 студентами.</p></div></details>
+                <details class="docs-details has-disclosure-chevron"><summary><span>Можно ли отменить массовую операцию?</span>{{ disclosure_chevron() }}</summary><div><p>Перед ключевыми изменениями создаётся резервная копия. Восстановить её может администратор в разделе «Резервные копии».</p></div></details>
+            </section>
+
+            <footer class="docs-footer">
+                <div><span class="docs-mark is-small" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"></path><path d="M15 3v4h4M9 11h6M9 15h6"></path></svg></span><div><strong>Документация manticore</strong><p>Версия {{ app_version }} · руководство встроено в приложение</p></div></div>
+                <a href="#overview">Наверх <span>↑</span></a>
+            </footer>
+        </article>
+    </main>
+
+    <div class="docs-overlay" data-docs-overlay></div>
+    <div class="docs-lightbox" data-docs-lightbox-dialog hidden>
+        <button type="button" class="docs-lightbox-backdrop" data-docs-lightbox-close aria-label="Закрыть изображение"></button>
+        <figure role="dialog" aria-modal="true" aria-labelledby="docs-lightbox-title">
+            <button type="button" class="docs-lightbox-close" data-docs-lightbox-close aria-label="Закрыть">×</button>
+            <img src="" alt="">
+            <figcaption id="docs-lightbox-title"></figcaption>
+        </figure>
+    </div>
+    <button class="docs-to-top" type="button" data-docs-to-top aria-label="Наверх">↑</button>
+</div>
+<script src="{{ url_for('static', filename='documentation.js') }}" defer></script>
+{% endblock %}

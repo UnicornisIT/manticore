@@ -65,6 +65,8 @@
     </div>
     <div class="order-detail-actions">
         <a href="{{ url_for('file_work', section='orders') }}" class="btn btn-secondary">Назад</a>
+        <a href="{{ url_for('enrollment_order_student_roster', upload_id=upload.id) }}" class="btn">Предварительный список</a>
+        <a href="{{ url_for('download_enrollment_order_student_roster', upload_id=upload.id) }}" class="btn btn-success btn-download">Скачать список Excel</a>
         {% if upload.stored_filename %}
         <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-download">Скачать файл</a>
         {% endif %}

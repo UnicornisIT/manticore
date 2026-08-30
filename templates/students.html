@@ -1,5 +1,6 @@
 <!-- templates/students.html -->
 {% extends "base.html" %}
+{% from "_ui_macros.html" import disclosure_chevron %}
 {% block title %}Список студентов{% endblock %}
 {% block head %}
 <style>
@@ -46,7 +47,7 @@
         background: #fff;
     }
     .students-table {
-        min-width: 1080px;
+        min-width: 1260px;
     }
     .students-table td:nth-child(4),
     .students-table td:nth-child(5) {
@@ -54,18 +55,87 @@
         white-space: normal;
     }
     .students-table-actions {
-        min-width: 190px;
-        white-space: normal;
+        min-width: 80px;
+        white-space: nowrap;
     }
     .students-table-actions form {
+        display: inline-flex;
+        align-items: center;
         margin: 0;
     }
+    .row-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .action-icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        min-width: 34px;
+        padding: 0;
+        margin: 0;
+        border-radius: 6px;
+    }
+    .action-icon-btn svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    .action-icon-edit {
+        color: #1d4ed8;
+        background: #dbeafe;
+        border: 1px solid #bfdbfe;
+    }
+    .action-icon-delete {
+        color: #991b1b;
+        background: #fee2e2;
+        border: 1px solid #fecaca;
+    }
+    .action-icon-edit:hover,
+    .action-icon-edit:focus {
+        background: #bfdbfe;
+    }
+    .action-icon-delete:hover,
+    .action-icon-delete:focus {
+        background: #fecaca;
+    }
+    .students-order-cell {
+        min-width: 170px;
+        white-space: normal;
+    }
+    .students-order-cell strong,
+    .students-order-cell small {
+        display: block;
+    }
+    .students-order-cell small {
+        margin-top: 3px;
+        color: #64748b;
+    }
     .password-reveal summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         cursor: pointer;
         color: #2563eb;
         font-weight: 600;
     }
-    .password-reveal span {
+    .password-reveal .disclosure-chevron {
+        width: 22px;
+        height: 22px;
+        flex-basis: 22px;
+    }
+    .password-reveal .disclosure-chevron svg {
+        width: 13px;
+        height: 13px;
+    }
+    .password-reveal > span {
         display: inline-block;
         margin-top: 6px;
         font-family: Consolas, monospace;
@@ -93,6 +163,14 @@
             {% endfor %}
         </select>
         {% endif %}
+        {% if enrollment_orders %}
+        <select name="enrollment_order">
+            <option value="">Все приказы о зачислении</option>
+            {% for enrollment_order in enrollment_orders %}
+            <option value="{{ enrollment_order.value }}" {% if request.args.get('enrollment_order') == enrollment_order.value %}selected{% endif %}>{{ enrollment_order.label }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
         <button type="submit" class="btn">Фильтровать</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-danger">Сбросить</a>
         <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-success btn-download">Скачать Excel</a>
@@ -111,6 +189,7 @@
             {% if course_groups_enabled %}
             <th>{{ sort_link('cohort2', 'Глобальная группа курса') }}</th>
             {% endif %}
+            <th>{{ sort_link('enrollment_order', 'Приказ о зачислении') }}</th>
             {% if session.get('role') == 'admin' %}
             <th>Действия</th>
             {% endif %}
@@ -122,8 +201,8 @@
             <td>{{ s['username'] }}</td>
             <td>
                 {% if session.get('role') == 'admin' %}
-                <details class="password-reveal">
-                    <summary>Показать</summary>
+                <details class="password-reveal has-disclosure-chevron">
+                    <summary><span>Показать</span>{{ disclosure_chevron() }}</summary>
                     <span>{{ s['password'] }}</span>
                 </details>
                 {% else %}
@@ -155,14 +234,37 @@
                 {% endif %}
             </td>
             {% endif %}
+            <td class="students-order-cell">
+                {% if s['enrollment_order_number'] or s['enrollment_order_date'] %}
+                    <strong>{% if s['enrollment_order_number'] %}№ {{ s['enrollment_order_number'] }}{% else %}Без номера{% endif %}</strong>
+                    {% if s['enrollment_order_date'] %}<small>от {{ format_display_date(s['enrollment_order_date']) }}</small>{% endif %}
+                {% else %}
+                    <span class="status-badge status-warning">Не указан</span>
+                {% endif %}
+            </td>
             {% if session.get('role') == 'admin' %}
             <td class="students-table-actions">
-                <a href="{{ url_for('edit_student', username=s['username']) }}" class="btn btn-secondary btn-small">Редактировать</a>
-                <form method="post" action="{{ url_for('delete_student') }}" onsubmit="return confirm('Удалить студента?');">
-                    {% include "_csrf_field.html" %}
-                    <input type="hidden" name="username" value="{{ s['username'] }}">
-                    <button type="submit" class="btn btn-danger btn-small">Удалить</button>
-                </form>
+                <div class="row-actions">
+                    <a href="{{ url_for('edit_student', username=s['username']) }}" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+                        </svg>
+                    </a>
+                    <form method="post" action="{{ url_for('delete_student') }}" onsubmit="return confirm('Удалить студента?');">
+                        {% include "_csrf_field.html" %}
+                        <input type="hidden" name="username" value="{{ s['username'] }}">
+                        <button type="submit" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18"></path>
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                <path d="M10 11v6"></path>
+                                <path d="M14 11v6"></path>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
             </td>
             {% endif %}
         </tr>

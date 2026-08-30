@@ -46,6 +46,54 @@
         color: #111827;
         font-size: 15px;
     }
+    .campaign-default {
+        max-width: 760px;
+        margin: 18px 0 24px 0;
+        padding: 18px;
+        border: 1px solid #bbf7d0;
+        border-radius: 8px;
+        background: #f0fdf4;
+    }
+    .campaign-default h2 {
+        margin: 0 0 8px 0;
+        color: #14532d;
+        font-size: 22px;
+    }
+    .campaign-default p {
+        margin: 0 0 14px 0;
+        color: #3f6212;
+        line-height: 1.45;
+    }
+    .campaign-default-controls {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .campaign-default-controls form {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin: 0;
+        padding: 0;
+    }
+    .campaign-default-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 700;
+    }
+    .campaign-default-field select {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 190px;
+        padding: 8px 32px 8px 10px;
+        border: 1px solid #86efac;
+        border-radius: 6px;
+        background: #fff;
+        color: #111827;
+        font-size: 15px;
+    }
     .campaign-actions form {
         display: inline-flex;
         margin: 0;
@@ -60,10 +108,24 @@
     .campaign-status-archived {
         color: #92400e;
     }
+    .campaign-status-active {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: #dcfce7;
+        color: #166534;
+        font-size: 12px;
+        white-space: nowrap;
+    }
     @media (max-width: 640px) {
         .campaign-create-field,
         .campaign-create-field input,
-        .campaign-create-row .btn {
+        .campaign-create-row .btn,
+        .campaign-default-field,
+        .campaign-default-field select,
+        .campaign-default-controls form,
+        .campaign-default-controls .btn {
             width: 100%;
         }
     }
@@ -77,9 +139,53 @@
     <a href="{{ url_for('admin_panel') }}" class="btn">Назад</a>
 </div>
 
+<section class="campaign-default">
+    <h2>Активная кампания по умолчанию</h2>
+    {% if pinned_campaign_year %}
+    <p>
+        Сейчас закреплена кампания <strong>{{ pinned_campaign_year }}</strong>.
+        Она будет открываться по умолчанию после входа, пока пользователь временно не выберет другой год в переключателе.
+    </p>
+    {% else %}
+    <p>
+        Закрепления нет: приложение автоматически выбирает последнюю кампанию —
+        <strong>{{ automatic_campaign_year }}</strong>.
+    </p>
+    {% endif %}
+    <div class="campaign-default-controls">
+        <form method="post">
+            {% include "_csrf_field.html" %}
+            <input type="hidden" name="campaign_action" value="set_active">
+            <div class="campaign-default-field">
+                <label for="default_campaign_year">Кампания</label>
+                <select id="default_campaign_year" name="campaign_year" required>
+                    {% for campaign in campaigns %}
+                    <option value="{{ campaign.campaign_year }}"
+                            {% if campaign.campaign_year == selected_default_campaign_year %}selected{% endif %}
+                            {% if campaign.is_archived %}disabled{% endif %}>
+                        {{ campaign.campaign_year }}{% if campaign.is_archived %} — архив{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn">Закрепить</button>
+        </form>
+        {% if pinned_campaign_year %}
+        <form method="post" onsubmit="return confirm('Вернуть автоматический выбор последней кампании?');">
+            {% include "_csrf_field.html" %}
+            <input type="hidden" name="campaign_action" value="clear_active">
+            <button type="submit" class="btn btn-secondary">Вернуть автовыбор</button>
+        </form>
+        {% endif %}
+    </div>
+</section>
+
 <section class="campaign-create">
     <h2>Добавить кампанию</h2>
-    <p>Новая кампания сразу появится в переключателе “Приемная кампания” и будет выбрана текущей.</p>
+    <p>
+        Новая кампания сразу появится в переключателе “Приемная кампания” и будет выбрана для текущей работы.
+        Если активная кампания закреплена вручную, её значение по умолчанию не изменится.
+    </p>
     <form method="post" class="campaign-create-row">
         {% include "_csrf_field.html" %}
         <input type="hidden" name="campaign_action" value="create">
@@ -110,6 +216,9 @@
                     <span class="campaign-status campaign-status-archived">Архив</span>
                 {% else %}
                     <span class="campaign-status campaign-status-open">Открыта</span>
+                {% endif %}
+                {% if campaign.is_active %}
+                    <span class="campaign-status-active">По умолчанию</span>
                 {% endif %}
             </td>
             <td>{{ campaign.changed_at or '-' }}</td>

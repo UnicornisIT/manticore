@@ -1,0 +1,2 @@
+# Install as /etc/sudoers.d/manticore-update with mode 0440.
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start --no-block manticore-update.service

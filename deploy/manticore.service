@@ -7,7 +7,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/srv/manticore
 EnvironmentFile=-/srv/manticore/.env
-Environment="PATH=/srv/manticore/.venv/bin"
+Environment="PATH=/srv/manticore/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/srv/manticore/.venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
 Restart=on-failure
 

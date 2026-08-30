@@ -74,6 +74,78 @@
     .admin-users-title {
         margin: 0 0 14px 0;
     }
+    .app-update-card {
+        margin: 0 0 32px 0;
+        padding: 22px;
+        border: 1px solid #dbeafe;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #eff6ff 0%, #ffffff 72%);
+        box-shadow: 0 10px 26px rgba(37, 99, 235, 0.08);
+    }
+    .app-update-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+    }
+    .app-update-heading h2 {
+        margin: 0 0 6px 0;
+    }
+    .app-update-heading p,
+    .app-update-note {
+        margin: 0;
+        color: #475569;
+    }
+    .app-update-versions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(150px, 1fr));
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+    .app-update-version {
+        padding: 12px 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.86);
+    }
+    .app-update-version-label {
+        display: block;
+        margin-bottom: 3px;
+        color: #64748b;
+        font-size: 0.85rem;
+    }
+    .app-update-version-value {
+        color: #0f172a;
+        font-size: 1.08rem;
+        font-weight: 700;
+    }
+    .app-update-status-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+        min-height: 28px;
+    }
+    .app-update-status-message {
+        color: #334155;
+        overflow-wrap: anywhere;
+    }
+    .app-update-actions {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+    .app-update-actions form {
+        margin: 0;
+    }
+    .app-update-actions .btn {
+        margin: 0;
+    }
+    .app-update-release-link[hidden] {
+        display: none;
+    }
     .admin-users-table-wrap {
         overflow-x: auto;
         border: 1px solid #e5e7eb;
@@ -89,6 +161,14 @@
     }
     @media (max-width: 700px) {
         .admin-toolbar {
+            grid-template-columns: 1fr;
+        }
+        .app-update-heading,
+        .app-update-actions {
+            align-items: stretch;
+            flex-direction: column;
+        }
+        .app-update-versions {
             grid-template-columns: 1fr;
         }
     }
@@ -115,6 +195,42 @@
             </button>
         </form>
     </div>
+    <section class="app-update-card" aria-labelledby="app-update-title">
+        <div class="app-update-heading">
+            <div>
+                <h2 id="app-update-title">Обновление панели</h2>
+                <p>Проверка и установка последнего опубликованного релиза с GitHub.</p>
+            </div>
+        </div>
+        <div class="app-update-versions">
+            <div class="app-update-version">
+                <span class="app-update-version-label">Установленная версия</span>
+                <span class="app-update-version-value" id="app-update-current">v{{ app_version }}</span>
+            </div>
+            <div class="app-update-version">
+                <span class="app-update-version-label">Последний релиз</span>
+                <span class="app-update-version-value" id="app-update-latest">Проверяем…</span>
+            </div>
+        </div>
+        <div class="app-update-status-row" aria-live="polite">
+            <span class="status-badge status-warning" id="app-update-status-badge">Проверка</span>
+            <span class="app-update-status-message" id="app-update-status-message">{{ app_update_status.get('message', '') }}</span>
+        </div>
+        <div class="app-update-actions">
+            <form method="post" action="{{ url_for('start_app_update') }}" id="app-update-form">
+                {% include "_csrf_field.html" %}
+                <button
+                    type="submit"
+                    class="btn"
+                    id="app-update-button"
+                    {% if not app_update_enabled %}disabled{% endif %}
+                    onclick="return confirm('Установить последний релиз? Перед обновлением будет создана резервная копия базы, затем сервер перезапустится.');"
+                >Проверить и обновить</button>
+            </form>
+            <a class="app-update-release-link" id="app-update-release-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Открыть страницу релиза</a>
+        </div>
+        <p class="app-update-note" style="margin-top: 14px;">Во время установки панель может быть недоступна несколько минут. Локальные настройки, загрузки и база данных сохраняются.</p>
+    </section>
     <h2 class="admin-users-title">Пользователи с доступом к базе данных</h2>
     <div class="admin-users-table-wrap">
         <table class="admin-users-table">
@@ -152,4 +268,92 @@
         </table>
     </div>
 </div>
+<script>
+(function () {
+    const statusUrl = {{ url_for('app_update_status_api') | tojson }};
+    const currentNode = document.getElementById('app-update-current');
+    const latestNode = document.getElementById('app-update-latest');
+    const badgeNode = document.getElementById('app-update-status-badge');
+    const messageNode = document.getElementById('app-update-status-message');
+    const buttonNode = document.getElementById('app-update-button');
+    const releaseLink = document.getElementById('app-update-release-link');
+    let pollTimer = null;
+
+    const stateLabels = {
+        idle: 'Готово',
+        queued: 'В очереди',
+        running: 'Обновление',
+        completed: 'Завершено',
+        up_to_date: 'Актуально',
+        failed: 'Ошибка'
+    };
+
+    function setBadge(state) {
+        badgeNode.textContent = stateLabels[state] || 'Состояние';
+        badgeNode.className = 'status-badge ' + (
+            state === 'completed' || state === 'up_to_date' ? 'status-success' :
+            state === 'failed' ? 'status-danger' : 'status-warning'
+        );
+    }
+
+    function schedulePoll(active) {
+        if (pollTimer) {
+            window.clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+        if (active) {
+            pollTimer = window.setTimeout(loadUpdateStatus, 4000);
+        }
+    }
+
+    function applyStatus(data) {
+        const status = data.status || {};
+        const active = status.state === 'queued' || status.state === 'running';
+        currentNode.textContent = 'v' + (data.current_version || {{ app_version | tojson }});
+        latestNode.textContent = data.latest_version ? 'v' + data.latest_version : 'Не удалось проверить';
+        setBadge(status.state || 'idle');
+
+        if (data.configuration_error) {
+            messageNode.textContent = data.configuration_error;
+        } else if (data.check_error && !active) {
+            messageNode.textContent = 'Не удалось проверить релиз: ' + data.check_error;
+        } else if (status.message) {
+            messageNode.textContent = status.message;
+        } else if (data.update_available) {
+            messageNode.textContent = 'Доступен новый релиз.';
+        } else {
+            messageNode.textContent = 'Установлена последняя версия.';
+        }
+
+        if (data.release_url && data.release_url.startsWith('https://')) {
+            releaseLink.href = data.release_url;
+            releaseLink.hidden = false;
+        } else {
+            releaseLink.hidden = true;
+        }
+
+        buttonNode.disabled = !data.enabled || active || data.update_available === false;
+        buttonNode.textContent = active ? 'Обновление выполняется…' :
+            data.update_available === false ? 'Установлена последняя версия' : 'Установить последний релиз';
+        schedulePoll(active);
+    }
+
+    async function loadUpdateStatus() {
+        try {
+            const response = await window.fetch(statusUrl, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+            applyStatus(await response.json());
+        } catch (error) {
+            latestNode.textContent = 'Нет связи';
+            setBadge('failed');
+            messageNode.textContent = 'Сервер временно недоступен или не удалось проверить обновления. Повторяем проверку…';
+            schedulePoll(true);
+        }
+    }
+
+    loadUpdateStatus();
+})();
+</script>
 {% endblock %}

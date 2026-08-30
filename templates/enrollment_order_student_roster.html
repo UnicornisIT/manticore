@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+{% from "_ui_macros.html" import disclosure_chevron %}
+{% block title %}Предварительный список по приказу{% endblock %}
+{% block head %}
+<style>
+    .roster-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .roster-header h1 {
+        margin-bottom: 8px;
+    }
+    .roster-meta {
+        margin: 0;
+        color: #475569;
+        line-height: 1.5;
+    }
+    .roster-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .roster-note {
+        margin: 16px 0;
+        padding: 12px 14px;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1e3a8a;
+        line-height: 1.45;
+    }
+    .roster-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(130px, 1fr));
+        gap: 10px;
+        margin: 18px 0;
+    }
+    .roster-summary-item {
+        padding: 11px 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+    .roster-summary-item strong {
+        display: block;
+        color: #2563eb;
+        font-size: 22px;
+    }
+    .roster-summary-item.warning {
+        border-color: #fde68a;
+        background: #fffbeb;
+    }
+    .roster-summary-item.warning strong {
+        color: #b45309;
+    }
+    .roster-groups {
+        display: grid;
+        gap: 12px;
+    }
+    .roster-group {
+        border: 1px solid #dbe3ee;
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .roster-group summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 13px 15px;
+        background: #f8fafc;
+        cursor: pointer;
+        list-style: none;
+        font-weight: 800;
+    }
+    .roster-group-counts {
+        margin-left: auto;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    .roster-table-wrap {
+        overflow-x: auto;
+        border-top: 1px solid #e5e7eb;
+        background: #fff;
+        scrollbar-color: #94a3b8 #eef2f7;
+        scrollbar-width: thin;
+    }
+    .roster-table-wrap::-webkit-scrollbar {
+        height: 11px;
+    }
+    .roster-table-wrap::-webkit-scrollbar-track {
+        background: #eef2f7;
+    }
+    .roster-table-wrap::-webkit-scrollbar-thumb {
+        border: 2px solid #eef2f7;
+        border-radius: 999px;
+        background: #94a3b8;
+    }
+    .roster-table {
+        width: max-content;
+        min-width: 2700px;
+        table-layout: auto;
+        margin: 0;
+    }
+    .roster-table th,
+    .roster-table td {
+        overflow-wrap: normal;
+        word-break: normal;
+        hyphens: none;
+    }
+    .roster-table th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 12px 10px;
+        background: #f1f5f9;
+        color: #334155;
+    }
+    .roster-table td {
+        padding: 12px 10px;
+        vertical-align: top;
+        line-height: 1.45;
+        background: #fff;
+    }
+    .roster-table tbody tr:nth-child(even) td {
+        background: #f8fafc;
+    }
+    .roster-table tbody tr:hover td {
+        background: #eff6ff;
+    }
+    .roster-table .status-badge {
+        max-width: none;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .roster-col-login { min-width: 115px; white-space: nowrap; }
+    .roster-col-password { min-width: 85px; white-space: nowrap; }
+    .roster-col-email { min-width: 210px; }
+    .roster-col-lastname { min-width: 190px; white-space: nowrap; }
+    .roster-col-firstname { min-width: 240px; }
+    .roster-col-group { min-width: 165px; white-space: nowrap; }
+    .roster-col-cohort2 { min-width: 225px; white-space: nowrap; }
+    .roster-col-order { min-width: 180px; white-space: nowrap; }
+    .roster-col-row { min-width: 75px; text-align: center; white-space: nowrap; }
+    .roster-col-specialty { min-width: 260px; max-width: 300px; }
+    .roster-col-dogovor { min-width: 190px; white-space: nowrap; }
+    .roster-col-payment { min-width: 145px; }
+    .roster-col-state { min-width: 185px; }
+    .roster-col-distribution { min-width: 240px; }
+    .roster-col-review { min-width: 390px; max-width: 420px; }
+    .roster-col-firstname,
+    .roster-col-specialty,
+    .roster-col-payment,
+    .roster-col-state,
+    .roster-col-distribution,
+    .roster-col-review {
+        white-space: normal;
+    }
+    .roster-fio {
+        font-weight: 700;
+    }
+    .roster-contact {
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .roster-muted {
+        color: #94a3b8;
+    }
+    .fio-review-card {
+        min-width: 350px;
+        max-width: 400px;
+        padding: 9px 10px;
+        border: 1px solid #fbbf24;
+        border-radius: 8px;
+        background: #fffbeb;
+        line-height: 1.4;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .fio-review-card strong,
+    .fio-review-card span {
+        display: block;
+    }
+    .fio-review-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+    }
+    .fio-review-actions form {
+        margin: 0;
+    }
+    .fio-review-actions .btn {
+        padding: 7px 10px;
+        font-size: 13px;
+    }
+    .fio-review-card .fio-review-skipped {
+        display: flex;
+        width: 100%;
+        box-sizing: border-box;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    @media (max-width: 900px) {
+        .roster-summary {
+            grid-template-columns: repeat(2, minmax(130px, 1fr));
+        }
+    }
+    @media (max-width: 560px) {
+        .roster-summary {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="roster-header">
+    <div>
+        <h1>Предварительный список по приказу</h1>
+        <p class="roster-meta">
+            {{ upload.original_filename or ('Приказ #' ~ upload.id) }}<br>
+            {% if upload.order_numbers %}Номер: {{ upload.order_numbers }}.{% endif %}
+            {% if upload.order_dates %} Дата: {{ upload.order_dates }}.{% endif %}
+            Кампания: {{ upload.campaign_year }}.
+        </p>
+    </div>
+    <div class="roster-actions">
+        <a href="{{ url_for('data_checks', campaign_year=upload.campaign_year) }}" class="btn btn-secondary">Назад к проверке</a>
+        <a href="{{ url_for('enrollment_order_upload_detail', upload_id=upload.id) }}" class="btn btn-secondary">Открыть приказ</a>
+        <a href="{{ url_for('download_enrollment_order_student_roster', upload_id=upload.id) }}" class="btn btn-success btn-download">Скачать Excel</a>
+    </div>
+</div>
+
+<p class="roster-note">
+    Это справочная симуляция зачисления по выбранному приказу. Система распределяет весь список
+    по учебным группам по той же логике, что и при реальном переносе: учитывает уже занятые места
+    и открывает следующую подгруппу после {{ max_group_students }} человек. Недостающие группы
+    показываются только здесь и в Excel — в базе они не создаются. Отсутствие почты или оплаты
+    не исключает человека из расчёта.
+</p>
+
+<div class="roster-summary">
+    <div class="roster-summary-item"><strong>{{ summary.total_count }}</strong>Всего в приказе</div>
+    <div class="roster-summary-item"><strong>{{ summary.group_count }}</strong>Учебных групп</div>
+    <div class="roster-summary-item"><strong>{{ summary.virtual_group_count }}</strong>Справочных групп</div>
+    <div class="roster-summary-item"><strong>{{ summary.student_count }}</strong>Уже студенты</div>
+    <div class="roster-summary-item"><strong>{{ summary.ready_count }}</strong>Готовы к переносу</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.missing_email_count }}</strong>Без почты</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.unpaid_count }}</strong>Без оплаты</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.not_found_count }}</strong>Не найдены в базе</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.unassigned_count }}</strong>Не распределены</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.fio_review_count }}</strong>Сверить ФИО</div>
+    <div class="roster-summary-item"><strong>{{ summary.fio_review_linked_count }}</strong>Логин присвоен после сверки</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.specialty_conflict_count }}</strong>Конфликт специальности</div>
+    <div class="roster-summary-item warning"><strong>{{ summary.attention_count }}</strong>Требуют внимания</div>
+</div>
+
+{% if groups %}
+<div class="roster-groups">
+    {% for group in groups %}
+    <details class="roster-group has-disclosure-chevron" {% if loop.first %}open{% endif %}>
+        <summary>
+            <span>
+                {{ group.name }}
+                {% if group.is_virtual %}<span class="status-badge status-info">Только в расчёте</span>{% endif %}
+            </span>
+            <span class="roster-group-counts">
+                {{ group.count }} чел.{% if group.attention_count %} · требуют внимания: {{ group.attention_count }}{% endif %}
+            </span>
+            {{ disclosure_chevron() }}
+        </summary>
+        <div class="roster-table-wrap">
+            <table class="roster-table">
+                <thead>
+                    <tr>
+                        <th class="roster-col-login">Логин</th>
+                        <th class="roster-col-password">Пароль</th>
+                        <th class="roster-col-email">Email</th>
+                        <th class="roster-col-lastname">Фамилия</th>
+                        <th class="roster-col-firstname">Имя</th>
+                        <th class="roster-col-group">Группа</th>
+                        {% if course_groups_enabled %}<th class="roster-col-cohort2">Глобальная группа курса</th>{% endif %}
+                        <th class="roster-col-order">Приказ о зачислении</th>
+                        <th class="roster-col-row">Строка</th>
+                        <th class="roster-col-specialty">Специальность</th>
+                        <th class="roster-col-dogovor">Договор</th>
+                        <th class="roster-col-payment">Оплата</th>
+                        <th class="roster-col-state">Состояние</th>
+                        <th class="roster-col-distribution">Распределение</th>
+                        <th class="roster-col-review">Сверка ФИО</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in group.rows %}
+                    <tr>
+                        <td class="roster-col-login">{{ row.login or '-' }}</td>
+                        <td class="roster-col-password">cron</td>
+                        <td class="roster-contact roster-col-email">
+                            {% if row.email %}{{ row.email }}{% else %}<span class="status-badge status-warning">Нет почты</span>{% endif %}
+                        </td>
+                        <td class="roster-fio roster-col-lastname">
+                            {% if row.person_url %}<a href="{{ row.person_url }}">{{ row.lastname or '-' }}</a>{% else %}{{ row.lastname or '-' }}{% endif %}
+                        </td>
+                        <td class="roster-col-firstname">{{ row.firstname or '-' }}</td>
+                        <td class="roster-col-group"><span class="status-badge {% if row.group_name == 'Не распределено' %}status-warning{% else %}status-info{% endif %}">{{ row.group_name }}</span></td>
+                        {% if course_groups_enabled %}
+                        <td class="roster-col-cohort2">{% if row.cohort2 %}<span class="status-badge status-info">{{ row.cohort2 }}</span>{% else %}<span class="status-badge status-warning">Не определена</span>{% endif %}</td>
+                        {% endif %}
+                        <td class="roster-col-order">
+                            {% if row.order_number %}№ {{ row.order_number }}{% else %}Без номера{% endif %}
+                            {% if row.order_date %}<br><span class="roster-muted">от {{ format_display_date(row.order_date) }}</span>{% endif %}
+                        </td>
+                        <td class="roster-col-row">{{ row.row_number or '-' }}</td>
+                        <td class="roster-col-specialty">{{ row.specialty or '-' }}</td>
+                        <td class="roster-col-dogovor">{{ row.dogovor or '-' }}</td>
+                        <td class="roster-col-payment">{{ row.payment_status }}</td>
+                        <td class="roster-col-state"><span class="status-badge {{ row.badge_class }}">{{ row.status }}</span></td>
+                        <td class="roster-col-distribution">
+                            {{ row.group_source }}<br>
+                            <span class="roster-muted">{{ row.group_assignment_status }}</span>
+                        </td>
+                        <td class="roster-col-review">
+                            {% if row.fio_review_status == 'fixed' %}
+                            <span class="status-badge status-success">ФИО исправлено по приказу</span>
+                            {% elif row.fio_review_kind == 'specialty_conflict' %}
+                            <div class="fio-review-card">
+                                <strong>ФИО совпадает, специальность отличается</strong>
+                                <span>В приказе: {{ row.specialty }}</span>
+                                <span>В базе: {{ row.suggested_abiturient_specialty or '-' }}</span>
+                                <span class="roster-muted">{{ row.suggested_abiturient_dogovor or 'Договор не указан' }}</span>
+                            </div>
+                            {% elif row.has_fio_review %}
+                            <div class="fio-review-card">
+                                <strong>Похоже на запись в базе — {{ row.fio_similarity }}%</strong>
+                                <span>В приказе: {{ row.fio }}</span>
+                                <span>В базе: {{ row.suggested_abiturient_fio }}</span>
+                                <span class="roster-muted">
+                                    Логин: {{ row.suggested_abiturient_login or '-' }}{% if row.suggested_abiturient_dogovor %}; договор: {{ row.suggested_abiturient_dogovor }}{% endif %}
+                                </span>
+                                {% if row.fio_review_status == 'linked' and row.reviewed_candidate_matches %}
+                                <span class="status-badge status-success fio-review-skipped">Опечатка в приказе — логин присвоен</span>
+                                {% if session.get('role') in ['admin', 'assistant', 'manager', 'operator'] %}
+                                <div class="fio-review-actions">
+                                    <form method="post" action="{{ url_for('review_enrollment_order_student_roster_fio', upload_id=upload.id) }}">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="review_action" value="reset">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <button type="submit" class="btn btn-secondary">Вернуть к сверке</button>
+                                    </form>
+                                </div>
+                                {% endif %}
+                                {% elif row.fio_review_status == 'skipped' and row.reviewed_candidate_matches %}
+                                <span class="status-badge status-info fio-review-skipped">Исправление пропущено</span>
+                                {% if session.get('role') in ['admin', 'assistant', 'manager', 'operator'] %}
+                                <div class="fio-review-actions">
+                                    <form method="post" action="{{ url_for('review_enrollment_order_student_roster_fio', upload_id=upload.id) }}">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="review_action" value="reset">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <button type="submit" class="btn btn-secondary">Вернуть к сверке</button>
+                                    </form>
+                                </div>
+                                {% endif %}
+                                {% elif session.get('role') in ['admin', 'assistant', 'manager', 'operator'] %}
+                                <div class="fio-review-actions">
+                                    <form method="post" action="{{ url_for('review_enrollment_order_student_roster_fio', upload_id=upload.id) }}" onsubmit="return confirm('Исправить ФИО абитуриента в базе по данным приказа?');">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="review_action" value="fix">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="abiturient_id" value="{{ row.suggested_abiturient_id }}">
+                                        <button type="submit" class="btn btn-success">Исправить в базе</button>
+                                    </form>
+                                    <form method="post" action="{{ url_for('review_enrollment_order_student_roster_fio', upload_id=upload.id) }}">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="review_action" value="link">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="abiturient_id" value="{{ row.suggested_abiturient_id }}">
+                                        <button type="submit" class="btn" onclick="return confirm('Считать ФИО в базе верным и присвоить строке приказа найденный логин без изменения ФИО?');">Пропустить и присвоить логин</button>
+                                    </form>
+                                    <form method="post" action="{{ url_for('review_enrollment_order_student_roster_fio', upload_id=upload.id) }}">
+                                        {% include "_csrf_field.html" %}
+                                        <input type="hidden" name="review_action" value="skip">
+                                        <input type="hidden" name="row_id" value="{{ row.id }}">
+                                        <input type="hidden" name="abiturient_id" value="{{ row.suggested_abiturient_id }}">
+                                        <button type="submit" class="btn btn-secondary">Пропустить без исправления</button>
+                                    </form>
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <span class="roster-muted">Нет безопасного совпадения</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+    {% endfor %}
+</div>
+{% else %}
+<p>В приказе нет строк, из которых можно сформировать список.</p>
+{% endif %}
+{% endblock %}

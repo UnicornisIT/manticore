@@ -1,0 +1,16 @@
+[Unit]
+Description=manticore application update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/srv/manticore
+EnvironmentFile=-/srv/manticore/.env
+Environment="UPDATE_LATEST_RELEASE=1"
+Environment="UPDATE_STATUS_FILE=/srv/manticore/uploads/app_update_status.json"
+ExecStart=/usr/bin/bash /srv/manticore/update.sh /srv/manticore
+TimeoutStartSec=30min
+UMask=0022

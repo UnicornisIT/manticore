@@ -156,6 +156,46 @@
             font-size: 15px;
             line-height: 1.2;
         }
+        details.has-disclosure-chevron > summary {
+            list-style: none;
+        }
+        details.has-disclosure-chevron > summary::-webkit-details-marker {
+            display: none;
+        }
+        .disclosure-chevron {
+            box-sizing: border-box;
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            flex: 0 0 30px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #dbeafe;
+            border-radius: 999px;
+            background: #fff;
+            color: #2563eb;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+            transition: transform 0.2s ease, background-color 0.2s ease,
+                        border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .disclosure-chevron svg {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.25;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        details[open] > summary .disclosure-chevron {
+            transform: rotate(180deg);
+        }
+        summary:hover .disclosure-chevron,
+        summary:focus-visible .disclosure-chevron {
+            border-color: #93c5fd;
+            background: #eff6ff;
+            box-shadow: 0 3px 8px rgba(37, 99, 235, 0.14);
+        }
         .nav-dropdown {
             position: relative;
         }
@@ -216,8 +256,13 @@
             gap: 10px;
         }
         .nav-submenu-caret {
-            width: 14px;
-            height: 14px;
+            box-sizing: border-box;
+            width: 24px;
+            height: 24px;
+            padding: 5px;
+            border: 1px solid #dbeafe;
+            border-radius: 999px;
+            background: #fff;
             stroke: currentColor;
             stroke-width: 2;
             stroke-linecap: round;
@@ -260,8 +305,13 @@
             }
         }
         .nav-dropdown-caret {
-            width: 14px;
-            height: 14px;
+            box-sizing: border-box;
+            width: 24px;
+            height: 24px;
+            padding: 5px;
+            border: 1px solid #dbeafe;
+            border-radius: 999px;
+            background: #fff;
             stroke: currentColor;
             stroke-width: 2;
             stroke-linecap: round;
@@ -400,7 +450,7 @@
         .table-scroll > table {
             margin: 0;
         }
-        input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not(.nav-search-input),
+        input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not(.nav-search-input):not(.docs-search-input),
         select,
         textarea,
         .form-control {
@@ -1463,6 +1513,16 @@
                 </a>
             </li>
             {% endif %}
+            <li>
+                <a href="{{ url_for('documentation') }}" class="nav-icon-link{% if request.endpoint == 'documentation' %} active{% endif %}" aria-label="Документация" title="Документация">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <path d="M9.7 9a2.5 2.5 0 1 1 3.4 2.33c-.76.33-1.1.82-1.1 1.67"></path>
+                        <path d="M12 17h.01"></path>
+                    </svg>
+                    <span class="sr-only">Документация</span>
+                </a>
+            </li>
             <li><a href="{{ url_for('logout') }}">Выйти</a></li>
         </ul>
         <div class="global-search-modal" id="global-search-modal" hidden>
