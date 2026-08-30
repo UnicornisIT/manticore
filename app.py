@@ -9181,7 +9181,7 @@ def build_app_update_command():
 
 def get_app_update_configuration_error():
     if not APP_UPDATE_ENABLED:
-        return 'Обновление из админки отключено в настройках сервера.'
+        return 'Обновление через панель управления отключено в настройках сервера.'
     if not (APP_DIR / '.git').exists():
         return 'Папка приложения не является Git-копией. Автоматическое обновление недоступно.'
     if not shutil.which('git') and not os.path.isfile('/usr/bin/git') and not os.path.isfile('/bin/git'):
