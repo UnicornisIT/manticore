@@ -23,6 +23,7 @@ CloseApplications=yes
 RestartApplications=yes
 AppMutex=ManticoreDesktopClient
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=manticore.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
