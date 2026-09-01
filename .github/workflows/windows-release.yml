@@ -48,13 +48,22 @@ jobs:
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.pfx'
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          "pfx_path=$certificatePath" >> $env:GITHUB_OUTPUT
           $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          $importedCertificates = @(Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+          $certificate = $importedCertificates | Where-Object { $_.HasPrivateKey } | Select-Object -First 1
           if (-not $certificate) {
-            throw 'The Windows code-signing certificate could not be imported.'
+            throw 'The PFX does not contain an importable certificate with a private key.'
           }
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-          "pfx_path=$certificatePath" >> $env:GITHUB_OUTPUT
+
+          if ($certificate.Subject -eq $certificate.Issuer) {
+            $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.cer'
+            Export-Certificate -Cert $certificate -FilePath $publicCertificatePath | Out-Null
+            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+            "cer_path=$publicCertificatePath" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Build and sign Windows installer
         shell: powershell
@@ -86,12 +95,25 @@ jobs:
           }
           gh release create '${{ github.ref_name }}' $installer --verify-tag --generate-notes --title '${{ github.ref_name }}'
 
-      - name: Remove certificate file
+      - name: Remove certificate material
         if: always()
         shell: powershell
         env:
           CERTIFICATE_PATH: ${{ steps.certificate.outputs.pfx_path }}
+          PUBLIC_CERTIFICATE_PATH: ${{ steps.certificate.outputs.cer_path }}
+          CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
         run: |
-          if ($env:CERTIFICATE_PATH -and (Test-Path -LiteralPath $env:CERTIFICATE_PATH)) {
-            Remove-Item -LiteralPath $env:CERTIFICATE_PATH -Force
+          foreach ($path in @($env:CERTIFICATE_PATH, $env:PUBLIC_CERTIFICATE_PATH)) {
+            if ($path -and (Test-Path -LiteralPath $path)) {
+              Remove-Item -LiteralPath $path -Force
+            }
+          }
+
+          if ($env:CERTIFICATE_THUMBPRINT -match '^[0-9A-Fa-f]{40}$') {
+            foreach ($store in @('Cert:\CurrentUser\My', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\TrustedPublisher')) {
+              $certificateItem = Join-Path $store $env:CERTIFICATE_THUMBPRINT
+              if (Test-Path -LiteralPath $certificateItem) {
+                Remove-Item -LiteralPath $certificateItem -Force
+              }
+            }
           }
