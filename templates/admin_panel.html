@@ -406,6 +406,22 @@
     let latestRelease = null;
     let latestApproved = false;
 
+    function updateInstallButton(installedVersion, approved) {
+        if (!latestRelease || !latestRelease.version) {
+            return;
+        }
+        const sameVersion = latestRelease.version === installedVersion;
+        const reinstallableRebuild = sameVersion && Boolean(latestRelease.is_rebuild);
+        installButton.disabled = !approved || (sameVersion && !reinstallableRebuild);
+        if (reinstallableRebuild) {
+            installButton.textContent = 'Установить исправленную сборку v' + latestRelease.version;
+        } else if (sameVersion) {
+            installButton.textContent = 'На этом компьютере установлена v' + installedVersion;
+        } else {
+            installButton.textContent = 'Установить v' + latestRelease.version + ' на этом компьютере';
+        }
+    }
+
     async function enableDesktopInstall() {
         if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.install_approved_update) {
             return;
@@ -414,12 +430,7 @@
         try {
             const installedVersion = await window.pywebview.api.get_current_version();
             installButton.dataset.installedVersion = installedVersion || '';
-            if (latestRelease && latestRelease.version) {
-                installButton.disabled = !latestApproved || latestRelease.version === installedVersion;
-                installButton.textContent = latestRelease.version === installedVersion
-                    ? 'На этом компьютере установлена v' + installedVersion
-                    : 'Установить v' + latestRelease.version + ' на этом компьютере';
-            }
+            updateInstallButton(installedVersion, latestApproved);
         } catch (error) {
             installNote.textContent = 'Не удалось определить версию установленного Windows-приложения.';
         }
@@ -477,10 +488,7 @@
             }
             if (!installButton.hidden && release.version) {
                 const installedVersion = installButton.dataset.installedVersion || '';
-                installButton.disabled = !data.approved || installedVersion === release.version;
-                installButton.textContent = installedVersion === release.version
-                    ? 'На этом компьютере установлена v' + installedVersion
-                    : 'Установить v' + release.version + ' на этом компьютере';
+                updateInstallButton(installedVersion, Boolean(data.approved));
             }
         } catch (error) {
             latestNode.textContent = 'Ошибка проверки';

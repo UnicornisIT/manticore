@@ -34,6 +34,22 @@ def normalize_version(value: str) -> str:
     return version
 
 
+def installer_version_from_tag(value: str) -> str:
+    """Return the installer version represented by a release tag.
+
+    A rebuild tag identifies a new immutable build of the same application
+    version, so ``v1.1.3-rebuild`` still contains
+    ``Manticore-Setup-1.1.3.exe``.
+    """
+    tag_version = normalize_version(value)
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)-rebuild", tag_version, flags=re.IGNORECASE)
+    return match.group(1) if match else tag_version
+
+
+def is_rebuild_tag(value: str) -> bool:
+    return installer_version_from_tag(value) != normalize_version(value)
+
+
 def normalize_repository(value: str) -> str:
     repository = str(value or "").strip().strip("/")
     if not REPOSITORY_PATTERN.fullmatch(repository):
@@ -84,7 +100,7 @@ def _validated_release_payload(payload: dict, repository: str) -> dict:
             "GitHub Release не помечен как Immutable. Включите immutable releases в настройках репозитория."
         )
     tag_name = str(payload.get("tag_name") or "").strip()
-    version = normalize_version(tag_name)
+    version = installer_version_from_tag(tag_name)
     expected_names = {
         f"Manticore-Setup-{version}.exe",
         f"Manticore-Setup-v{version}.exe",
@@ -138,6 +154,7 @@ def _validated_release_payload(payload: dict, repository: str) -> dict:
         "release_id": release_id,
         "tag_name": tag_name,
         "version": version,
+        "is_rebuild": is_rebuild_tag(tag_name),
         "name": str(payload.get("name") or tag_name).strip()[:300],
         "notes": str(payload.get("body") or "")[:4000],
         "html_url": str(payload.get("html_url") or ""),
@@ -197,13 +214,14 @@ def approve_release(
     repository = normalize_repository(release.get("repository", ""))
     version = normalize_version(release.get("version", ""))
     tag_name = str(release.get("tag_name") or "").strip()
-    if normalize_version(tag_name) != version:
+    if installer_version_from_tag(tag_name) != version:
         raise DesktopReleaseError("Тег GitHub Release не совпадает с версией установщика.")
     validated = {
         "repository": repository,
         "release_id": int(release["release_id"]),
         "tag_name": tag_name,
         "version": version,
+        "is_rebuild": is_rebuild_tag(tag_name),
         "asset_id": int(release["asset_id"]),
         "asset_name": str(release["asset_name"]),
         "sha256": str(release["sha256"]).lower(),
@@ -238,7 +256,7 @@ def load_approval(upload_folder: str | os.PathLike[str]) -> dict:
         expected_names = {f"Manticore-Setup-{version}.exe", f"Manticore-Setup-v{version}.exe"}
         if (
             not SHA256_PATTERN.fullmatch(sha256)
-            or normalize_version(tag_name) != version
+            or installer_version_from_tag(tag_name) != version
             or release_id <= 0
             or asset_id <= 0
             or asset_name not in expected_names
@@ -251,6 +269,7 @@ def load_approval(upload_folder: str | os.PathLike[str]) -> dict:
             "release_id": release_id,
             "tag_name": tag_name,
             "version": version,
+            "is_rebuild": is_rebuild_tag(tag_name),
             "asset_id": asset_id,
             "asset_name": asset_name,
             "sha256": sha256,

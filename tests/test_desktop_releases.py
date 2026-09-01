@@ -50,6 +50,30 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertEqual(loaded["asset_id"], 456)
         self.assertEqual(loaded["approved_by"], "admin")
 
+    def test_rebuild_tag_uses_base_version_installer(self):
+        payload = self.github_payload()
+        payload["tag_name"] = "v2.3.4-rebuild"
+        payload["name"] = "v2.3.4-rebuild"
+        payload["html_url"] = "https://github.com/UnicornisIT/manticore/releases/tag/v2.3.4-rebuild"
+        payload["assets"][0]["browser_download_url"] = (
+            "https://github.com/UnicornisIT/manticore/releases/download/"
+            "v2.3.4-rebuild/Manticore-Setup-2.3.4.exe"
+        )
+
+        release = desktop_releases._validated_release_payload(payload, "UnicornisIT/manticore")
+        approval = desktop_releases.approve_release(self.upload_folder, release, approved_by="admin")
+        loaded = desktop_releases.load_approval(self.upload_folder)
+
+        self.assertEqual(release["version"], "2.3.4")
+        self.assertTrue(release["is_rebuild"])
+        self.assertTrue(approval["is_rebuild"])
+        self.assertTrue(loaded["is_rebuild"])
+        self.assertEqual(loaded["asset_name"], "Manticore-Setup-2.3.4.exe")
+
+        payload["assets"][0]["name"] = "Manticore-Setup-2.3.4-rebuild.exe"
+        with self.assertRaises(desktop_releases.DesktopReleaseError):
+            desktop_releases._validated_release_payload(payload, "UnicornisIT/manticore")
+
     def test_rejects_mutable_release_and_missing_digest(self):
         with self.assertRaises(desktop_releases.DesktopReleaseError):
             desktop_releases._validated_release_payload(

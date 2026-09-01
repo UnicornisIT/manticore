@@ -41,6 +41,7 @@ class WindowsClientTests(unittest.TestCase):
             'https://manticore.example.test',
             ask_confirmation=False,
             show_check_errors=True,
+            allow_same_version_rebuild=True,
         )
         timer.return_value.start.assert_called_once_with()
 
@@ -142,6 +143,58 @@ class WindowsClientTests(unittest.TestCase):
         fetch_release.return_value['sha256'] = 'c' * 64
         with self.assertRaises(ValueError):
             windows_client.fetch_update_manifest('https://manticore.example.test')
+
+    @mock.patch('desktop.windows_client.current_version', return_value='9.8.7')
+    @mock.patch('desktop.windows_client.load_trust_policy')
+    @mock.patch('desktop.windows_client.desktop_releases.fetch_release_by_tag')
+    @mock.patch('desktop.windows_client.urllib.request.urlopen')
+    def test_same_version_rebuild_is_available_only_for_manual_install(
+        self,
+        urlopen,
+        fetch_release,
+        trust_policy,
+        _current_version,
+    ):
+        trust_policy.return_value = {
+            'github_repository': 'UnicornisIT/manticore',
+            'signer_certificate_sha256': 'b' * 64,
+        }
+        approval = {
+            'repository': 'UnicornisIT/manticore',
+            'release_id': 101,
+            'tag_name': 'v9.8.7-rebuild',
+            'version': '9.8.7',
+            'asset_id': 201,
+            'asset_name': 'Manticore-Setup-9.8.7.exe',
+            'sha256': 'a' * 64,
+            'size': 1234,
+        }
+        server_response = mock.MagicMock()
+        server_response.__enter__.return_value.read.return_value = json.dumps({
+            'repository': 'UnicornisIT/manticore',
+            'approved': True,
+            'approval': approval,
+        }).encode('utf-8')
+        urlopen.return_value = server_response
+        fetch_release.return_value = {
+            **approval,
+            'is_rebuild': True,
+            'notes': 'Исправленная сборка',
+            'download_url': (
+                'https://github.com/UnicornisIT/manticore/releases/download/'
+                'v9.8.7-rebuild/Manticore-Setup-9.8.7.exe'
+            ),
+        }
+
+        self.assertEqual(windows_client.fetch_update_manifest('https://manticore.example.test'), {})
+        manifest = windows_client.fetch_update_manifest(
+            'https://manticore.example.test',
+            allow_same_version_rebuild=True,
+        )
+
+        self.assertEqual(manifest['version'], '9.8.7')
+        self.assertEqual(manifest['tag_name'], 'v9.8.7-rebuild')
+        self.assertTrue(manifest['is_rebuild'])
 
 
 if __name__ == "__main__":

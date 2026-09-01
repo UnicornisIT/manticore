@@ -323,7 +323,7 @@ def version_key(value: str):
     return int(major), int(minor), int(patch), 1 if suffix is None else 0, suffix or ""
 
 
-def fetch_update_manifest(server_url: str) -> dict:
+def fetch_update_manifest(server_url: str, *, allow_same_version_rebuild: bool = False) -> dict:
     trust_policy = load_trust_policy()
     endpoint = server_url.rstrip("/") + UPDATE_ENDPOINT
     request = urllib.request.Request(
@@ -359,9 +359,13 @@ def fetch_update_manifest(server_url: str) -> dict:
     latest_key = version_key(release["version"])
     installed_key = version_key(current_version())
     if latest_key is not None and installed_key is not None and latest_key <= installed_key:
-        return {}
+        same_version_rebuild = bool(release.get("is_rebuild")) and latest_key == installed_key
+        if not (allow_same_version_rebuild and same_version_rebuild):
+            return {}
     return {
         "version": release["version"],
+        "tag_name": release["tag_name"],
+        "is_rebuild": bool(release.get("is_rebuild")),
         "sha256": release["sha256"],
         "size": release["size"],
         "notes": release["notes"],
@@ -557,6 +561,7 @@ def offer_and_install_update(
     *,
     ask_confirmation: bool = True,
     show_check_errors: bool = False,
+    allow_same_version_rebuild: bool = False,
 ) -> bool:
     if not server_url:
         if show_check_errors:
@@ -573,7 +578,10 @@ def offer_and_install_update(
             root.destroy()
         return False
     try:
-        manifest = fetch_update_manifest(server_url)
+        manifest = fetch_update_manifest(
+            server_url,
+            allow_same_version_rebuild=allow_same_version_rebuild,
+        )
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         logging.warning("Update check failed: %s", exc)
         if show_check_errors:
@@ -605,7 +613,10 @@ def offer_and_install_update(
 
     root = tk.Tk()
     root.withdraw()
-    details = f"Доступна версия {manifest['version']} (установлена {current_version()})."
+    if manifest.get("is_rebuild") and manifest["version"] == current_version():
+        details = f"Доступна исправленная сборка версии {manifest['version']}."
+    else:
+        details = f"Доступна версия {manifest['version']} (установлена {current_version()})."
     if manifest["notes"]:
         details += f"\n\n{manifest['notes']}"
     details += "\n\nСкачать и установить обновление сейчас?"
@@ -670,6 +681,7 @@ class DesktopApi:
             self.update_server_url,
             ask_confirmation=False,
             show_check_errors=True,
+            allow_same_version_rebuild=True,
         )
         if started:
             timer = threading.Timer(0.25, self._close_windows)
