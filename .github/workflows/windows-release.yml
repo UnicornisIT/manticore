@@ -39,6 +39,7 @@ jobs:
       - name: Import code-signing certificate
         id: certificate
         shell: powershell
+        timeout-minutes: 2
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -56,13 +57,22 @@ jobs:
             throw 'The PFX does not contain an importable certificate with a private key.'
           }
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          Write-Host "Imported code-signing certificate $($certificate.Thumbprint)."
 
           if ($certificate.Subject -eq $certificate.Issuer) {
             $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.cer'
             Export-Certificate -Cert $certificate -FilePath $publicCertificatePath | Out-Null
-            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
             "cer_path=$publicCertificatePath" >> $env:GITHUB_OUTPUT
+            Write-Host 'Trusting the self-signed certificate for this runner job.'
+            & certutil.exe -user -f -addstore Root $publicCertificatePath
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not add the self-signed certificate to the current-user Root store.'
+            }
+            & certutil.exe -user -f -addstore TrustedPublisher $publicCertificatePath
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Could not add the self-signed certificate to the current-user TrustedPublisher store.'
+            }
+            Write-Host 'The self-signed certificate is trusted for this runner job.'
           }
 
       - name: Build and sign Windows installer
