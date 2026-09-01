@@ -38,11 +38,11 @@ def installer_version_from_tag(value: str) -> str:
     """Return the installer version represented by a release tag.
 
     A rebuild tag identifies a new immutable build of the same application
-    version, so ``v1.1.3-rebuild`` still contains
+    version, so ``v1.1.3-rebuild`` and ``v1.1.3-rebuild.2`` still contain
     ``Manticore-Setup-1.1.3.exe``.
     """
     tag_version = normalize_version(value)
-    match = re.fullmatch(r"(\d+\.\d+\.\d+)-rebuild", tag_version, flags=re.IGNORECASE)
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)-rebuild(?:\.\d+)?", tag_version, flags=re.IGNORECASE)
     return match.group(1) if match else tag_version
 
 

@@ -52,12 +52,12 @@ class DesktopReleaseTests(unittest.TestCase):
 
     def test_rebuild_tag_uses_base_version_installer(self):
         payload = self.github_payload()
-        payload["tag_name"] = "v2.3.4-rebuild"
-        payload["name"] = "v2.3.4-rebuild"
-        payload["html_url"] = "https://github.com/UnicornisIT/manticore/releases/tag/v2.3.4-rebuild"
+        payload["tag_name"] = "v2.3.4-rebuild.2"
+        payload["name"] = "v2.3.4-rebuild.2"
+        payload["html_url"] = "https://github.com/UnicornisIT/manticore/releases/tag/v2.3.4-rebuild.2"
         payload["assets"][0]["browser_download_url"] = (
             "https://github.com/UnicornisIT/manticore/releases/download/"
-            "v2.3.4-rebuild/Manticore-Setup-2.3.4.exe"
+            "v2.3.4-rebuild.2/Manticore-Setup-2.3.4.exe"
         )
 
         release = desktop_releases._validated_release_payload(payload, "UnicornisIT/manticore")
