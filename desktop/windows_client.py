@@ -32,6 +32,8 @@ UPDATE_ENDPOINT = "/api/desktop/releases/windows"
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
 MAX_INSTALLER_SIZE = 256 * 1024 * 1024
 TRUST_POLICY_PATH = Path("desktop") / "trusted_update.json"
+WINDOW_ICON_PATH = Path("desktop") / "manticore.ico"
+UNINSTALL_REGISTRY_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{815471B3-D4A7-49C8-9F25-BEACF00E37B8}_is1"
 WINTRUST_SUCCESS = 0x00000000
 WINTRUST_UNTRUSTED_ROOT = 0x800B0109
 _INSTANCE_MUTEX = None
@@ -406,10 +408,34 @@ def download_installer(manifest: dict, progress=None) -> Path:
         raise
 
 
+def installed_scope_switch() -> str:
+    """Keep an update in the same per-user or all-users scope as the old version."""
+    if os.name != "nt":
+        return "/CURRENTUSER"
+    try:
+        import winreg
+    except ImportError:
+        return "/CURRENTUSER"
+
+    registry_views = (getattr(winreg, "KEY_WOW64_64KEY", 0), getattr(winreg, "KEY_WOW64_32KEY", 0))
+    for hive, switch in ((winreg.HKEY_LOCAL_MACHINE, "/ALLUSERS"), (winreg.HKEY_CURRENT_USER, "/CURRENTUSER")):
+        for view in registry_views:
+            try:
+                with winreg.OpenKey(hive, UNINSTALL_REGISTRY_KEY, 0, winreg.KEY_READ | view):
+                    return switch
+            except OSError:
+                continue
+    return "/CURRENTUSER"
+
+
 def launch_installer_after_exit(installer_path: Path) -> None:
-    """Wait for this process to exit so Inno Setup can replace the executable."""
+    """Wait for this process to exit, then replace the existing installation safely."""
     path_literal = "'" + str(installer_path).replace("'", "''") + "'"
-    arguments = "@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/CLOSEAPPLICATIONS')"
+    scope_switch = installed_scope_switch()
+    arguments = (
+        "@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"
+        f"'{scope_switch}','/CLOSEAPPLICATIONS','/RESTARTAPPLICATIONS')"
+    )
     command = (
         f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue; "
         f"Start-Process -FilePath {path_literal} -ArgumentList {arguments}"
@@ -695,7 +721,11 @@ def open_desktop_window(url: str, update_server_url: str | None = None) -> None:
         text_select=True,
         js_api=DesktopApi(update_server_url or url),
     )
-    webview.start(private_mode=False, storage_path=str(storage_path))
+    webview.start(
+        private_mode=False,
+        storage_path=str(storage_path),
+        icon=str(bundle_root() / WINDOW_ICON_PATH),
+    )
 
 
 def parse_arguments() -> argparse.Namespace:

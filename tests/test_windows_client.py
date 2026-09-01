@@ -45,8 +45,9 @@ class WindowsClientTests(unittest.TestCase):
         timer.return_value.start.assert_called_once_with()
 
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
+    @mock.patch('desktop.windows_client.installed_scope_switch', return_value='/ALLUSERS')
     @mock.patch('desktop.windows_client.subprocess.Popen')
-    def test_installer_launcher_waits_for_current_process(self, popen, _powershell):
+    def test_installer_launcher_waits_for_current_process(self, popen, _scope, _powershell):
         windows_client.launch_installer_after_exit(Path(r'C:\Temp\Manticore-Setup-2.0.0.exe'))
 
         command_arguments = popen.call_args.args[0]
@@ -55,6 +56,27 @@ class WindowsClientTests(unittest.TestCase):
         self.assertIn('Wait-Process -Id', command)
         self.assertIn('Start-Process -FilePath', command)
         self.assertIn('Manticore-Setup-2.0.0.exe', command)
+        self.assertIn("'/ALLUSERS'", command)
+        self.assertIn("'/RESTARTAPPLICATIONS'", command)
+
+    def test_desktop_window_uses_bundled_icon(self):
+        webview = mock.Mock()
+        with tempfile.TemporaryDirectory(prefix='manticore_window_') as directory:
+            root = Path(directory)
+            data_directory = root / 'data'
+            bundle_directory = root / 'bundle'
+            with (
+                mock.patch.dict('sys.modules', {'webview': webview}),
+                mock.patch('desktop.windows_client.application_data_directory', return_value=data_directory),
+                mock.patch('desktop.windows_client.bundle_root', return_value=bundle_directory),
+            ):
+                windows_client.open_desktop_window('https://manticore.example.test')
+
+        webview.start.assert_called_once_with(
+            private_mode=False,
+            storage_path=str(data_directory / 'webview'),
+            icon=str(bundle_directory / windows_client.WINDOW_ICON_PATH),
+        )
 
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
     @mock.patch('desktop.windows_client.win_verify_trust', return_value=windows_client.WINTRUST_UNTRUSTED_ROOT)

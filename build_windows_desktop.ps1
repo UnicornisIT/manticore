@@ -56,6 +56,15 @@ if ($CertificateThumbprint) {
 
 $BuildDirectory = Join-Path $ProjectRoot 'build'
 New-Item -ItemType Directory -Force -Path $BuildDirectory | Out-Null
+$PyInstallerWorkDirectory = Join-Path $BuildDirectory 'Manticore'
+if (Test-Path -LiteralPath $PyInstallerWorkDirectory) {
+    Get-ChildItem -LiteralPath $PyInstallerWorkDirectory -Force -Recurse | ForEach-Object {
+        $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+    }
+    $WorkDirectoryItem = Get-Item -LiteralPath $PyInstallerWorkDirectory -Force
+    $WorkDirectoryItem.Attributes = $WorkDirectoryItem.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+    Remove-Item -LiteralPath $PyInstallerWorkDirectory -Recurse -Force
+}
 $TrustPolicy = [ordered]@{
     github_repository = $Repository
     signer_certificate_sha256 = $SignerSha256
@@ -97,6 +106,7 @@ try {
 
     if (-not $SkipInstaller) {
         $CompilerCandidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
             (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
             (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
         ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
