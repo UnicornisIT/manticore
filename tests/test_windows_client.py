@@ -57,14 +57,28 @@ class WindowsClientTests(unittest.TestCase):
         self.assertIn('Manticore-Setup-2.0.0.exe', command)
 
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
+    @mock.patch('desktop.windows_client.win_verify_trust', return_value=windows_client.WINTRUST_UNTRUSTED_ROOT)
     @mock.patch('desktop.windows_client.subprocess.run')
-    def test_authenticode_signer_certificate_is_pinned(self, run, _powershell):
+    def test_authenticode_signer_certificate_is_pinned(self, run, verify_trust, _powershell):
         run.return_value = mock.Mock(returncode=0, stdout=('a' * 64) + '\n', stderr='')
         installer = Path(r'C:\Temp\Manticore-Setup-2.0.0.exe')
 
         windows_client.verify_authenticode_signature(installer, 'a' * 64)
+        verify_trust.assert_called_once_with(installer)
         with self.assertRaises(ValueError):
             windows_client.verify_authenticode_signature(installer, 'b' * 64)
+
+    @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
+    @mock.patch('desktop.windows_client.win_verify_trust', return_value=0x80096010)
+    @mock.patch('desktop.windows_client.subprocess.run')
+    def test_authenticode_rejects_a_bad_file_digest(self, run, _verify_trust, _powershell):
+        run.return_value = mock.Mock(returncode=0, stdout=('a' * 64) + '\n', stderr='')
+
+        with self.assertRaisesRegex(ValueError, '0x80096010'):
+            windows_client.verify_authenticode_signature(
+                Path(r'C:\Temp\Manticore-Setup-tampered.exe'),
+                'a' * 64,
+            )
 
     @mock.patch('desktop.windows_client.load_trust_policy')
     @mock.patch('desktop.windows_client.desktop_releases.fetch_release_by_tag')

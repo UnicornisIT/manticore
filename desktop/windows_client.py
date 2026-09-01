@@ -32,6 +32,8 @@ UPDATE_ENDPOINT = "/api/desktop/releases/windows"
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
 MAX_INSTALLER_SIZE = 256 * 1024 * 1024
 TRUST_POLICY_PATH = Path("desktop") / "trusted_update.json"
+WINTRUST_SUCCESS = 0x00000000
+WINTRUST_UNTRUSTED_ROOT = 0x800B0109
 _INSTANCE_MUTEX = None
 
 
@@ -421,11 +423,83 @@ def launch_installer_after_exit(installer_path: Path) -> None:
     )
 
 
+def win_verify_trust(installer_path: Path) -> int:
+    """Return the unsigned WinVerifyTrust result for an Authenticode-signed file."""
+    if os.name != "nt":
+        raise OSError("Проверка Authenticode доступна только в Windows.")
+
+    import ctypes
+    from ctypes import wintypes
+
+    class Guid(ctypes.Structure):
+        _fields_ = [
+            ("data1", wintypes.DWORD),
+            ("data2", wintypes.WORD),
+            ("data3", wintypes.WORD),
+            ("data4", ctypes.c_ubyte * 8),
+        ]
+
+    class WinTrustFileInfo(ctypes.Structure):
+        _fields_ = [
+            ("cb_struct", wintypes.DWORD),
+            ("file_path", wintypes.LPCWSTR),
+            ("file_handle", wintypes.HANDLE),
+            ("known_subject", ctypes.POINTER(Guid)),
+        ]
+
+    class WinTrustData(ctypes.Structure):
+        _fields_ = [
+            ("cb_struct", wintypes.DWORD),
+            ("policy_callback_data", wintypes.LPVOID),
+            ("sip_client_data", wintypes.LPVOID),
+            ("ui_choice", wintypes.DWORD),
+            ("revocation_checks", wintypes.DWORD),
+            ("union_choice", wintypes.DWORD),
+            ("file_info", ctypes.POINTER(WinTrustFileInfo)),
+            ("state_action", wintypes.DWORD),
+            ("state_data", wintypes.HANDLE),
+            ("url_reference", wintypes.LPCWSTR),
+            ("provider_flags", wintypes.DWORD),
+            ("ui_context", wintypes.DWORD),
+        ]
+
+    verify_action = Guid(
+        0x00AAC56B,
+        0xCD44,
+        0x11D0,
+        (ctypes.c_ubyte * 8)(0x8C, 0xC2, 0x00, 0xC0, 0x4F, 0xC2, 0x95, 0xEE),
+    )
+    file_path = str(Path(installer_path).resolve())
+    file_info = WinTrustFileInfo(ctypes.sizeof(WinTrustFileInfo), file_path, None, None)
+    trust_data = WinTrustData(
+        ctypes.sizeof(WinTrustData),
+        None,
+        None,
+        2,  # WTD_UI_NONE
+        0,
+        1,  # WTD_CHOICE_FILE
+        ctypes.pointer(file_info),
+        0,
+        None,
+        None,
+        0,
+        0,
+    )
+    verify = ctypes.WinDLL("wintrust", use_last_error=True).WinVerifyTrust
+    verify.argtypes = [wintypes.HWND, ctypes.POINTER(Guid), ctypes.POINTER(WinTrustData)]
+    verify.restype = ctypes.c_long
+    result = verify(None, ctypes.byref(verify_action), ctypes.byref(trust_data))
+    return ctypes.c_uint32(result).value
+
+
 def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: str) -> None:
     path_literal = "'" + str(installer_path).replace("'", "''") + "'"
     command = (
+        "$securityModule = Join-Path $env:SystemRoot "
+        "'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'; "
+        "Import-Module $securityModule -ErrorAction Stop; "
         f"$signature = Get-AuthenticodeSignature -LiteralPath {path_literal}; "
-        "if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) { exit 2 }; "
+        "if ($null -eq $signature.SignerCertificate) { exit 2 }; "
         "$sha = [System.Security.Cryptography.SHA256]::Create(); "
         "try { $hash = [BitConverter]::ToString($sha.ComputeHash($signature.SignerCertificate.RawData)).Replace('-', '') } "
         "finally { $sha.Dispose() }; Write-Output $hash"
@@ -441,9 +515,15 @@ def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: 
     output_lines = (completed.stdout or "").strip().splitlines()
     actual_hash = output_lines[-1].strip().lower() if output_lines else ""
     if completed.returncode != 0:
-        raise ValueError("Цифровая подпись Windows-установщика недействительна или не пользуется доверием.")
+        raise ValueError("Windows-установщик не содержит проверяемой цифровой подписи.")
     if not hmac.compare_digest(actual_hash, expected_signer_sha256.lower()):
         raise ValueError("Установщик подписан не тем сертификатом издателя.")
+    trust_result = win_verify_trust(installer_path)
+    if trust_result not in {WINTRUST_SUCCESS, WINTRUST_UNTRUSTED_ROOT}:
+        raise ValueError(
+            "Цифровая подпись Windows-установщика повреждена или недействительна "
+            f"(WinVerifyTrust 0x{trust_result:08X})."
+        )
 
 
 def offer_and_install_update(
