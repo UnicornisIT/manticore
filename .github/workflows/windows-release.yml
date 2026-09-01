@@ -64,13 +64,13 @@ jobs:
             Export-Certificate -Cert $certificate -FilePath $publicCertificatePath | Out-Null
             "cer_path=$publicCertificatePath" >> $env:GITHUB_OUTPUT
             Write-Host 'Trusting the self-signed certificate for this runner job.'
-            & certutil.exe -user -f -addstore Root $publicCertificatePath
+            & certutil.exe -f -addstore Root $publicCertificatePath
             if ($LASTEXITCODE -ne 0) {
-              throw 'Could not add the self-signed certificate to the current-user Root store.'
+              throw 'Could not add the self-signed certificate to the local-machine Root store.'
             }
-            & certutil.exe -user -f -addstore TrustedPublisher $publicCertificatePath
+            & certutil.exe -f -addstore TrustedPublisher $publicCertificatePath
             if ($LASTEXITCODE -ne 0) {
-              throw 'Could not add the self-signed certificate to the current-user TrustedPublisher store.'
+              throw 'Could not add the self-signed certificate to the local-machine TrustedPublisher store.'
             }
             Write-Host 'The self-signed certificate is trusted for this runner job.'
           }
@@ -120,7 +120,7 @@ jobs:
           }
 
           if ($env:CERTIFICATE_THUMBPRINT -match '^[0-9A-Fa-f]{40}$') {
-            foreach ($store in @('Cert:\CurrentUser\My', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\TrustedPublisher')) {
+            foreach ($store in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\Root', 'Cert:\LocalMachine\TrustedPublisher')) {
               $certificateItem = Join-Path $store $env:CERTIFICATE_THUMBPRINT
               if (Test-Path -LiteralPath $certificateItem) {
                 Remove-Item -LiteralPath $certificateItem -Force
