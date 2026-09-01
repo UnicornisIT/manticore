@@ -89,4 +89,9 @@ jobs:
       - name: Remove certificate file
         if: always()
         shell: powershell
-        run: Remove-Item -LiteralPath '${{ steps.certificate.outputs.pfx_path }}' -Force -ErrorAction SilentlyContinue
+        env:
+          CERTIFICATE_PATH: ${{ steps.certificate.outputs.pfx_path }}
+        run: |
+          if ($env:CERTIFICATE_PATH -and (Test-Path -LiteralPath $env:CERTIFICATE_PATH)) {
+            Remove-Item -LiteralPath $env:CERTIFICATE_PATH -Force
+          }
