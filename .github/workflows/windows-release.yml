@@ -28,7 +28,8 @@ jobs:
         shell: powershell
         run: |
           $version = (Get-Content VERSION -Raw).Trim().TrimStart('v', 'V')
-          if ('${{ github.ref_name }}' -ne "v$version") {
+          $allowedTags = @("v$version", "v$version-rebuild")
+          if ($allowedTags -notcontains '${{ github.ref_name }}') {
             throw "Tag ${{ github.ref_name }} does not match VERSION ($version)."
           }
 
