@@ -1,0 +1,92 @@
+name: Windows desktop release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-sign-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-desktop.txt
+
+      - name: Verify tag matches VERSION
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim().TrimStart('v', 'V')
+          if ('${{ github.ref_name }}' -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match VERSION ($version)."
+          }
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+
+      - name: Import code-signing certificate
+        id: certificate
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_BASE64 -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            throw 'Configure WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD repository secrets.'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate) {
+            throw 'The Windows code-signing certificate could not be imported.'
+          }
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          "pfx_path=$certificatePath" >> $env:GITHUB_OUTPUT
+
+      - name: Build and sign Windows installer
+        shell: powershell
+        run: .\build_windows_desktop.ps1 -CertificateThumbprint '${{ steps.certificate.outputs.thumbprint }}'
+
+      - name: Verify Authenticode signature
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim().TrimStart('v', 'V')
+          $installer = "dist\installer\Manticore-Setup-$version.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid') {
+            throw "Installer signature is not valid: $($signature.StatusMessage)"
+          }
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: dist/installer/Manticore-Setup-*.exe
+
+      - name: Publish GitHub Release asset
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem 'dist\installer\Manticore-Setup-*.exe' | Select-Object -ExpandProperty FullName -First 1
+          if (-not $installer) {
+            throw 'The Windows installer was not found.'
+          }
+          gh release create '${{ github.ref_name }}' $installer --verify-tag --generate-notes --title '${{ github.ref_name }}'
+
+      - name: Remove certificate file
+        if: always()
+        shell: powershell
+        run: Remove-Item -LiteralPath '${{ steps.certificate.outputs.pfx_path }}' -Force -ErrorAction SilentlyContinue

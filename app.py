@@ -23,6 +23,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from time import time
 import update_app
+import desktop_releases
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -86,6 +87,10 @@ except OSError:
     APP_VERSION = os.environ.get('APP_VERSION', '1.1.1')
 APP_UPDATE_ENABLED = env_bool('APP_UPDATE_ENABLED', os.name != 'nt')
 APP_UPDATE_STALE_SECONDS = env_int('APP_UPDATE_STALE_SECONDS', 3600, minimum=60)
+DESKTOP_GITHUB_REPOSITORY = os.environ.get(
+    'DESKTOP_GITHUB_REPOSITORY',
+    desktop_releases.DEFAULT_GITHUB_REPOSITORY,
+).strip()
 ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
 HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
 HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
@@ -9116,7 +9121,73 @@ def admin_panel():
         all_users=all_users,
         app_update_enabled=APP_UPDATE_ENABLED,
         app_update_status=get_app_update_status(),
+        desktop_release_approval=desktop_releases.load_approval(app.config['UPLOAD_FOLDER']),
+        desktop_github_repository=DESKTOP_GITHUB_REPOSITORY,
     )
+
+
+@app.route('/api/desktop/releases/windows')
+def desktop_release_api():
+    """Return the GitHub release approved by an administrator for desktop clients."""
+    approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
+    payload = {
+        'platform': 'windows',
+        'repository': DESKTOP_GITHUB_REPOSITORY,
+        'approved': bool(approval),
+        'approval': approval or None,
+    }
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/admin/desktop-release/status')
+@admin_required
+def desktop_release_status_api():
+    approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
+    try:
+        timeout = min(15.0, max(1.0, float(os.environ.get('DESKTOP_UPDATE_CHECK_TIMEOUT', '8'))))
+        latest = desktop_releases.fetch_latest_release(DESKTOP_GITHUB_REPOSITORY, timeout=timeout)
+        approved = bool(
+            approval
+            and approval.get('release_id') == latest.get('release_id')
+            and approval.get('asset_id') == latest.get('asset_id')
+            and hmac.compare_digest(approval.get('sha256', ''), latest.get('sha256', ''))
+        )
+        result = {'ok': True, 'latest': latest, 'approval': approval or None, 'approved': approved}
+    except (ValueError, desktop_releases.DesktopReleaseError) as exc:
+        result = {'ok': False, 'error': str(exc), 'approval': approval or None, 'approved': False}
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/admin/desktop-release/approve', methods=['POST'])
+@admin_required
+def approve_desktop_release():
+    try:
+        timeout = min(15.0, max(1.0, float(os.environ.get('DESKTOP_UPDATE_CHECK_TIMEOUT', '8'))))
+        release = desktop_releases.fetch_latest_release(DESKTOP_GITHUB_REPOSITORY, timeout=timeout)
+        approval = desktop_releases.approve_release(
+            app.config['UPLOAD_FOLDER'],
+            release,
+            approved_by=session.get('user', ''),
+        )
+        log_action(
+            'desktop_github_release_approved',
+            'desktop_release',
+            approval['version'],
+            f"repository={approval['repository']}; tag={approval['tag_name']}; sha256={approval['sha256']}",
+        )
+        flash(
+            f'GitHub Release {approval["tag_name"]} разрешён для Windows-клиентов.',
+            'success',
+        )
+    except (ValueError, desktop_releases.DesktopReleaseError) as exc:
+        flash(f'Не удалось разрешить GitHub Release: {exc}', 'error')
+    except OSError as exc:
+        flash(f'Не удалось сохранить разрешение обновления: {exc}', 'error')
+    return redirect(url_for('admin_panel'), code=303)
 
 
 def get_app_update_status_path():

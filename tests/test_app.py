@@ -79,6 +79,45 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIsNotNone(token_match)
         return token_match.group(1)
 
+    @mock.patch('app.desktop_releases.fetch_latest_release')
+    def test_admin_can_approve_windows_github_release(self, fetch_latest_release):
+        approval_path = os.path.join(TEST_UPLOAD_DIR, 'desktop_release_approval.json')
+        if os.path.exists(approval_path):
+            os.remove(approval_path)
+        fetch_latest_release.return_value = {
+            'repository': manticore.DESKTOP_GITHUB_REPOSITORY,
+            'release_id': 987,
+            'tag_name': 'v9.8.7',
+            'version': '9.8.7',
+            'name': 'v9.8.7',
+            'notes': 'Тестовый выпуск',
+            'html_url': 'https://github.com/UnicornisIT/manticore/releases/tag/v9.8.7',
+            'published_at': '2026-09-01T00:00:00Z',
+            'immutable': True,
+            'asset_id': 654,
+            'asset_name': 'Manticore-Setup-9.8.7.exe',
+            'download_url': 'https://github.com/UnicornisIT/manticore/releases/download/v9.8.7/Manticore-Setup-9.8.7.exe',
+            'sha256': 'a' * 64,
+            'size': 12345,
+        }
+        client = manticore.app.test_client()
+        self.login_session(client)
+        token = self.csrf_from_response(client.get('/admin_panel'))
+
+        response = client.post(
+            '/admin/desktop-release/approve',
+            data={'csrf_token': token},
+        )
+
+        self.assertEqual(response.status_code, 303)
+        manifest_response = client.get('/api/desktop/releases/windows')
+        self.assertEqual(manifest_response.status_code, 200)
+        manifest = manifest_response.get_json()
+        self.assertTrue(manifest['approved'])
+        self.assertEqual(manifest['approval']['version'], '9.8.7')
+        self.assertEqual(manifest['approval']['sha256'], 'a' * 64)
+        os.remove(approval_path)
+
     def test_custom_login_generation_rules_are_used_for_import(self):
         rules = manticore.get_default_login_generation_rules()
         rules.update({

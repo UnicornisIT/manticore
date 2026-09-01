@@ -231,6 +231,44 @@
         </div>
         <p class="app-update-note" style="margin-top: 14px;">Во время установки панель может быть недоступна несколько минут. Локальные настройки, загрузки и база данных сохраняются.</p>
     </section>
+    <section class="app-update-card" aria-labelledby="desktop-release-title">
+        <div class="app-update-heading">
+            <div>
+                <h2 id="desktop-release-title">Windows-приложение</h2>
+                <p>Проверка и разрешение последнего защищённого релиза из GitHub.</p>
+            </div>
+        </div>
+        <div class="app-update-versions">
+            <div class="app-update-version">
+                <span class="app-update-version-label">Разрешено администратором</span>
+                <span class="app-update-version-value" id="desktop-approved-version">
+                    {% if desktop_release_approval %}v{{ desktop_release_approval.version }}{% else %}Нет{% endif %}
+                </span>
+            </div>
+            <div class="app-update-version">
+                <span class="app-update-version-label">Последний GitHub Release</span>
+                <span class="app-update-version-value" id="desktop-github-version">Проверяем…</span>
+            </div>
+        </div>
+        <div class="app-update-status-row" aria-live="polite">
+            <span class="status-badge status-warning" id="desktop-release-status-badge">Проверка</span>
+            <span class="app-update-status-message" id="desktop-release-status-message">Проверяем {{ desktop_github_repository }}…</span>
+        </div>
+        <div class="app-update-actions">
+        <form method="post" action="{{ url_for('approve_desktop_release') }}">
+            {% include "_csrf_field.html" %}
+            <button
+                type="submit"
+                class="btn"
+                id="desktop-release-approve-button"
+                disabled
+                onclick="return confirm('Разрешить последний неизменяемый GitHub Release для Windows-клиентов?');"
+            >Разрешить последний GitHub Release</button>
+        </form>
+        <a class="app-update-release-link" id="desktop-github-release-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Открыть GitHub Release</a>
+        </div>
+        <p class="app-update-note" style="margin-top: 14px;">Клиент принимает только Immutable Release с SHA-256 digest из GitHub и установщиком с действительной цифровой подписью ожидаемого издателя.</p>
+    </section>
     <h2 class="admin-users-title">Пользователи с доступом к базе данных</h2>
     <div class="admin-users-table-wrap">
         <table class="admin-users-table">
@@ -354,6 +392,49 @@
     }
 
     loadUpdateStatus();
+})();
+(function () {
+    const statusUrl = {{ url_for('desktop_release_status_api') | tojson }};
+    const latestNode = document.getElementById('desktop-github-version');
+    const badgeNode = document.getElementById('desktop-release-status-badge');
+    const messageNode = document.getElementById('desktop-release-status-message');
+    const buttonNode = document.getElementById('desktop-release-approve-button');
+    const releaseLink = document.getElementById('desktop-github-release-link');
+
+    async function loadDesktopRelease() {
+        try {
+            const response = await window.fetch(statusUrl, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+            const data = await response.json();
+            if (!data.ok) {
+                throw new Error(data.error || 'GitHub Release не прошёл проверку');
+            }
+            const release = data.latest || {};
+            latestNode.textContent = release.version ? 'v' + release.version : 'Не найден';
+            badgeNode.textContent = data.approved ? 'Разрешён' : 'Ожидает';
+            badgeNode.className = 'status-badge ' + (data.approved ? 'status-success' : 'status-warning');
+            messageNode.textContent = data.approved
+                ? 'Этот Immutable Release уже разрешён Windows-клиентам.'
+                : 'Релиз проверен в GitHub и ожидает разрешения администратора.';
+            buttonNode.disabled = Boolean(data.approved);
+            buttonNode.textContent = data.approved ? 'Релиз уже разрешён' : 'Разрешить v' + release.version;
+            if (release.html_url && release.html_url.startsWith('https://github.com/')) {
+                releaseLink.href = release.html_url;
+                releaseLink.hidden = false;
+            }
+        } catch (error) {
+            latestNode.textContent = 'Ошибка проверки';
+            badgeNode.textContent = 'Ошибка';
+            badgeNode.className = 'status-badge status-danger';
+            messageNode.textContent = error.message || 'Не удалось проверить GitHub Release.';
+            buttonNode.disabled = true;
+            releaseLink.hidden = true;
+        }
+    }
+
+    loadDesktopRelease();
 })();
 </script>
 {% endblock %}
