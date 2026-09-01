@@ -1119,9 +1119,11 @@ class ManticoreAppTests(unittest.TestCase):
         body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Обновление панели', body)
+        self.assertIn('Обновление серверной панели', body)
         self.assertIn('/admin/app-update/status', body)
         self.assertIn('/admin/app-update/start', body)
+        self.assertIn('id="desktop-install-update-button"', body)
+        self.assertIn('install_approved_update', body)
 
     @mock.patch.object(manticore.update_app, 'fetch_latest_release')
     def test_admin_can_check_latest_release(self, fetch_latest_release):

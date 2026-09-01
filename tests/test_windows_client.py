@@ -29,6 +29,21 @@ class WindowsClientTests(unittest.TestCase):
         self.assertGreater(windows_client.version_key("2.0.0"), windows_client.version_key("1.9.9"))
         self.assertGreater(windows_client.version_key("1.0.0"), windows_client.version_key("1.0.0-rc.1"))
 
+    @mock.patch('desktop.windows_client.threading.Timer')
+    @mock.patch('desktop.windows_client.offer_and_install_update', return_value=True)
+    def test_desktop_api_starts_approved_update_and_closes_windows(self, install_update, timer):
+        api = windows_client.DesktopApi('https://manticore.example.test')
+
+        result = api.install_approved_update()
+
+        self.assertTrue(result['started'])
+        install_update.assert_called_once_with(
+            'https://manticore.example.test',
+            ask_confirmation=False,
+            show_check_errors=True,
+        )
+        timer.return_value.start.assert_called_once_with()
+
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
     @mock.patch('desktop.windows_client.subprocess.Popen')
     def test_installer_launcher_waits_for_current_process(self, popen, _powershell):

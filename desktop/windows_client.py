@@ -446,15 +446,52 @@ def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: 
         raise ValueError("Установщик подписан не тем сертификатом издателя.")
 
 
-def offer_and_install_update(server_url: str) -> bool:
+def offer_and_install_update(
+    server_url: str,
+    *,
+    ask_confirmation: bool = True,
+    show_check_errors: bool = False,
+) -> bool:
     if not server_url:
+        if show_check_errors:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "Не удалось проверить обновление",
+                "Сервер обновлений не настроен.",
+                parent=root,
+            )
+            root.destroy()
         return False
     try:
         manifest = fetch_update_manifest(server_url)
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         logging.warning("Update check failed: %s", exc)
+        if show_check_errors:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Не удалось проверить обновление", str(exc), parent=root)
+            root.destroy()
         return False
     if not manifest:
+        if show_check_errors:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo(
+                "Обновление Manticore",
+                "Разрешённая новая версия не найдена. На этом компьютере уже установлена последняя разрешённая версия либо администратор ещё не разрешил новый релиз.",
+                parent=root,
+            )
+            root.destroy()
         return False
 
     import tkinter as tk
@@ -466,7 +503,7 @@ def offer_and_install_update(server_url: str) -> bool:
     if manifest["notes"]:
         details += f"\n\n{manifest['notes']}"
     details += "\n\nСкачать и установить обновление сейчас?"
-    if not messagebox.askyesno("Обновление Manticore", details, parent=root):
+    if ask_confirmation and not messagebox.askyesno("Обновление Manticore", details, parent=root):
         root.destroy()
         return False
 
@@ -503,6 +540,38 @@ def offer_and_install_update(server_url: str) -> bool:
         return False
 
 
+class DesktopApi:
+    """Operations that are safe to expose to pages opened in the desktop shell."""
+
+    def __init__(self, update_server_url: str):
+        self.update_server_url = update_server_url
+
+    @staticmethod
+    def _close_windows() -> None:
+        import webview
+
+        for window in list(webview.windows):
+            try:
+                window.destroy()
+            except Exception:
+                logging.exception("Could not close a desktop window for the update")
+
+    def get_current_version(self) -> str:
+        return current_version()
+
+    def install_approved_update(self) -> dict:
+        started = offer_and_install_update(
+            self.update_server_url,
+            ask_confirmation=False,
+            show_check_errors=True,
+        )
+        if started:
+            timer = threading.Timer(0.25, self._close_windows)
+            timer.daemon = True
+            timer.start()
+        return {"started": started, "current_version": current_version()}
+
+
 class LocalServer:
     def __init__(self, database_path: str, admin_password: str | None, secret_key: str):
         database = Path(database_path).resolve()
@@ -532,7 +601,7 @@ class LocalServer:
         self._thread.join(timeout=5)
 
 
-def open_desktop_window(url: str) -> None:
+def open_desktop_window(url: str, update_server_url: str | None = None) -> None:
     import webview
 
     storage_path = application_data_directory() / "webview"
@@ -544,6 +613,7 @@ def open_desktop_window(url: str) -> None:
         height=860,
         min_size=(960, 640),
         text_select=True,
+        js_api=DesktopApi(update_server_url or url),
     )
     webview.start(private_mode=False, storage_path=str(storage_path))
 
@@ -569,7 +639,7 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
             return run_configured_client(config, args)
         if not args.skip_update and offer_and_install_update(target_url):
             return 0
-        open_desktop_window(target_url)
+        open_desktop_window(target_url, target_url)
         return 0
 
     database_path = normalize_database_path(config.get("database_path") or default_database_path())
@@ -588,7 +658,7 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
         update_server = config.get("update_server_url") or local_server.url
         if not args.skip_update and offer_and_install_update(update_server):
             return 0
-        open_desktop_window(local_server.url)
+        open_desktop_window(local_server.url, update_server)
     finally:
         local_server.stop()
     return 0

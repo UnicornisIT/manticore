@@ -198,8 +198,8 @@
     <section class="app-update-card" aria-labelledby="app-update-title">
         <div class="app-update-heading">
             <div>
-                <h2 id="app-update-title">Обновление панели</h2>
-                <p>Проверка и установка последнего опубликованного релиза с GitHub.</p>
+                <h2 id="app-update-title">Обновление серверной панели</h2>
+                <p>Обновляет код на сервере. Установленное Windows-приложение обновляется отдельно в блоке ниже.</p>
             </div>
         </div>
         <div class="app-update-versions">
@@ -266,8 +266,9 @@
             >Разрешить последний GitHub Release</button>
         </form>
         <a class="app-update-release-link" id="desktop-github-release-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Открыть GitHub Release</a>
+        <button type="button" class="btn" id="desktop-install-update-button" hidden>Обновить это приложение</button>
         </div>
-        <p class="app-update-note" style="margin-top: 14px;">Клиент принимает только Immutable Release с SHA-256 digest из GitHub и установщиком с действительной цифровой подписью ожидаемого издателя.</p>
+        <p class="app-update-note" id="desktop-install-update-note" style="margin-top: 14px;">Клиент принимает только Immutable Release с SHA-256 digest из GitHub и установщиком с действительной цифровой подписью ожидаемого издателя.</p>
     </section>
     <h2 class="admin-users-title">Пользователи с доступом к базе данных</h2>
     <div class="admin-users-table-wrap">
@@ -400,6 +401,54 @@
     const messageNode = document.getElementById('desktop-release-status-message');
     const buttonNode = document.getElementById('desktop-release-approve-button');
     const releaseLink = document.getElementById('desktop-github-release-link');
+    const installButton = document.getElementById('desktop-install-update-button');
+    const installNote = document.getElementById('desktop-install-update-note');
+    let latestRelease = null;
+    let latestApproved = false;
+
+    async function enableDesktopInstall() {
+        if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.install_approved_update) {
+            return;
+        }
+        installButton.hidden = false;
+        try {
+            const installedVersion = await window.pywebview.api.get_current_version();
+            installButton.dataset.installedVersion = installedVersion || '';
+            if (latestRelease && latestRelease.version) {
+                installButton.disabled = !latestApproved || latestRelease.version === installedVersion;
+                installButton.textContent = latestRelease.version === installedVersion
+                    ? 'На этом компьютере установлена v' + installedVersion
+                    : 'Установить v' + latestRelease.version + ' на этом компьютере';
+            }
+        } catch (error) {
+            installNote.textContent = 'Не удалось определить версию установленного Windows-приложения.';
+        }
+    }
+
+    installButton.addEventListener('click', async function () {
+        const targetVersion = latestRelease && latestRelease.version ? ' v' + latestRelease.version : '';
+        if (!window.confirm('Скачать и установить последнюю разрешённую версию' + targetVersion + ' на этом компьютере? Manticore закроется для установки.')) {
+            return;
+        }
+        installButton.disabled = true;
+        installButton.textContent = 'Загрузка и проверка обновления…';
+        installNote.textContent = 'Не закрывайте приложение: установщик скачивается и проверяется.';
+        try {
+            const result = await window.pywebview.api.install_approved_update();
+            if (result && result.started) {
+                installButton.textContent = 'Запускается установщик…';
+                installNote.textContent = 'Manticore сейчас закроется и установит обновление.';
+            } else {
+                installButton.disabled = false;
+                installButton.textContent = 'Обновить это приложение';
+                installNote.textContent = 'Обновление не запущено. Проверьте сообщение Windows-клиента.';
+            }
+        } catch (error) {
+            installButton.disabled = false;
+            installButton.textContent = 'Повторить обновление';
+            installNote.textContent = 'Не удалось запустить обновление: ' + (error.message || error);
+        }
+    });
 
     async function loadDesktopRelease() {
         try {
@@ -412,6 +461,8 @@
                 throw new Error(data.error || 'GitHub Release не прошёл проверку');
             }
             const release = data.latest || {};
+            latestRelease = release;
+            latestApproved = Boolean(data.approved);
             latestNode.textContent = release.version ? 'v' + release.version : 'Не найден';
             badgeNode.textContent = data.approved ? 'Разрешён' : 'Ожидает';
             badgeNode.className = 'status-badge ' + (data.approved ? 'status-success' : 'status-warning');
@@ -424,6 +475,13 @@
                 releaseLink.href = release.html_url;
                 releaseLink.hidden = false;
             }
+            if (!installButton.hidden && release.version) {
+                const installedVersion = installButton.dataset.installedVersion || '';
+                installButton.disabled = !data.approved || installedVersion === release.version;
+                installButton.textContent = installedVersion === release.version
+                    ? 'На этом компьютере установлена v' + installedVersion
+                    : 'Установить v' + release.version + ' на этом компьютере';
+            }
         } catch (error) {
             latestNode.textContent = 'Ошибка проверки';
             badgeNode.textContent = 'Ошибка';
@@ -434,7 +492,9 @@
         }
     }
 
+    window.addEventListener('pywebviewready', enableDesktopInstall);
     loadDesktopRelease();
+    enableDesktopInstall();
 })();
 </script>
 {% endblock %}
