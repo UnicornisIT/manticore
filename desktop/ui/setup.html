@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Настройка Manticore</title>
+  <link rel="stylesheet" href="setup.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+  <main class="setup-shell" aria-live="polite">
+    <header class="brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <span><strong>Manticore</strong><small id="version-label"></small></span>
+    </header>
+
+    <section id="loading-view" class="view loading-view">
+      <span class="spinner" aria-hidden="true"></span>
+      <h1>Запуск Manticore…</h1>
+      <p>Подготавливаем настройку рабочего места</p>
+    </section>
+
+    <section id="configuration-view" class="view" hidden>
+      <div class="view-heading">
+        <p class="eyebrow">Первый запуск</p>
+        <h1>Настройка рабочего места</h1>
+        <p>Выберите, где Manticore будет хранить и обрабатывать данные.</p>
+      </div>
+      <form id="configuration-form" novalidate>
+        <fieldset class="mode-grid" aria-label="Режим работы">
+          <label class="mode-card">
+            <input type="radio" name="mode" value="remote">
+            <span class="mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6.5h16v11H4zM8 20h8M12 17.5V20"/></svg></span>
+            <span><strong>Общий сервер</strong><small>Работа с общей базой организации</small></span>
+            <span class="mode-check" aria-hidden="true">✓</span>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="mode" value="local">
+            <span class="mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg></span>
+            <span><strong>Локальная база</strong><small>Данные хранятся только на этом ПК</small></span>
+            <span class="mode-check" aria-hidden="true">✓</span>
+          </label>
+        </fieldset>
+
+        <div id="remote-fields" class="fields-panel">
+          <label for="server-url">Адрес сервера</label>
+          <input id="server-url" type="url" spellcheck="false" autocomplete="url" placeholder="https://manticore.example.ru">
+          <p class="field-hint"><span class="secure-dot" aria-hidden="true"></span> Для удалённого подключения обязательно используется HTTPS.</p>
+        </div>
+
+        <div id="local-fields" class="fields-panel" hidden>
+          <label for="database-path">Файл локальной базы</label>
+          <div class="input-action">
+            <input id="database-path" type="text" spellcheck="false" autocomplete="off">
+            <button type="button" class="button secondary" id="browse-database">Выбрать…</button>
+          </div>
+          <label for="update-server-url">Сервер обновлений <span>необязательно</span></label>
+          <input id="update-server-url" type="url" spellcheck="false" autocomplete="url" placeholder="https://manticore.example.ru">
+          <p class="field-hint">Пустое значение использует настройки локального сервера.</p>
+        </div>
+
+        <div class="form-error" id="configuration-error" role="alert" hidden></div>
+        <footer class="actions">
+          <button type="button" class="button ghost" data-cancel>Отмена</button>
+          <button type="submit" class="button primary" id="configuration-submit">Сохранить и открыть</button>
+        </footer>
+      </form>
+    </section>
+
+    <section id="password-view" class="view" hidden>
+      <div class="view-heading">
+        <p class="eyebrow">Локальная база</p>
+        <h1>Создание администратора</h1>
+        <p>В этой базе ещё нет администратора. Создайте пароль для пользователя <strong>admin</strong>.</p>
+      </div>
+      <form id="password-form" novalidate>
+        <div class="fields-panel password-fields">
+          <label for="admin-password">Новый пароль</label>
+          <input id="admin-password" type="password" minlength="8" autocomplete="new-password" autofocus>
+          <label for="admin-password-repeat">Повторите пароль</label>
+          <input id="admin-password-repeat" type="password" minlength="8" autocomplete="new-password">
+          <p class="field-hint">Не менее 8 символов. Пароль не сохраняется в конфигурации клиента.</p>
+        </div>
+        <div class="form-error" id="password-error" role="alert" hidden></div>
+        <footer class="actions">
+          <button type="button" class="button ghost" data-cancel>Отмена</button>
+          <button type="submit" class="button primary" id="password-submit">Создать и продолжить</button>
+        </footer>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

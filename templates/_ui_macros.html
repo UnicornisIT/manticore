@@ -5,3 +5,16 @@
     </svg>
 </span>
 {%- endmacro %}
+
+{% macro badge(text, tone='neutral') -%}
+<span class="badge badge-{{ tone }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro empty_state(title, description='', action_url='', action_label='') -%}
+<section class="empty-state" role="status">
+    <span class="empty-state-icon" aria-hidden="true">—</span>
+    <h2>{{ title }}</h2>
+    {% if description %}<p>{{ description }}</p>{% endif %}
+    {% if action_url and action_label %}<a class="btn" href="{{ action_url }}">{{ action_label }}</a>{% endif %}
+</section>
+{%- endmacro %}

@@ -1,28 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Глобальный поиск{% endblock %}
 {% block head %}
-<style>
-    .search-form {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 18px;
-    }
-    .search-form input {
-        box-sizing: border-box;
-        height: 38px;
-        min-width: 360px;
-        padding: 8px 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-    }
-    @media (max-width: 560px) {
-        .search-form input {
-            min-width: 0;
-            width: 100%;
-        }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/search.css') }}">
 {% endblock %}
 {% block content %}
 <h1>Глобальный поиск</h1>

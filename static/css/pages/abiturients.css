@@ -1,0 +1,337 @@
+.abiturients-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.filter-panel {
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.filter-panel-summary {
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 13px;
+    list-style: none;
+    cursor: pointer;
+}
+
+.filter-panel-summary::-webkit-details-marker,
+.export-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.filter-panel-summary > span {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+}
+
+.filter-panel-summary strong {
+    font-size: 13px;
+}
+
+.filter-panel-summary small {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.filter-panel-summary > svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 1.8;
+    transition: transform var(--motion-fast);
+}
+
+.filter-panel[open] .filter-panel-summary > svg {
+    transform: rotate(180deg);
+}
+
+.abiturients-filter {
+    padding: 0 13px 13px;
+    border-top: 1px solid var(--border);
+}
+
+.filter-fields {
+    display: grid;
+    grid-template-columns: minmax(250px, 1.5fr) repeat(4, minmax(155px, 1fr));
+    gap: 8px;
+    padding-top: 12px;
+}
+
+.filter-fields input,
+.filter-fields select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.export-menu {
+    position: relative;
+}
+
+.export-menu > summary {
+    list-style: none;
+}
+
+.export-menu > summary svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.export-menu-panel {
+    position: absolute;
+    z-index: 15;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 210px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+}
+
+.export-menu-panel a {
+    display: block;
+    padding: 8px 9px;
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.export-menu-panel a:hover {
+    background: var(--bg-subtle);
+}
+
+.bulk-toolbar {
+    position: sticky;
+    top: calc(var(--topbar-height) + 8px);
+    z-index: 12;
+    width: max-content;
+    max-width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 9px 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+}
+
+.bulk-toolbar[hidden] {
+    display: none !important;
+}
+
+.bulk-toolbar-label {
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.bulk-toolbar-label strong {
+    color: var(--accent);
+}
+
+.bulk-select-shell {
+    position: relative;
+    display: inline-flex;
+}
+
+.bulk-toolbar select,
+.bulk-toolbar .btn {
+    height: 34px;
+    margin: 0;
+}
+
+.bulk-toolbar select {
+    min-width: 230px;
+    padding-right: 34px;
+    appearance: none;
+}
+
+.bulk-select-shell::after {
+    content: "";
+    position: absolute;
+    right: 13px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-right: 1.5px solid var(--text-muted);
+    border-bottom: 1.5px solid var(--text-muted);
+    transform: translateY(-65%) rotate(45deg);
+    pointer-events: none;
+}
+
+.abiturients-table-wrap {
+    max-width: 100%;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    scrollbar-gutter: stable;
+}
+
+.abiturients-table {
+    min-width: 1260px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.abiturients-table th,
+.abiturients-table td {
+    vertical-align: middle;
+}
+
+.abiturients-table .selection-cell {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    padding-inline: 8px;
+    text-align: center;
+    background: var(--bg-surface);
+}
+
+.abiturients-table thead .selection-cell {
+    z-index: 7;
+    background: var(--bg-subtle) !important;
+}
+
+.abiturients-table .fio-header,
+.abiturients-table .fio-cell {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    min-width: 200px;
+    max-width: 250px;
+    background: var(--bg-surface);
+    box-shadow: 1px 0 0 var(--border);
+}
+
+.abiturients-table.has-selection .fio-header,
+.abiturients-table.has-selection .fio-cell {
+    left: 42px;
+}
+
+.abiturients-table .fio-header {
+    z-index: 6;
+    background: var(--bg-subtle) !important;
+}
+
+.abiturients-table .fio-cell {
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+.abiturients-table tbody tr:hover .selection-cell,
+.abiturients-table tbody tr:hover .fio-cell {
+    background: color-mix(in srgb, var(--accent-soft) 48%, var(--bg-surface));
+}
+
+.abiturients-table tbody tr.is-selected .selection-cell,
+.abiturients-table tbody tr.is-selected .fio-cell {
+    background: var(--accent-soft);
+}
+
+.abiturients-table .name-part-cell {
+    min-width: 120px;
+}
+
+.abiturients-table .name-detail-cell {
+    min-width: 180px;
+    white-space: normal;
+}
+
+.abiturients-table .table-actions-heading,
+.abiturients-table .action-cell {
+    position: sticky;
+    right: 0;
+    z-index: 4;
+    min-width: 108px;
+    width: 108px;
+    white-space: nowrap;
+    background: var(--bg-surface);
+    box-shadow: -1px 0 0 var(--border);
+    text-align: center;
+}
+
+.abiturients-table .table-actions-heading {
+    z-index: 7;
+    background: var(--bg-subtle) !important;
+}
+
+.abiturients-table tbody tr:hover .action-cell {
+    background: color-mix(in srgb, var(--accent-soft) 48%, var(--bg-surface));
+}
+
+@media (max-width: 1500px) {
+    .filter-fields {
+        grid-template-columns: repeat(3, minmax(170px, 1fr));
+    }
+
+    .filter-fields input:first-of-type {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 900px) {
+    .filter-fields {
+        grid-template-columns: repeat(2, minmax(150px, 1fr));
+    }
+
+    .filter-panel-summary small {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .filter-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-fields input:first-of-type {
+        grid-column: auto;
+    }
+
+    .bulk-toolbar,
+    .bulk-select-shell,
+    .bulk-toolbar select,
+    .bulk-toolbar .btn {
+        width: 100%;
+    }
+}

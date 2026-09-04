@@ -1,136 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Вход{% endblock %}
 {% block head %}
-<style>
-    .login-page {
-        min-height: 60vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 24px 0;
-    }
-    .login-card {
-        width: 100%;
-        max-width: 420px;
-        box-sizing: border-box;
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(44, 62, 80, 0.10);
-        padding: 38px 36px 30px;
-    }
-    .login-logo {
-        display: block;
-        width: min(230px, 100%);
-        height: auto;
-        margin: 0 auto 18px;
-    }
-    .login-card h2 {
-        margin: 0 0 24px;
-        text-align: center;
-        color: #2563eb;
-        font-size: 28px;
-    }
-    .login-field {
-        margin-bottom: 18px;
-    }
-    .login-field label {
-        display: block;
-        margin-bottom: 7px;
-        font-weight: 600;
-        color: #111827;
-    }
-    .login-field input {
-        width: 100%;
-        height: 38px;
-        box-sizing: border-box;
-        padding: 8px 11px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #fff;
-        color: #111827;
-        font-size: 15px;
-        outline: none;
-        transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .login-field input:focus {
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-    }
-    .login-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        margin-top: 24px;
-    }
-    .login-actions .btn {
-        width: 100%;
-        height: 38px;
-        margin: 0;
-        padding: 0 16px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 6px;
-        font-weight: 600;
-    }
-    .login-actions .btn:disabled {
-        opacity: 0.75;
-        cursor: wait;
-    }
-    .login-btn-secondary {
-        background: #e5e7eb;
-        color: #1f2937;
-    }
-    .login-btn-secondary:hover,
-    .login-btn-secondary:focus {
-        background: #d1d5db;
-    }
-    .login-message {
-        margin: 2px 0 18px;
-        padding: 10px 12px;
-        border-radius: 8px;
-        text-align: center;
-        font-weight: 500;
-        line-height: 1.35;
-    }
-    .login-message.error {
-        color: #991b1b;
-        background: #fee2e2;
-        border: 1px solid #fecaca;
-    }
-    .login-message.success {
-        color: #14532d;
-        background: #dcfce7;
-        border: 1px solid #bbf7d0;
-    }
-    .login-message.info,
-    .login-message.message {
-        color: #1e3a8a;
-        background: #dbeafe;
-        border: 1px solid #bfdbfe;
-    }
-    @media (max-width: 520px) {
-        .login-card {
-            padding: 30px 22px 24px;
-        }
-        .login-actions {
-            grid-template-columns: 1fr;
-        }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/login.css') }}">
 {% endblock %}
 {% block content %}
 <div class="login-page">
     <form method="post" class="login-card" data-login-form>
-        <img src="{{ url_for('static', filename='images/manticore-logo.png') }}" alt="manticore" class="login-logo">
-        <h2>Вход</h2>
+        <img src="{{ url_for('static', filename='images/manticore-logo.png') }}" alt="Manticore" class="login-logo logo-light">
+        <img src="{{ url_for('static', filename='images/manticore-logo-dark.png') }}" alt="Manticore" class="login-logo logo-dark">
+        <h2>Manticore</h2>
+        <p class="login-subtitle">Система управления приёмной кампанией</p>
         {% include "_csrf_field.html" %}
         <div class="login-field">
-            <label for="username">Логин:</label>
+            <label for="username">Логин</label>
             <input type="text" id="username" name="username" value="{{ username|default('', true) }}" required autocomplete="username">
         </div>
         <div class="login-field">
-            <label for="password">Пароль:</label>
+            <label for="password">Пароль</label>
             <input type="password" id="password" name="password" required autocomplete="current-password">
         </div>
         {% with messages = get_flashed_messages(with_categories=true) %}

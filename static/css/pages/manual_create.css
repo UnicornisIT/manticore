@@ -1,0 +1,230 @@
+.manual-create-page {
+        max-width: 980px;
+    }
+    .manual-create-card {
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--bg-surface);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, .05);
+    }
+    .manual-create-subtitle {
+        max-width: 760px;
+        margin: -10px 0 22px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+    .manual-mode-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+    }
+    .manual-mode {
+        position: relative;
+        display: flex;
+        gap: 12px;
+        min-height: 76px;
+        padding: 16px;
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        background: var(--bg-surface);
+        cursor: pointer;
+        transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+    .manual-mode:has(input:checked) {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        box-shadow: var(--focus-ring);
+    }
+    .manual-mode input {
+        width: 18px;
+        height: 18px;
+        margin: 2px 0 0;
+        accent-color: var(--accent);
+        flex: 0 0 auto;
+    }
+    .manual-mode-title {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-primary);
+        font-weight: 700;
+    }
+    .manual-mode-description {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.4;
+    }
+    .manual-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+    }
+    .manual-field {
+        min-width: 0;
+    }
+    .manual-field--wide {
+        grid-column: 1 / -1;
+    }
+    .manual-field label {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+    .manual-field input,
+    .manual-field select {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 44px;
+        padding: 9px 12px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font: inherit;
+    }
+    .manual-field input:focus,
+    .manual-field select:focus {
+        border-color: var(--accent);
+        outline: 3px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    }
+    .manual-field-hint {
+        margin-top: 6px;
+        color: var(--text-muted);
+        font-size: 13px;
+        line-height: 1.4;
+    }
+    .manual-settings {
+        margin-top: 18px;
+        padding: 18px;
+        border: 1px solid var(--info-border);
+        border-radius: 10px;
+        background: var(--bg-subtle);
+    }
+    .manual-settings-title {
+        margin: 0 0 14px;
+        color: var(--info);
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .manual-contract-note {
+        margin: 18px 0 0;
+        padding: 14px 16px;
+        border-radius: 10px;
+        background: var(--info-soft);
+        color: var(--info);
+        line-height: 1.5;
+    }
+    .manual-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 20px;
+    }
+    .manual-actions .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 42px;
+        margin: 0;
+        padding: 0 20px;
+    }
+    .manual-message {
+        margin-bottom: 18px;
+        padding: 14px 16px;
+        border: 1px solid;
+        border-radius: 10px;
+        line-height: 1.45;
+    }
+    .manual-message--success { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+    .manual-message--warning { border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning); }
+    .manual-message--error { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+    .manual-message--info { border-color: var(--info-border); background: var(--info-soft); color: var(--info); }
+    .manual-result {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 0 0 18px;
+        padding: 16px;
+        border: 1px solid var(--success-border);
+        border-radius: 12px;
+        background: var(--success-soft);
+    }
+    .manual-result-item {
+        min-width: 0;
+    }
+    .manual-result-label {
+        display: block;
+        margin-bottom: 3px;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+    .manual-result-value {
+        display: block;
+        overflow-wrap: anywhere;
+        color: var(--success);
+        font-weight: 700;
+    }
+    .manual-collisions {
+        margin: 0 0 18px;
+        overflow-x: auto;
+        border: 1px solid var(--warning-border);
+        border-radius: 10px;
+    }
+    .manual-collisions table {
+        width: 100%;
+        min-width: 680px;
+        border-collapse: collapse;
+        background: var(--bg-surface);
+    }
+    .manual-collisions th,
+    .manual-collisions td {
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: break-word;
+    }
+    .manual-collisions th {
+        background: var(--warning-soft);
+        color: var(--warning);
+        font-size: 13px;
+    }
+    .manual-collisions tr:last-child td {
+        border-bottom: 0;
+    }
+    .manual-confirm {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        margin-top: 18px;
+        padding: 13px 14px;
+        border: 1px solid var(--warning-border);
+        border-radius: 9px;
+        background: var(--warning-soft);
+        color: var(--warning);
+        cursor: pointer;
+    }
+    .manual-confirm input {
+        width: 18px;
+        height: 18px;
+        margin: 1px 0 0;
+        accent-color: var(--warning);
+        flex: 0 0 auto;
+    }
+    [hidden] { display: none !important; }
+    @media (max-width: 720px) {
+        .manual-mode-grid,
+        .manual-fields,
+        .manual-result {
+            grid-template-columns: 1fr;
+        }
+        .manual-field--wide {
+            grid-column: auto;
+        }
+        .manual-create-card {
+            padding: 18px;
+        }
+    }

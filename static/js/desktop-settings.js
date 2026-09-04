@@ -1,0 +1,16 @@
+(function(){
+  'use strict';
+  const root=document.querySelector('[data-desktop-settings]');if(!root)return;
+  const themeButtons=Array.from(root.querySelectorAll('[data-theme-value]'));
+  const syncTheme=()=>{const current=window.ManticoreTheme?.get()||'system';themeButtons.forEach(button=>{const selected=button.dataset.themeValue===current;button.classList.toggle('is-active',selected);button.setAttribute('aria-checked',String(selected))})};
+  themeButtons.forEach(button=>button.addEventListener('click',()=>{window.ManticoreTheme?.set(button.dataset.themeValue);syncTheme()}));syncTheme();
+  let initialized=false;
+  async function initializeDesktop(){if(initialized||!window.pywebview?.api)return;initialized=true;root.querySelectorAll('[data-desktop-only]').forEach(item=>item.hidden=false);root.querySelector('[data-browser-only]').hidden=true;const info=await window.pywebview.api.get_client_info();document.getElementById('desktop-version').textContent=`Manticore ${info.version}`;document.getElementById('desktop-mode').textContent=info.mode==='local'?'Локальная база':'Общий сервер';document.getElementById('desktop-source').textContent=info.mode==='local'?info.database_path:info.server_url}
+  window.addEventListener('pywebviewready',initializeDesktop,{once:true});setTimeout(initializeDesktop,100);
+  const status=root.querySelector('[data-client-status]');
+  root.querySelector('[data-open-config]').addEventListener('click',async event=>{event.currentTarget.disabled=true;status.textContent='Открыта настройка подключения…';const result=await window.pywebview.api.reconfigure();status.textContent=result.saved?'Настройки сохранены. Перезапустите Manticore, чтобы применить их.':'Настройки не изменены.';event.currentTarget.disabled=false});
+  root.querySelector('[data-open-log]').addEventListener('click',async()=>{const result=await window.pywebview.api.open_log();status.textContent=result.ok?'Журнал открыт в системном приложении.':result.error});
+  const updateStatus=root.querySelector('[data-update-status]'),badge=root.querySelector('[data-update-badge]'),install=root.querySelector('[data-install-update]');
+  root.querySelector('[data-check-update]').addEventListener('click',async event=>{event.currentTarget.disabled=true;updateStatus.textContent='Проверяем разрешённые версии…';const result=await window.pywebview.api.check_for_update();event.currentTarget.disabled=false;if(!result.ok){badge.textContent='Ошибка';badge.className='status-pill status-danger';updateStatus.textContent=result.error;return}if(!result.available){badge.textContent='Последняя версия';badge.className='status-pill status-success';updateStatus.textContent=`Установлена актуальная версия ${result.current_version}.`;install.hidden=true;return}badge.textContent='Доступно';badge.className='status-pill status-info';updateStatus.textContent=`Доступна версия ${result.version}. ${result.notes||''}`;install.hidden=false});
+  install.addEventListener('click',async()=>{install.disabled=true;updateStatus.textContent='Скачиваем и проверяем цифровую подпись…';const result=await window.pywebview.api.install_approved_update();if(!result.started){install.disabled=false;updateStatus.textContent='Обновление не было запущено. Подробности сохранены в журнале.'}});
+})();

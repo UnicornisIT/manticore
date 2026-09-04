@@ -1,0 +1,167 @@
+.checks-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 22px;
+    }
+    .checks-header h1 {
+        margin-bottom: 8px;
+    }
+    .checks-subtitle {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 17px;
+        font-weight: 600;
+    }
+    .checks-total {
+        min-width: 190px;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-subtle);
+        text-align: center;
+    }
+    .checks-total strong {
+        display: block;
+        color: var(--accent);
+        font-size: 30px;
+    }
+    .checks-total span {
+        color: var(--text-secondary);
+    }
+    .checks-section {
+        border-top: 1px solid var(--border);
+        padding-top: 18px;
+        margin-top: 22px;
+    }
+    .checks-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+    .check-item {
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+    }
+    .check-item.success {
+        background: var(--success-soft);
+        border-color: var(--success-border);
+    }
+    .check-item.warning {
+        background: var(--warning-soft);
+        border-color: var(--warning-border);
+    }
+    .check-item.info {
+        background: var(--info-soft);
+        border-color: var(--info-border);
+    }
+    .check-item.expandable {
+        padding: 0;
+        overflow: hidden;
+    }
+    .check-item.expandable > summary {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px;
+        cursor: pointer;
+        list-style: none;
+    }
+    .check-expanded-content {
+        padding: 0 14px 14px 14px;
+        border-top: 1px solid var(--border);
+    }
+    .check-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .checks-section-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .checks-info-label {
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: var(--info-soft);
+        color: var(--info);
+        font-size: 12px;
+        font-weight: 700;
+    }
+    .check-topline {
+        display: flex;
+        flex: 1 1 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .check-topline h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: 18px;
+    }
+    .check-count {
+        min-width: 42px;
+        color: var(--accent);
+        font-size: 24px;
+        font-weight: 800;
+        text-align: right;
+    }
+    .check-description {
+        margin: 8px 0 12px 0;
+        color: var(--text-secondary);
+        line-height: 1.4;
+    }
+    .check-samples {
+        margin: 0 0 12px 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+        justify-content: stretch;
+        list-style: none;
+    }
+    .check-samples li {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--bg-surface) 75%, transparent);
+    }
+    .sample-title {
+        display: block;
+        color: var(--text-primary);
+        font-weight: 700;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .sample-detail {
+        display: block;
+        margin-top: 2px;
+        color: var(--text-muted);
+        font-size: 13px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .check-ok {
+        color: var(--success);
+        font-weight: 700;
+    }
+    @media (max-width: 900px) {
+        .checks-header {
+            display: block;
+        }
+        .checks-total {
+            margin-top: 14px;
+            text-align: left;
+        }
+        .checks-grid {
+            grid-template-columns: 1fr;
+        }
+    }

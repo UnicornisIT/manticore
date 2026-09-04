@@ -1,0 +1,20 @@
+.search-form {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .search-form input {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 360px;
+        padding: 8px 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+    }
+    @media (max-width: 560px) {
+        .search-form input {
+            min-width: 0;
+            width: 100%;
+        }
+    }

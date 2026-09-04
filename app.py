@@ -7436,6 +7436,11 @@ def documentation():
     """Render the read-only in-app user guide."""
     return render_template('documentation.html')
 
+@app.route('/desktop_settings')
+@login_required
+def desktop_settings():
+    return render_template('desktop_settings.html')
+
 @app.route('/search')
 @login_required
 def search():

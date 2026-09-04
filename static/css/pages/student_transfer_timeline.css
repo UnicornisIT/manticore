@@ -1,0 +1,183 @@
+.student-movement-timeline {
+        position: relative;
+        min-height: 138px;
+        overflow-x: auto;
+        padding: 18px 12px 18px 40px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-elevated) 75%, transparent);
+    }
+    .student-movement-timeline::before {
+        content: "";
+        position: absolute;
+        top: 62px;
+        left: 20px;
+        right: 12px;
+        height: 13px;
+        border-radius: 999px;
+        background: var(--border);
+    }
+    .student-movement-timeline::after {
+        content: "";
+        position: absolute;
+        top: 54px;
+        left: 10px;
+        width: 24px;
+        height: 24px;
+        border-left: 8px solid var(--border);
+        border-bottom: 8px solid var(--border);
+        transform: rotate(45deg);
+    }
+    .student-movement-items {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        gap: 72px;
+        min-width: max-content;
+        padding: 0 12px 8px 0;
+    }
+    .student-movement-item {
+        appearance: none;
+        width: min(340px, calc(100vw - 96px));
+        min-height: 106px;
+        padding: 17px 18px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.18);
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.08s ease;
+    }
+    .student-movement-item:hover,
+    .student-movement-item:focus {
+        border-color: var(--accent);
+        box-shadow: 0 12px 26px rgba(37, 99, 235, 0.18);
+    }
+    .student-movement-item:focus-visible {
+        outline: 0;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22), 0 12px 26px rgba(37, 99, 235, 0.18);
+    }
+    .student-movement-item:active {
+        transform: translateY(1px);
+    }
+    .student-movement-date {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-muted);
+        font-weight: 800;
+    }
+    .student-movement-dot {
+        width: 23px;
+        height: 23px;
+        flex: 0 0 23px;
+        border-radius: 50%;
+        background: var(--border-strong);
+    }
+    .student-movement-title {
+        display: block;
+        margin-top: 10px;
+        color: var(--text-primary);
+        font-size: 22px;
+        font-weight: 900;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-subtitle {
+        display: block;
+        margin-top: 6px;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-modal[hidden] {
+        display: none;
+    }
+    .student-movement-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+    }
+    .student-movement-backdrop {
+        position: absolute;
+        inset: 0;
+        background: var(--overlay);
+    }
+    .student-movement-panel {
+        position: relative;
+        z-index: 1;
+        width: min(720px, 100%);
+        max-height: calc(100vh - 48px);
+        overflow-y: auto;
+        padding: 26px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        box-shadow: 0 22px 48px rgba(15, 23, 42, 0.28);
+    }
+    .student-movement-panel h4 {
+        margin: 0 0 20px 0;
+        color: var(--text-primary);
+        font-size: 24px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-details {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px 52px;
+        margin: 0;
+    }
+    .student-movement-details div {
+        min-width: 0;
+    }
+    .student-movement-details dt {
+        margin: 0 0 3px 0;
+        color: var(--text-primary);
+        font-weight: 800;
+    }
+    .student-movement-details dd {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 16px;
+        overflow-wrap: anywhere;
+    }
+    .student-movement-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 10px;
+        margin-top: 28px;
+        flex-wrap: wrap;
+    }
+    .student-movement-actions .btn {
+        min-width: 118px;
+    }
+    .student-movement-empty {
+        margin: 0;
+        color: var(--text-muted);
+    }
+    @media (max-width: 720px) {
+        .student-movement-timeline {
+            padding-left: 24px;
+        }
+        .student-movement-items {
+            gap: 28px;
+        }
+        .student-movement-details {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        .student-movement-panel {
+            padding: 22px 18px;
+        }
+    }

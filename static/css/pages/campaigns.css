@@ -1,0 +1,127 @@
+.campaigns-page {
+        max-width: 1180px;
+    }
+    .campaign-create {
+        max-width: 760px;
+        margin: 18px 0 24px 0;
+        padding: 18px;
+        border: 1px solid var(--info-border);
+        border-radius: 8px;
+        background: var(--info-soft);
+    }
+    .campaign-create h2 {
+        margin: 0 0 8px 0;
+        color: var(--text-primary);
+        font-size: 22px;
+    }
+    .campaign-create p {
+        margin: 0 0 14px 0;
+        color: var(--text-secondary);
+        line-height: 1.45;
+    }
+    .campaign-create-row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        padding: 0;
+    }
+    .campaign-create-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 700;
+    }
+    .campaign-create-field input {
+        box-sizing: border-box;
+        height: 38px;
+        width: 150px;
+        padding: 8px 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+    .campaign-default {
+        max-width: 760px;
+        margin: 18px 0 24px 0;
+        padding: 18px;
+        border: 1px solid var(--success-border);
+        border-radius: 8px;
+        background: var(--success-soft);
+    }
+    .campaign-default h2 {
+        margin: 0 0 8px 0;
+        color: var(--success);
+        font-size: 22px;
+    }
+    .campaign-default p {
+        margin: 0 0 14px 0;
+        color: var(--text-secondary);
+        line-height: 1.45;
+    }
+    .campaign-default-controls {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .campaign-default-controls form {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin: 0;
+        padding: 0;
+    }
+    .campaign-default-field label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 700;
+    }
+    .campaign-default-field select {
+        box-sizing: border-box;
+        height: 38px;
+        min-width: 190px;
+        padding: 8px 32px 8px 10px;
+        border: 1px solid var(--success-border);
+        border-radius: 6px;
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+    .campaign-actions form {
+        display: inline-flex;
+        margin: 0;
+        padding: 0;
+    }
+    .campaign-status {
+        font-weight: 700;
+    }
+    .campaign-status-open {
+        color: var(--success);
+    }
+    .campaign-status-archived {
+        color: var(--warning);
+    }
+    .campaign-status-active {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--success-soft);
+        color: var(--success);
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+        .campaign-create-field,
+        .campaign-create-field input,
+        .campaign-create-row .btn,
+        .campaign-default-field,
+        .campaign-default-field select,
+        .campaign-default-controls form,
+        .campaign-default-controls .btn {
+            width: 100%;
+        }
+    }

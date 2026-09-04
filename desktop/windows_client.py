@@ -175,103 +175,153 @@ def default_database_path() -> str:
     return str(path)
 
 
-def show_configuration_dialog(existing: dict) -> dict | None:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+def desktop_client_command(*arguments: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *arguments]
+    return [sys.executable, str(Path(__file__).resolve()), *arguments]
 
-    result: dict | None = None
-    root = tk.Tk()
-    root.title("Настройка Manticore")
-    root.resizable(False, False)
-    root.columnconfigure(0, weight=1)
 
-    frame = ttk.Frame(root, padding=20)
-    frame.grid(sticky="nsew")
-    frame.columnconfigure(1, weight=1)
+def show_native_message(title: str, message: str, *, error: bool = False) -> None:
+    """Show a dependency-free Windows message when the WebView cannot be used."""
+    if os.name == "nt":
+        import ctypes
 
-    ttk.Label(frame, text="Как использовать приложение?", font=("Segoe UI", 13, "bold")).grid(
-        row=0, column=0, columnspan=3, sticky="w", pady=(0, 14)
-    )
-    mode = tk.StringVar(value=existing.get("mode") if existing.get("mode") in {"remote", "local"} else "remote")
-    ttk.Radiobutton(frame, text="Подключиться к существующему серверу", variable=mode, value="remote").grid(
-        row=1, column=0, columnspan=3, sticky="w", pady=3
-    )
-    ttk.Radiobutton(frame, text="Работать с локальной базой на этом ПК", variable=mode, value="local").grid(
-        row=2, column=0, columnspan=3, sticky="w", pady=3
-    )
+        flags = 0x00000010 if error else 0x00000040  # MB_ICONERROR / MB_ICONINFORMATION
+        ctypes.windll.user32.MessageBoxW(None, str(message), str(title), flags)
+        return
+    print(f"{title}: {message}", file=sys.stderr if error else sys.stdout)
 
-    ttk.Label(frame, text="Адрес сервера").grid(row=3, column=0, sticky="w", padx=(22, 10), pady=(14, 4))
-    server_url = tk.StringVar(value=existing.get("server_url", ""))
-    server_entry = ttk.Entry(frame, width=54, textvariable=server_url)
-    server_entry.grid(row=3, column=1, columnspan=2, sticky="ew", pady=(14, 4))
 
-    ttk.Label(frame, text="Локальная база").grid(row=4, column=0, sticky="w", padx=(22, 10), pady=4)
-    database_path = tk.StringVar(value=existing.get("database_path") or default_database_path())
-    database_entry = ttk.Entry(frame, width=46, textvariable=database_path)
-    database_entry.grid(row=4, column=1, sticky="ew", pady=4)
+def confirm_native_message(title: str, message: str) -> bool:
+    if os.name == "nt":
+        import ctypes
 
-    def browse_database() -> None:
-        selected = filedialog.askopenfilename(
-            parent=root,
-            title="Выберите существующую базу Manticore",
-            filetypes=(("SQLite", "*.db *.sqlite *.sqlite3"), ("Все файлы", "*.*")),
+        return ctypes.windll.user32.MessageBoxW(None, str(message), str(title), 0x00000024) == 6
+    return False
+
+
+class SetupApi:
+    """Narrow bridge exposed only to the bundled onboarding page."""
+
+    def __init__(self, existing: dict, page: str, password_result_path: str = ""):
+        self.existing = dict(existing)
+        self.page = page
+        self.password_result_path = password_result_path
+        self.saved = False
+
+    def get_state(self) -> dict:
+        return {
+            "page": self.page,
+            "version": current_version(),
+            "mode": self.existing.get("mode") if self.existing.get("mode") in {"remote", "local"} else "remote",
+            "server_url": str(self.existing.get("server_url") or ""),
+            "database_path": str(self.existing.get("database_path") or default_database_path()),
+            "update_server_url": str(self.existing.get("update_server_url") or ""),
+        }
+
+    @staticmethod
+    def _close_window() -> None:
+        import webview
+
+        if webview.windows:
+            webview.windows[0].destroy()
+
+    def browse_database(self) -> str:
+        import webview
+
+        if not webview.windows:
+            return ""
+        dialog_type = getattr(webview, "OPEN_DIALOG", None)
+        if dialog_type is None and hasattr(webview, "FileDialog"):
+            dialog_type = webview.FileDialog.OPEN
+        selection = webview.windows[0].create_file_dialog(
+            dialog_type,
+            allow_multiple=False,
+            file_types=("SQLite (*.db;*.sqlite;*.sqlite3)", "Все файлы (*.*)"),
         )
-        if selected:
-            database_path.set(selected)
+        return str(selection[0]) if selection else ""
 
-    ttk.Button(frame, text="Выбрать…", command=browse_database).grid(row=4, column=2, padx=(8, 0), pady=4)
-
-    ttk.Label(frame, text="Сервер обновлений").grid(row=5, column=0, sticky="w", padx=(22, 10), pady=4)
-    update_url = tk.StringVar(value=existing.get("update_server_url", ""))
-    update_entry = ttk.Entry(frame, width=54, textvariable=update_url)
-    update_entry.grid(row=5, column=1, columnspan=2, sticky="ew", pady=4)
-    ttk.Label(
-        frame,
-        text="Для локального режима необязательно. Если оставить пустым, обновления берутся из локальной админки.",
-        foreground="#555555",
-        wraplength=520,
-    ).grid(row=6, column=0, columnspan=3, sticky="w", padx=(22, 0), pady=(0, 14))
-
-    def refresh_fields(*_args) -> None:
-        remote = mode.get() == "remote"
-        server_entry.configure(state="normal" if remote else "disabled")
-        database_entry.configure(state="disabled" if remote else "normal")
-        update_entry.configure(state="disabled" if remote else "normal")
-
-    def submit() -> None:
-        nonlocal result
+    def submit_configuration(self, payload: dict) -> dict:
         try:
-            if mode.get() == "remote":
-                normalized_server = normalize_server_url(server_url.get())
-                result = {
+            mode = str(payload.get("mode") or "")
+            if mode == "remote":
+                server_url = normalize_server_url(payload.get("server_url", ""))
+                configured = {
                     "mode": "remote",
-                    "server_url": normalized_server,
-                    "update_server_url": normalized_server,
-                    "database_path": database_path.get().strip(),
+                    "server_url": server_url,
+                    "update_server_url": server_url,
+                    "database_path": str(payload.get("database_path") or "").strip(),
                 }
-            else:
-                result = {
+            elif mode == "local":
+                configured = {
                     "mode": "local",
                     "server_url": "",
-                    "database_path": normalize_database_path(database_path.get()),
-                    "update_server_url": normalize_server_url(update_url.get(), optional=True),
+                    "database_path": normalize_database_path(payload.get("database_path", "")),
+                    "update_server_url": normalize_server_url(payload.get("update_server_url", ""), optional=True),
                 }
+            else:
+                raise ValueError("Выберите режим работы.")
+            configured["local_secret_key"] = self.existing.get("local_secret_key") or secrets.token_urlsafe(48)
+            save_config(configured)
         except (OSError, ValueError) as exc:
-            messagebox.showerror("Проверьте настройки", str(exc), parent=root)
-            return
-        root.destroy()
+            return {"ok": False, "error": str(exc)}
+        self.saved = True
+        threading.Timer(0.05, self._close_window).start()
+        return {"ok": True}
 
-    mode.trace_add("write", refresh_fields)
-    refresh_fields()
-    buttons = ttk.Frame(frame)
-    buttons.grid(row=7, column=0, columnspan=3, sticky="e", pady=(5, 0))
-    ttk.Button(buttons, text="Отмена", command=root.destroy).pack(side="right", padx=(8, 0))
-    ttk.Button(buttons, text="Сохранить и открыть", command=submit).pack(side="right")
-    root.protocol("WM_DELETE_WINDOW", root.destroy)
-    root.update_idletasks()
-    root.geometry(f"+{max(0, (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2)}+{max(0, (root.winfo_screenheight() - root.winfo_reqheight()) // 2)}")
-    root.mainloop()
-    return result
+    def submit_admin_password(self, first: str, second: str) -> dict:
+        if len(first or "") < 8:
+            return {"ok": False, "error": "Пароль должен содержать не менее 8 символов."}
+        if not secrets.compare_digest(first, second):
+            return {"ok": False, "error": "Пароли не совпадают."}
+        try:
+            Path(self.password_result_path).write_text(first, encoding="utf-8")
+        except OSError:
+            logging.exception("Could not store the one-time admin password")
+            return {"ok": False, "error": "Не удалось безопасно передать пароль приложению."}
+        self.saved = True
+        threading.Timer(0.05, self._close_window).start()
+        return {"ok": True}
+
+    def cancel(self) -> None:
+        threading.Timer(0.05, self._close_window).start()
+
+
+def run_setup_window(existing: dict, page: str = "configuration", password_result_path: str = "") -> bool:
+    import webview
+
+    api = SetupApi(existing, page, password_result_path)
+    setup_page = bundle_root() / "desktop" / "ui" / "setup.html"
+    storage_path = application_data_directory() / "setup-webview"
+    storage_path.mkdir(parents=True, exist_ok=True)
+    webview.create_window(
+        "Manticore — настройка рабочего места" if page == "configuration" else "Manticore — локальная база",
+        str(setup_page),
+        width=760,
+        height=650,
+        min_size=(680, 560),
+        resizable=True,
+        text_select=False,
+        js_api=api,
+    )
+    webview.start(
+        private_mode=False,
+        storage_path=str(storage_path),
+        icon=str(bundle_root() / WINDOW_ICON_PATH),
+    )
+    return api.saved
+
+
+def run_setup_child(page: str, password_result_path: str = "") -> int:
+    return 0 if run_setup_window(load_config(), page, password_result_path) else 2
+
+
+def show_configuration_dialog(existing: dict) -> dict | None:
+    completed = subprocess.run(
+        desktop_client_command("--configuration-child"),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return load_config() if completed.returncode == 0 else None
 
 
 def database_has_admin(database_path: str) -> bool:
@@ -287,31 +337,24 @@ def database_has_admin(database_path: str) -> bool:
 
 
 def prompt_initial_admin_password() -> str | None:
-    import tkinter as tk
-    from tkinter import messagebox, simpledialog
-
-    root = tk.Tk()
-    root.withdraw()
-    messagebox.showinfo(
-        "Локальная база",
-        "В выбранной базе нет администратора. Создайте пароль для пользователя admin.",
-        parent=root,
-    )
-    first = simpledialog.askstring("Пароль администратора", "Новый пароль (не менее 8 символов):", show="*", parent=root)
-    if first is None:
-        root.destroy()
+    descriptor, result_name = tempfile.mkstemp(prefix="manticore-admin-", suffix=".secret")
+    os.close(descriptor)
+    result_path = Path(result_name)
+    try:
+        result_path.unlink(missing_ok=True)
+        completed = subprocess.run(
+            desktop_client_command("--admin-password-child", str(result_path)),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0:
+            return None
+        password = result_path.read_text(encoding="utf-8")
+        return password if len(password) >= 8 else None
+    except OSError:
+        logging.exception("Admin password onboarding failed")
         return None
-    second = simpledialog.askstring("Пароль администратора", "Повторите пароль:", show="*", parent=root)
-    if len(first) < 8:
-        messagebox.showerror("Пароль не сохранён", "Пароль должен содержать не менее 8 символов.", parent=root)
-        root.destroy()
-        return None
-    if first != second:
-        messagebox.showerror("Пароль не сохранён", "Пароли не совпадают.", parent=root)
-        root.destroy()
-        return None
-    root.destroy()
-    return first
+    finally:
+        result_path.unlink(missing_ok=True)
 
 
 def version_key(value: str):
@@ -565,17 +608,7 @@ def offer_and_install_update(
 ) -> bool:
     if not server_url:
         if show_check_errors:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror(
-                "Не удалось проверить обновление",
-                "Сервер обновлений не настроен.",
-                parent=root,
-            )
-            root.destroy()
+            show_native_message("Не удалось проверить обновление", "Сервер обновлений не настроен.", error=True)
         return False
     try:
         manifest = fetch_update_manifest(
@@ -585,34 +618,16 @@ def offer_and_install_update(
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         logging.warning("Update check failed: %s", exc)
         if show_check_errors:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Не удалось проверить обновление", str(exc), parent=root)
-            root.destroy()
+            show_native_message("Не удалось проверить обновление", str(exc), error=True)
         return False
     if not manifest:
         if show_check_errors:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showinfo(
+            show_native_message(
                 "Обновление Manticore",
                 "Разрешённая новая версия не найдена. На этом компьютере уже установлена последняя разрешённая версия либо администратор ещё не разрешил новый релиз.",
-                parent=root,
             )
-            root.destroy()
         return False
 
-    import tkinter as tk
-    from tkinter import messagebox, ttk
-
-    root = tk.Tk()
-    root.withdraw()
     if manifest.get("is_rebuild") and manifest["version"] == current_version():
         details = f"Доступна исправленная сборка версии {manifest['version']}."
     else:
@@ -620,29 +635,13 @@ def offer_and_install_update(
     if manifest["notes"]:
         details += f"\n\n{manifest['notes']}"
     details += "\n\nСкачать и установить обновление сейчас?"
-    if ask_confirmation and not messagebox.askyesno("Обновление Manticore", details, parent=root):
-        root.destroy()
+    if ask_confirmation and not confirm_native_message("Обновление Manticore", details):
         return False
 
-    progress_window = tk.Toplevel(root)
-    progress_window.title("Обновление Manticore")
-    progress_window.resizable(False, False)
-    ttk.Label(progress_window, text=f"Загрузка версии {manifest['version']}…").pack(padx=24, pady=(20, 10))
-    progress_bar = ttk.Progressbar(progress_window, length=360, maximum=manifest["size"], mode="determinate")
-    progress_bar.pack(padx=24, pady=(0, 20))
-    progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
-
-    def update_progress(downloaded: int, _total: int) -> None:
-        progress_bar["value"] = downloaded
-        progress_window.update_idletasks()
-        progress_window.update()
-
     try:
-        installer_path = download_installer(manifest, update_progress)
+        installer_path = download_installer(manifest)
         verify_authenticode_signature(installer_path, manifest["signer_certificate_sha256"])
-        progress_window.destroy()
         launch_installer_after_exit(installer_path)
-        root.destroy()
         return True
     except (OSError, ValueError, urllib.error.URLError) as exc:
         logging.exception("Update installation failed")
@@ -651,17 +650,18 @@ def offer_and_install_update(
                 installer_path.unlink()
             except OSError:
                 pass
-        progress_window.destroy()
-        messagebox.showerror("Не удалось обновить Manticore", str(exc), parent=root)
-        root.destroy()
+        if show_check_errors:
+            show_native_message("Не удалось обновить Manticore", str(exc), error=True)
         return False
 
 
 class DesktopApi:
     """Operations that are safe to expose to pages opened in the desktop shell."""
 
-    def __init__(self, update_server_url: str):
+    def __init__(self, update_server_url: str, target_url: str = ""):
         self.update_server_url = update_server_url
+        self.target_url = target_url
+        self.connection_error = ""
 
     @staticmethod
     def _close_windows() -> None:
@@ -676,6 +676,66 @@ class DesktopApi:
     def get_current_version(self) -> str:
         return current_version()
 
+    def get_client_info(self) -> dict:
+        config = load_config()
+        return {
+            "desktop": True,
+            "version": current_version(),
+            "mode": config.get("mode", ""),
+            "server_url": config.get("server_url", ""),
+            "database_path": config.get("database_path", ""),
+            "update_server_url": config.get("update_server_url", ""),
+            "log_path": str(application_data_directory() / "logs" / "client.log"),
+        }
+
+    def check_for_update(self) -> dict:
+        try:
+            manifest = fetch_update_manifest(self.update_server_url, allow_same_version_rebuild=True)
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
+            logging.warning("Manual update check failed: %s", exc)
+            return {"ok": False, "error": str(exc), "current_version": current_version()}
+        if not manifest:
+            return {"ok": True, "available": False, "current_version": current_version()}
+        return {
+            "ok": True,
+            "available": True,
+            "current_version": current_version(),
+            "version": manifest["version"],
+            "notes": manifest.get("notes", ""),
+            "is_rebuild": bool(manifest.get("is_rebuild")),
+        }
+
+    def open_log(self) -> dict:
+        log_path = application_data_directory() / "logs" / "client.log"
+        try:
+            if os.name == "nt":
+                os.startfile(str(log_path))
+            else:
+                return {"ok": False, "error": str(log_path)}
+        except OSError as exc:
+            logging.warning("Could not open client log: %s", exc)
+            return {"ok": False, "error": "Не удалось открыть журнал клиента."}
+        return {"ok": True}
+
+    def reconfigure(self) -> dict:
+        configured = show_configuration_dialog(load_config())
+        return {"saved": configured is not None, "restart_required": configured is not None}
+
+    def get_connection_state(self) -> dict:
+        return {"url": self.target_url, "error": self.connection_error}
+
+    def retry_connection(self) -> dict:
+        error = check_server_connection(self.target_url)
+        if error:
+            self.connection_error = error
+            return {"ok": False, "error": error}
+        self.connection_error = ""
+        import webview
+
+        if webview.windows:
+            webview.windows[0].load_url(self.target_url)
+        return {"ok": True}
+
     def install_approved_update(self) -> dict:
         started = offer_and_install_update(
             self.update_server_url,
@@ -688,6 +748,25 @@ class DesktopApi:
             timer.daemon = True
             timer.start()
         return {"started": started, "current_version": current_version()}
+
+
+def check_server_connection(url: str, timeout: float = 5.0) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if is_loopback_host(parsed.hostname):
+        return ""
+    request = urllib.request.Request(url, headers={"User-Agent": f"Manticore-Desktop/{current_version()}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return ""
+    except urllib.error.HTTPError:
+        return ""  # An HTTP response proves the server and TLS connection are reachable.
+    except urllib.error.URLError as exc:
+        logging.warning("Remote server connection failed for %s: %s", url, exc)
+        reason = str(getattr(exc, "reason", exc))
+        return f"Сервер не ответил. Проверьте подключение к сети, адрес сервера и сертификат TLS. ({reason})"
+    except (OSError, TimeoutError) as exc:
+        logging.warning("Remote server connection failed for %s: %s", url, exc)
+        return "Сервер не ответил вовремя. Проверьте сеть и повторите попытку."
 
 
 class LocalServer:
@@ -724,16 +803,29 @@ def open_desktop_window(url: str, update_server_url: str | None = None) -> None:
 
     storage_path = application_data_directory() / "webview"
     storage_path.mkdir(parents=True, exist_ok=True)
-    webview.create_window(
+    api = DesktopApi(update_server_url or url, url)
+    startup_page = bundle_root() / "desktop" / "ui" / "startup.html"
+    error_page = bundle_root() / "desktop" / "ui" / "connection_error.html"
+    window = webview.create_window(
         f"Manticore {current_version()}",
-        url,
+        str(startup_page),
         width=1360,
         height=860,
-        min_size=(960, 640),
+        min_size=(1024, 640),
         text_select=True,
-        js_api=DesktopApi(update_server_url or url),
+        js_api=api,
     )
+
+    def finish_startup() -> None:
+        connection_error = check_server_connection(url)
+        if connection_error:
+            api.connection_error = connection_error
+            window.load_url(str(error_page))
+            return
+        window.load_url(url)
+
     webview.start(
+        finish_startup,
         private_mode=False,
         storage_path=str(storage_path),
         icon=str(bundle_root() / WINDOW_ICON_PATH),
@@ -744,6 +836,8 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manticore Windows desktop client")
     parser.add_argument("--configure", action="store_true", help="show connection settings")
     parser.add_argument("--skip-update", action="store_true", help="skip the update check for this launch")
+    parser.add_argument("--configuration-child", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--admin-password-child", metavar="RESULT_PATH", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -789,16 +883,14 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
 def main() -> int:
     configure_logging()
     cleanup_old_installers()
-    if not acquire_single_instance():
-        import tkinter as tk
-        from tkinter import messagebox
-
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo("Manticore", "Приложение уже запущено.", parent=root)
-        root.destroy()
-        return 0
     args = parse_arguments()
+    if args.configuration_child:
+        return run_setup_child("configuration")
+    if args.admin_password_child:
+        return run_setup_child("admin-password", args.admin_password_child)
+    if not acquire_single_instance():
+        show_native_message("Manticore", "Приложение уже запущено.")
+        return 0
     config = load_config()
     if args.configure or config.get("mode") not in {"remote", "local"}:
         configured = show_configuration_dialog(config)
@@ -815,17 +907,9 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:
         logging.exception("Desktop client stopped unexpectedly")
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror(
-                "Manticore",
-                f"Не удалось запустить приложение:\n{exc}\n\nПодробности записаны в журнал клиента.",
-                parent=root,
-            )
-            root.destroy()
-        finally:
-            raise SystemExit(1)
+        show_native_message(
+            "Manticore",
+            f"Не удалось запустить приложение.\n\n{exc}\n\nПодробности записаны в журнал клиента.",
+            error=True,
+        )
+        raise SystemExit(1)

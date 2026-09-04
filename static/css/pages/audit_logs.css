@@ -1,0 +1,11 @@
+.audit-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .audit-details {
+        max-width: 420px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }

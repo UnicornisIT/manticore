@@ -1,145 +1,8 @@
 {% extends "base.html" %}
-{% from "_ui_macros.html" import disclosure_chevron %}
+{% from "_ui_macros.html" import disclosure_chevron, empty_state %}
 {% block title %}Список студентов{% endblock %}
 {% block head %}
-<style>
-    .students-filter {
-        margin-bottom: 18px;
-    }
-    .students-filter-row {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        align-items: center;
-    }
-    .students-filter-row input,
-    .students-filter-row select,
-    .students-filter-row .btn {
-        box-sizing: border-box;
-        height: 38px;
-        margin: 0;
-        font-size: 15px;
-    }
-    .students-filter-row input,
-    .students-filter-row select {
-        min-width: 180px;
-        padding: 8px 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #fff;
-    }
-    .students-filter-row select {
-        min-width: 120px;
-    }
-    .students-filter-row .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 18px;
-        line-height: 1;
-    }
-    .students-table-wrap {
-        max-width: 100%;
-        overflow-x: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #fff;
-    }
-    .students-table {
-        min-width: 1260px;
-    }
-    .students-table td:nth-child(4),
-    .students-table td:nth-child(5) {
-        min-width: 140px;
-        white-space: normal;
-    }
-    .students-table-actions {
-        min-width: 80px;
-        white-space: nowrap;
-    }
-    .students-table-actions form {
-        display: inline-flex;
-        align-items: center;
-        margin: 0;
-    }
-    .row-actions {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .action-icon-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 34px;
-        height: 34px;
-        min-width: 34px;
-        padding: 0;
-        margin: 0;
-        border-radius: 6px;
-    }
-    .action-icon-btn svg {
-        width: 18px;
-        height: 18px;
-        stroke: currentColor;
-        stroke-width: 2;
-        fill: none;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-    }
-    .action-icon-edit {
-        color: #1d4ed8;
-        background: #dbeafe;
-        border: 1px solid #bfdbfe;
-    }
-    .action-icon-delete {
-        color: #991b1b;
-        background: #fee2e2;
-        border: 1px solid #fecaca;
-    }
-    .action-icon-edit:hover,
-    .action-icon-edit:focus {
-        background: #bfdbfe;
-    }
-    .action-icon-delete:hover,
-    .action-icon-delete:focus {
-        background: #fecaca;
-    }
-    .students-order-cell {
-        min-width: 170px;
-        white-space: normal;
-    }
-    .students-order-cell strong,
-    .students-order-cell small {
-        display: block;
-    }
-    .students-order-cell small {
-        margin-top: 3px;
-        color: #64748b;
-    }
-    .password-reveal summary {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-        color: #2563eb;
-        font-weight: 600;
-    }
-    .password-reveal .disclosure-chevron {
-        width: 22px;
-        height: 22px;
-        flex-basis: 22px;
-    }
-    .password-reveal .disclosure-chevron svg {
-        width: 13px;
-        height: 13px;
-    }
-    .password-reveal > span {
-        display: inline-block;
-        margin-top: 6px;
-        font-family: Consolas, monospace;
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/students_list.css') }}">
 {% endblock %}
 {% block content %}
 {% macro sort_link(column, label) -%}
@@ -170,9 +33,9 @@
             {% endfor %}
         </select>
         {% endif %}
-        <button type="submit" class="btn">Фильтровать</button>
-        <a href="{{ url_for('students_list') }}" class="btn btn-danger">Сбросить</a>
-        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-success btn-download">Скачать Excel</a>
+        <button type="submit" class="btn">Применить фильтры</button>
+        <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Очистить</a>
+        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
     </div>
 </form>
 <div class="students-table-wrap">
@@ -190,7 +53,7 @@
             {% endif %}
             <th>{{ sort_link('enrollment_order', 'Приказ о зачислении') }}</th>
             {% if session.get('role') == 'admin' %}
-            <th>Действия</th>
+            <th class="table-actions-heading">Действия</th>
             {% endif %}
         </tr>
     </thead>
@@ -243,17 +106,22 @@
             </td>
             {% if session.get('role') == 'admin' %}
             <td class="students-table-actions">
-                <div class="row-actions">
-                    <a href="{{ url_for('edit_student', username=s['username']) }}" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать">
+                <button type="button" class="row-action-trigger" popovertarget="student-actions-{{ loop.index }}" aria-label="Действия со студентом {{ s['username'] }}">
+                    <span>Действия</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+                </button>
+                <div class="row-action-popover" id="student-actions-{{ loop.index }}" popover aria-label="Действия со студентом {{ s['username'] }}">
+                    <a href="{{ url_for('edit_student', username=s['username']) }}" class="row-action-item">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                             <path d="M12 20h9"></path>
                             <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
                         </svg>
+                        <span>Редактировать</span>
                     </a>
-                    <form method="post" action="{{ url_for('delete_student') }}" onsubmit="return confirm('Удалить студента?');">
+                    <form method="post" action="{{ url_for('delete_student') }}" data-confirm="Удалить студента?">
                         {% include "_csrf_field.html" %}
                         <input type="hidden" name="username" value="{{ s['username'] }}">
-                        <button type="submit" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить">
+                        <button type="submit" class="row-action-item is-danger">
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M3 6h18"></path>
                                 <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -261,6 +129,7 @@
                                 <path d="M10 11v6"></path>
                                 <path d="M14 11v6"></path>
                             </svg>
+                            <span>Удалить студента</span>
                         </button>
                     </form>
                 </div>
@@ -272,6 +141,6 @@
 </table>
 </div>
 {% if not students %}
-    <p>Нет данных о студентах.</p>
+    {{ empty_state('Студентов пока нет', 'Загрузите CSV или Excel со списком студентов, чтобы начать работу.', url_for('file_work', section='students'), 'Загрузить студентов') }}
 {% endif %}
 {% endblock %}

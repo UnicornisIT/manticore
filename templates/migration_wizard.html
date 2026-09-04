@@ -1,78 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Мастер миграции{% endblock %}
 {% block head %}
-<style>
-    .wizard-steps {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 22px;
-    }
-    .wizard-step {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 14px;
-        background: #f8fafc;
-    }
-    .wizard-step strong {
-        display: block;
-        color: #2563eb;
-        margin-bottom: 6px;
-    }
-    .wizard-action-groups {
-        display: grid;
-        grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.7fr);
-        gap: 16px;
-        align-items: start;
-        margin-bottom: 20px;
-    }
-    .wizard-action-section {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 16px;
-        background: #f8fafc;
-    }
-    .wizard-action-section h2 {
-        margin: 0 0 12px 0;
-        color: #1f2937;
-        font-size: 18px;
-    }
-    .wizard-primary-actions {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-    }
-    .wizard-secondary-actions {
-        display: grid;
-        gap: 10px;
-    }
-    .wizard-primary-actions form {
-        display: flex;
-        margin: 0;
-        padding: 0;
-    }
-    .wizard-action-section .btn {
-        width: 100%;
-        min-height: 44px;
-        margin: 0;
-        padding: 0 14px;
-        justify-content: center;
-    }
-    .wizard-secondary-actions .btn {
-        color: #1d4ed8;
-        background: #fff;
-        border-color: #bfdbfe;
-        box-shadow: none;
-    }
-    @media (max-width: 900px) {
-        .wizard-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .wizard-action-groups { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 560px) {
-        .wizard-steps { grid-template-columns: 1fr; }
-        .wizard-primary-actions { grid-template-columns: 1fr; }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/migration_wizard.css') }}">
 {% endblock %}
 {% block content %}
 <h1>Мастер миграции</h1>

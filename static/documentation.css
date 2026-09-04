@@ -1,12 +1,12 @@
 :root {
-    --docs-ink: #172033;
-    --docs-muted: #64748b;
-    --docs-line: #e6eaf0;
-    --docs-blue: #2563eb;
-    --docs-blue-dark: #1d4ed8;
-    --docs-blue-soft: #eef4ff;
-    --docs-surface: #ffffff;
-    --docs-canvas: #f6f8fb;
+    --docs-ink: var(--text-primary);
+    --docs-muted: var(--text-secondary);
+    --docs-line: var(--border);
+    --docs-blue: var(--accent);
+    --docs-blue-dark: var(--accent-hover);
+    --docs-blue-soft: var(--accent-soft);
+    --docs-surface: var(--bg-surface);
+    --docs-canvas: var(--bg-canvas);
     --docs-radius: 18px;
 }
 
@@ -34,8 +34,8 @@ body > .container > .main-nav {
     max-width: 1500px;
     margin: 0 auto;
     padding: 15px 24px;
-    background: rgba(255, 255, 255, .92);
-    border-bottom: 1px solid rgba(226, 232, 240, .9);
+    background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+    border-bottom: 1px solid var(--border);
     backdrop-filter: blur(18px);
 }
 
@@ -69,10 +69,10 @@ body > .container > .main-nav {
     height: 100vh;
     padding: 29px 22px 22px;
     overflow-y: auto;
-    background: #f9fafc;
+    background: var(--bg-subtle);
     border-right: 1px solid var(--docs-line);
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: var(--border-strong) transparent;
 }
 
 .docs-eyebrow {
@@ -322,7 +322,7 @@ body > .container > .main-nav {
     color: #435066;
     border: 1px solid #e1e8f2;
     border-radius: 11px;
-    background: rgba(255, 255, 255, .94);
+    background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
     box-shadow: 0 10px 24px rgba(32, 51, 78, .09);
     font-size: 10px;
     font-weight: 700;
@@ -578,7 +578,7 @@ body.docs-lightbox-open { overflow: hidden; }
     .docs-app.is-menu-open .docs-sidebar { transform: translateX(0); }
     .docs-overlay { position: fixed; z-index: 110; inset: 0; display: block; background: rgba(15, 23, 42, .35); opacity: 0; pointer-events: none; transition: opacity .2s; }
     .docs-app.is-menu-open .docs-overlay { opacity: 1; pointer-events: auto; }
-    .docs-mobile-bar { position: sticky; z-index: 30; top: 0; display: flex; height: 52px; padding: 0 22px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--docs-line); background: rgba(255,255,255,.94); backdrop-filter: blur(15px); }
+    .docs-mobile-bar { position: sticky; z-index: 30; top: 0; display: flex; height: 52px; padding: 0 22px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--docs-line); background: color-mix(in srgb, var(--bg-surface) 94%, transparent); backdrop-filter: blur(15px); }
     .docs-mobile-bar > span { color: #8591a2; font-size: 10px; font-weight: 750; }
     .docs-menu-button { display: inline-flex; padding: 7px 10px; align-items: center; gap: 6px; color: #41516a; border: 1px solid #dfe5ed; border-radius: 8px; background: #fff; font: 700 10px/1 'Segoe UI', sans-serif; }
     .docs-menu-button svg { width: 15px; height: 15px; }

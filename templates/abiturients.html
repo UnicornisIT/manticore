@@ -1,306 +1,91 @@
 {% extends "base.html" %}
     {% block title %}Список абитуриентов и логинов{% endblock %}
     {% block head %}
-    <style>
-        .abiturients-filter {
-            margin-bottom: 18px;
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        .abiturients-filter input,
-        .abiturients-filter select,
-        .abiturients-filter .btn {
-            box-sizing: border-box;
-            height: 38px;
-            margin: 0;
-            font-size: 15px;
-        }
-        .abiturients-filter input,
-        .abiturients-filter select {
-            min-width: 145px;
-            padding: 8px 10px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            background: #fff;
-            color: #111827;
-        }
-        .abiturients-filter input {
-            min-width: 230px;
-        }
-        .abiturients-filter .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0 18px;
-            line-height: 1;
-        }
-        .abiturients-actions {
-            margin-bottom: 12px;
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        .abiturients-actions .btn {
-            box-sizing: border-box;
-            height: 38px;
-            margin: 0;
-            padding: 0 18px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .bulk-toolbar {
-            margin-bottom: 12px;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap;
-            width: max-content;
-            max-width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            background: #f8fafc;
-        }
-        .bulk-toolbar-label {
-            color: #374151;
-            font-weight: 600;
-            white-space: nowrap;
-        }
-        .bulk-select-shell {
-            position: relative;
-            display: inline-flex;
-        }
-        .bulk-toolbar select,
-        .bulk-toolbar .btn {
-            box-sizing: border-box;
-            height: 38px;
-            margin: 0;
-        }
-        .bulk-toolbar select {
-            min-width: 240px;
-            padding: 0 36px 0 12px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            background: #fff;
-            color: #111827;
-            font-size: 15px;
-            appearance: none;
-        }
-        .bulk-select-shell::after {
-            content: "";
-            position: absolute;
-            right: 13px;
-            top: 50%;
-            width: 8px;
-            height: 8px;
-            border-right: 2px solid #64748b;
-            border-bottom: 2px solid #64748b;
-            transform: translateY(-65%) rotate(45deg);
-            pointer-events: none;
-        }
-        .bulk-toolbar .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 112px;
-            padding: 0 18px;
-        }
-        .abiturients-table {
-            min-width: 1380px;
-        }
-        .abiturients-table-wrap {
-            max-width: 100%;
-            overflow-x: auto;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            background: #fff;
-        }
-        .abiturients-table th,
-        .abiturients-table td {
-            vertical-align: middle;
-        }
-        .abiturients-table th:first-child,
-        .abiturients-table td:first-child {
-            width: 42px;
-            text-align: center;
-        }
-        .abiturients-table .fio-cell {
-            min-width: 190px;
-            max-width: 240px;
-            white-space: normal;
-            word-break: normal;
-            overflow-wrap: break-word;
-        }
-        .abiturients-table .name-part-cell {
-            min-width: 120px;
-        }
-        .abiturients-table .name-detail-cell {
-            min-width: 180px;
-            white-space: normal;
-        }
-        .abiturients-table .action-cell {
-            min-width: 190px;
-            white-space: nowrap;
-        }
-        .abiturients-table .action-cell form {
-            display: inline-flex !important;
-            align-items: center;
-        }
-        .row-actions {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .action-icon-btn {
-            width: 34px;
-            height: 34px;
-            min-width: 34px;
-            padding: 0;
-            margin: 0;
-            border-radius: 6px;
-        }
-        .action-icon-btn svg {
-            width: 18px;
-            height: 18px;
-            stroke: currentColor;
-            stroke-width: 2;
-            fill: none;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-        .action-icon-paid {
-            color: #166534;
-            background: #dcfce7;
-            border: 1px solid #86efac;
-        }
-        .action-icon-unpaid {
-            color: #92400e;
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-        }
-        .action-icon-edit {
-            color: #1d4ed8;
-            background: #dbeafe;
-            border: 1px solid #bfdbfe;
-        }
-        .action-icon-withdraw {
-            color: #9a3412;
-            background: #ffedd5;
-            border: 1px solid #fdba74;
-        }
-        .action-icon-withdraw.is-withdrawn {
-            color: #64748b;
-            background: #f1f5f9;
-            border-color: #cbd5e1;
-        }
-        .action-icon-delete {
-            color: #991b1b;
-            background: #fee2e2;
-            border: 1px solid #fecaca;
-        }
-        .action-icon-paid:hover,
-        .action-icon-paid:focus {
-            background: #bbf7d0;
-        }
-        .action-icon-unpaid:hover,
-        .action-icon-unpaid:focus {
-            background: #fde68a;
-        }
-        .action-icon-edit:hover,
-        .action-icon-edit:focus {
-            background: #bfdbfe;
-        }
-        .action-icon-withdraw:hover,
-        .action-icon-withdraw:focus {
-            background: #fed7aa;
-        }
-        .action-icon-delete:hover,
-        .action-icon-delete:focus {
-            background: #fecaca;
-        }
-        @media (max-width: 640px) {
-            .bulk-toolbar,
-            .bulk-select-shell,
-            .bulk-toolbar select,
-            .bulk-toolbar .btn {
-                width: 100%;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/abiturients.css') }}">
     {% endblock %}
     {% block content %}
     {% macro sort_link(column, label) -%}
         {% set next_dir = 'desc' if order_by == column and order_dir == 'asc' else 'asc' %}
         <a href="{{ url_for_with_query('abiturients', order_by=column, order_dir=next_dir) }}">{{ label }}{% if order_by == column %} {{ '↑' if order_dir == 'asc' else '↓' }}{% endif %}</a>
     {%- endmacro %}
+    {% set can_select_rows = session.get('role') in ['admin', 'assistant', 'operator'] %}
+    {% set can_manage_rows = session.get('role') == 'admin' %}
     <h1>Список абитуриентов и логинов</h1>
     {% include "_campaign_switcher.html" %}
     <div class="abiturients-actions">
         {% if session.get('role') in ['admin', 'assistant'] %}
             <a href="{{ url_for('abiturients_to_students') }}" class="btn">Миграция абитуриентов</a>
         {% endif %}
-        <a href="{{ url_for('login_conflicts') }}" class="btn">Конфликты логинов</a>
+        <a href="{{ url_for('login_conflicts') }}" class="btn btn-secondary">Конфликты логинов</a>
     </div>
-    <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
-        <input type="hidden" name="order_by" value="{{ order_by }}">
-        <input type="hidden" name="order_dir" value="{{ order_dir }}">
-        <input type="text" name="q" placeholder="Поиск по ФИО, логину, договору, почте" value="{{ request.args.get('q', '') }}">
-        <select name="spec">
-            <option value="">Все специальности</option>
-            {% for s in specs %}
-            <option value="{{ s }}" {% if request.args.get('spec') == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-        </select>
-        <select name="base">
-            <option value="">Все уровни</option>
-            {% for b in bases %}
-            <option value="{{ b }}" {% if request.args.get('base') == b %}selected{% endif %}>{{ b }}</option>
-            {% endfor %}
-        </select>
-        <select name="year">
-            <option value="">Все года в договоре</option>
-            {% for y in years %}
-            <option value="{{ y }}" {% if request.args.get('year') == y %}selected{% endif %}>{{ y }}</option>
-            {% endfor %}
-        </select>
-        <select name="is_i">
-            <option value="">Очный/индивидуальный график</option>
-            <option value="1" {% if request.args.get('is_i') == '1' %}selected{% endif %}>Индивидуальный график (i)</option>
-            <option value="0" {% if request.args.get('is_i') == '0' %}selected{% endif %}>Очная форма</option>
-        </select>
-        <select name="has_email">
-            <option value="">Все по почте</option>
-            <option value="1" {% if request.args.get('has_email') == '1' %}selected{% endif %}>Есть почта</option>
-            <option value="0" {% if request.args.get('has_email') == '0' %}selected{% endif %}>Нет почты</option>
-        </select>
-        <select name="has_paid">
-            <option value="">Все по оплате</option>
-            <option value="1" {% if request.args.get('has_paid') == '1' %}selected{% endif %}>Оплачен</option>
-            <option value="0" {% if request.args.get('has_paid') == '0' %}selected{% endif %}>Не оплачен</option>
-        </select>
-        <select name="has_order">
-            <option value="">Все по приказу</option>
-            <option value="1" {% if request.args.get('has_order') == '1' %}selected{% endif %}>Есть приказ</option>
-            <option value="0" {% if request.args.get('has_order') == '0' %}selected{% endif %}>Нет приказа</option>
-        </select>
-        <select name="withdrawn">
-            <option value="">Все статусы документов</option>
-            <option value="0" {% if request.args.get('withdrawn') == '0' %}selected{% endif %}>Документы не отозваны</option>
-            <option value="1" {% if request.args.get('withdrawn') == '1' %}selected{% endif %}>Документы отозваны</option>
-        </select>
-        <button type="submit" class="btn">Фильтровать</button>
-        <a href="{{ url_for('abiturients') }}" class="btn btn-danger">Сбросить</a>
-        <a href="{{ url_for('download_abiturients') }}" class="btn btn-success btn-download">Скачать Excel</a>
-        <a href="{{ url_for('download_abiturients', **request.args) }}" class="btn btn-success btn-download">Скачать Excel (отфильтрованный)</a>
-    </form>
-    {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
-    <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar">
+    <details class="filter-panel" open>
+        <summary class="filter-panel-summary">
+            <span><strong>Фильтры списка</strong><small>Поиск и отбор абитуриентов</small></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+        </summary>
+        <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
+            <input type="hidden" name="order_by" value="{{ order_by }}">
+            <input type="hidden" name="order_dir" value="{{ order_dir }}">
+            <div class="filter-fields">
+                <input type="text" name="q" aria-label="Поиск" placeholder="ФИО, логин, договор или почта" value="{{ request.args.get('q', '') }}">
+                <select name="spec" aria-label="Специальность">
+                    <option value="">Все специальности</option>
+                    {% for s in specs %}<option value="{{ s }}" {% if request.args.get('spec') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+                </select>
+                <select name="base" aria-label="Уровень обучения">
+                    <option value="">Все уровни</option>
+                    {% for b in bases %}<option value="{{ b }}" {% if request.args.get('base') == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+                </select>
+                <select name="year" aria-label="Год в договоре">
+                    <option value="">Все годы в договоре</option>
+                    {% for y in years %}<option value="{{ y }}" {% if request.args.get('year') == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+                </select>
+                <select name="is_i" aria-label="Форма обучения">
+                    <option value="">Любая форма обучения</option>
+                    <option value="1" {% if request.args.get('is_i') == '1' %}selected{% endif %}>Индивидуальный график</option>
+                    <option value="0" {% if request.args.get('is_i') == '0' %}selected{% endif %}>Очная форма</option>
+                </select>
+                <select name="has_email" aria-label="Наличие почты">
+                    <option value="">Любое состояние почты</option>
+                    <option value="1" {% if request.args.get('has_email') == '1' %}selected{% endif %}>Есть почта</option>
+                    <option value="0" {% if request.args.get('has_email') == '0' %}selected{% endif %}>Нет почты</option>
+                </select>
+                <select name="has_paid" aria-label="Статус оплаты">
+                    <option value="">Любой статус оплаты</option>
+                    <option value="1" {% if request.args.get('has_paid') == '1' %}selected{% endif %}>Оплачен</option>
+                    <option value="0" {% if request.args.get('has_paid') == '0' %}selected{% endif %}>Не оплачен</option>
+                </select>
+                <select name="has_order" aria-label="Наличие приказа">
+                    <option value="">Любой статус приказа</option>
+                    <option value="1" {% if request.args.get('has_order') == '1' %}selected{% endif %}>Есть приказ</option>
+                    <option value="0" {% if request.args.get('has_order') == '0' %}selected{% endif %}>Нет приказа</option>
+                </select>
+                <select name="withdrawn" aria-label="Статус документов">
+                    <option value="">Любой статус документов</option>
+                    <option value="0" {% if request.args.get('withdrawn') == '0' %}selected{% endif %}>Документы не отозваны</option>
+                    <option value="1" {% if request.args.get('withdrawn') == '1' %}selected{% endif %}>Документы отозваны</option>
+                </select>
+            </div>
+            <div class="filter-actions">
+                <button type="submit" class="btn">Применить фильтры</button>
+                <a href="{{ url_for('abiturients') }}" class="btn btn-secondary">Очистить</a>
+                <details class="export-menu">
+                    <summary class="btn btn-secondary">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"></path></svg>
+                        Экспорт
+                    </summary>
+                    <div class="export-menu-panel">
+                        <a href="{{ url_for('download_abiturients') }}">Весь список</a>
+                        <a href="{{ url_for('download_abiturients', **request.args) }}">По текущим фильтрам</a>
+                    </div>
+                </details>
+            </div>
+        </form>
+    </details>
+    {% if can_select_rows %}
+    <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar" data-bulk-toolbar hidden>
         {% include "_csrf_field.html" %}
-        <span class="bulk-toolbar-label">Выбранные:</span>
+        <span class="bulk-toolbar-label">Выбрано: <strong data-bulk-count>0</strong></span>
         <span class="bulk-select-shell">
             <select name="bulk_action" required>
                 <option value="">Выберите действие</option>
@@ -312,16 +97,17 @@
                 {% endif %}
             </select>
         </span>
-        <button type="submit" class="btn" onclick="return confirm('Выполнить действие для выбранных записей?');">Применить</button>
+        <button type="submit" class="btn" data-confirm="Выполнить действие для выбранных записей?">Выполнить</button>
     </form>
     {% endif %}
     <div class="abiturients-table-wrap">
-        <table class="abiturients-table">
+        <table class="abiturients-table{% if can_select_rows %} has-selection{% endif %}">
+            <thead>
             <tr>
-                {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
-                <th><input type="checkbox" id="select_all_abiturients" title="Выбрать все"></th>
+                {% if can_select_rows %}
+                <th class="selection-cell"><input type="checkbox" id="select_all_abiturients" title="Выбрать все" aria-label="Выбрать все записи"></th>
                 {% endif %}
-                <th>{{ sort_link('fio', 'ФИО') }}</th>
+                <th class="fio-header">{{ sort_link('fio', 'ФИО') }}</th>
                 <th>{{ sort_link('campaign_year', 'Кампания') }}</th>
                 <th>{{ sort_link('dogovor', 'Договор') }}</th>
                 <th>{{ sort_link('login', 'Логин') }}</th>
@@ -329,12 +115,14 @@
                 <th>{{ sort_link('fam', 'Фамилия') }}</th>
                 <th>{{ sort_link('imotch', 'Имя Отчество') }}</th>
                 <th>{{ sort_link('created_at', 'Дата добавления') }}</th>
-                <th>Действие</th>
+                {% if can_manage_rows %}<th class="table-actions-heading">Действия</th>{% endif %}
             </tr>
+            </thead>
+            <tbody>
             {% for a in abiturients %}
             <tr>
-                {% if session.get('role') in ['admin', 'assistant', 'operator'] %}
-                <td><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form"></td>
+                {% if can_select_rows %}
+                <td class="selection-cell"><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form" aria-label="Выбрать {{ a['fio'] }}"></td>
                 {% endif %}
                 <td class="fio-cell">{{ a['fio'] }}</td>
                 <td>{{ a['campaign_year'] }}</td>
@@ -350,9 +138,13 @@
                 <td class="name-part-cell">{{ a['fam'] }}</td>
                 <td class="name-detail-cell">{{ a['imotch'] }}</td>
                 <td>{{ a['created_at'] }}</td>
+                {% if can_manage_rows %}
                 <td class="action-cell">
-                    {% if session.get('role') == 'admin' %}
-                        <div class="row-actions">
+                    <button type="button" class="row-action-trigger" popovertarget="abiturient-actions-{{ a['id'] }}" aria-label="Действия с {{ a['fio'] }}">
+                        <span>Действия</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+                    </button>
+                    <div class="row-action-popover" id="abiturient-actions-{{ a['id'] }}" popover aria-label="Действия с {{ a['fio'] }}">
                             <form method="post" action="{{ url_for('toggle_abiturient_paid') }}">
                                 {% include "_csrf_field.html" %}
                                 <input type="hidden" name="id" value="{{ a['id'] }}">
@@ -368,36 +160,27 @@
                                 <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                                 <input type="hidden" name="order_by" value="{{ order_by }}">
                                 <input type="hidden" name="order_dir" value="{{ order_dir }}">
-                                <button
-                                    type="submit"
-                                    class="btn action-icon-btn {{ 'action-icon-paid' if a['paid'] else 'action-icon-unpaid' }}"
-                                    title="{{ 'Снять оплату' if a['paid'] else 'Отметить оплату' }}"
-                                    aria-label="{{ 'Снять оплату' if a['paid'] else 'Отметить оплату' }}"
-                                >
+                                <button type="submit" class="row-action-item">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h11"></path>
                                         <path d="M18 9V5a2 2 0 0 0-2-2H7"></path>
                                         <path d="M16 13h6v4h-6a2 2 0 0 1 0-4z"></path>
                                     </svg>
+                                    <span>{{ 'Снять отметку об оплате' if a['paid'] else 'Отметить оплату' }}</span>
                                 </button>
                             </form>
                             {% if is_withdrawn_login(a['login']) %}
-                            <button
-                                type="button"
-                                class="btn action-icon-btn action-icon-withdraw is-withdrawn"
-                                title="Документы уже отозваны"
-                                aria-label="Документы уже отозваны"
-                                disabled
-                            >
+                            <button type="button" class="row-action-item" disabled>
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <path d="M14 2v6h6"></path>
                                     <path d="m9 13 6 6"></path>
                                     <path d="m15 13-6 6"></path>
                                 </svg>
+                                <span>Документы уже отозваны</span>
                             </button>
                             {% else %}
-                            <form method="post" action="{{ url_for('withdraw_abiturient_documents') }}" onsubmit='return confirm({{ ("Отозвать документы у абитуриента " ~ a["fio"] ~ "? Исходный логин будет освобождён, запись будет исключена из подготовки к зачислению.")|tojson }});'>
+                            <form method="post" action="{{ url_for('withdraw_abiturient_documents') }}" data-confirm="{{ 'Отозвать документы у абитуриента ' ~ a['fio'] ~ '? Исходный логин будет освобождён, запись будет исключена из подготовки к зачислению.' }}">
                                 {% include "_csrf_field.html" %}
                                 <input type="hidden" name="id" value="{{ a['id'] }}">
                                 <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">
@@ -412,28 +195,31 @@
                                 <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
                                 <input type="hidden" name="order_by" value="{{ order_by }}">
                                 <input type="hidden" name="order_dir" value="{{ order_dir }}">
-                                <button type="submit" class="btn action-icon-btn action-icon-withdraw" title="Отозвать документы" aria-label="Отозвать документы">
+                                <button type="submit" class="row-action-item is-warning">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                         <path d="M14 2v6h6"></path>
                                         <path d="m9 13 6 6"></path>
                                         <path d="m15 13-6 6"></path>
                                     </svg>
+                                    <span>Отозвать документы</span>
                                 </button>
                             </form>
                             {% endif %}
-                            <a href="{{ url_for_with_query('edit_abiturient', login=a['login'], campaign_year=a['campaign_year']) }}" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать">
+                            <div class="row-action-divider" aria-hidden="true"></div>
+                            <a href="{{ url_for_with_query('edit_abiturient', login=a['login'], campaign_year=a['campaign_year']) }}" class="row-action-item">
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 20h9"></path>
                                     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
                                 </svg>
+                                <span>Редактировать</span>
                             </a>
-                            <form method="post" action="{{ url_for('delete_abiturient') }}" onsubmit="return confirm('Вы уверены, что хотите удалить?');">
+                            <form method="post" action="{{ url_for('delete_abiturient') }}" data-confirm="Вы уверены, что хотите удалить?">
                                 {% include "_csrf_field.html" %}
                                 <input type="hidden" name="id" value="{{ a['id'] }}">
                                 <input type="hidden" name="login" value="{{ a['login'] }}">
                                 <input type="hidden" name="campaign_year" value="{{ a['campaign_year'] }}">
-                                <button type="submit" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить">
+                                <button type="submit" class="row-action-item is-danger">
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
                                         <path d="M3 6h18"></path>
                                         <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -441,41 +227,41 @@
                                         <path d="M10 11v6"></path>
                                         <path d="M14 11v6"></path>
                                     </svg>
+                                    <span>Удалить запись</span>
                                 </button>
                             </form>
-                        </div>
-                    {% else %}
-                        <div class="row-actions">
-                            <button type="button" class="btn action-icon-btn action-icon-edit" title="Редактировать" aria-label="Редактировать" onclick="alert('У вас недостаточно прав для редактирования данных!'); return false;">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M12 20h9"></path>
-                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
-                                </svg>
-                            </button>
-                            <button type="button" class="btn action-icon-btn action-icon-delete" title="Удалить" aria-label="Удалить" onclick="alert('У вас недостаточно прав для удаления!'); return false;">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M3 6h18"></path>
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-                                    <path d="M10 11v6"></path>
-                                    <path d="M14 11v6"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    {% endif %}
+                    </div>
                 </td>
+                {% endif %}
             </tr>
             {% endfor %}
+            </tbody>
         </table>
     </div>
     <script>
     const selectAllAbiturients = document.getElementById('select_all_abiturients');
+    const abiturientCheckboxes = Array.from(document.querySelectorAll('input[name="abiturient_ids"][form="bulk_abiturients_form"]'));
+    const bulkToolbar = document.querySelector('[data-bulk-toolbar]');
+    const bulkCount = bulkToolbar?.querySelector('[data-bulk-count]');
+    const syncBulkToolbar = function() {
+        const selected = abiturientCheckboxes.filter(function(input) { return input.checked; }).length;
+        if (bulkCount) bulkCount.textContent = String(selected);
+        if (bulkToolbar) bulkToolbar.hidden = selected === 0;
+        if (selectAllAbiturients) {
+            selectAllAbiturients.checked = selected > 0 && selected === abiturientCheckboxes.length;
+            selectAllAbiturients.indeterminate = selected > 0 && selected < abiturientCheckboxes.length;
+        }
+    };
     if (selectAllAbiturients) {
         selectAllAbiturients.addEventListener('change', function() {
-            document.querySelectorAll('input[name="abiturient_ids"][form="bulk_abiturients_form"]').forEach(function(input) {
+            abiturientCheckboxes.forEach(function(input) {
                 input.checked = selectAllAbiturients.checked;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             });
+            syncBulkToolbar();
         });
     }
+    abiturientCheckboxes.forEach(function(input) { input.addEventListener('change', syncBulkToolbar); });
+    syncBulkToolbar();
     </script>
     {% endblock %}

@@ -1,56 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Одобрение заявок ассистентов{% endblock %}
 {% block head %}
-<style>
-    .approve-users-title {
-        text-align: center;
-    }
-    .approve-users-list {
-        display: grid;
-        gap: 10px;
-        width: min(100%, 560px);
-        margin: 28px auto;
-    }
-    .approve-user-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 14px;
-        padding: 14px 16px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #fff;
-    }
-    .approve-user-name {
-        color: #111827;
-        font-size: 16px;
-        font-weight: 700;
-        overflow-wrap: anywhere;
-    }
-    .approve-user-role {
-        color: #2563eb;
-    }
-    .approve-user-actions {
-        display: inline-flex;
-        gap: 8px;
-        margin: 0;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-    }
-    .approve-users-empty {
-        color: #64748b;
-        text-align: center;
-    }
-    @media (max-width: 560px) {
-        .approve-user-row {
-            align-items: stretch;
-            flex-direction: column;
-        }
-        .approve-user-actions .btn {
-            width: 100%;
-        }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/approve_users.css') }}">
 {% endblock %}
 {% block content %}
 <h2 class="approve-users-title">Заявки на регистрацию ассистентов</h2>

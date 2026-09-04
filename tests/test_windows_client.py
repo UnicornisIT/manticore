@@ -62,6 +62,7 @@ class WindowsClientTests(unittest.TestCase):
 
     def test_desktop_window_uses_bundled_icon(self):
         webview = mock.Mock()
+        window = webview.create_window.return_value
         with tempfile.TemporaryDirectory(prefix='manticore_window_') as directory:
             root = Path(directory)
             data_directory = root / 'data'
@@ -73,11 +74,51 @@ class WindowsClientTests(unittest.TestCase):
             ):
                 windows_client.open_desktop_window('https://manticore.example.test')
 
+        start_callback = webview.start.call_args.args[0]
         webview.start.assert_called_once_with(
+            start_callback,
             private_mode=False,
             storage_path=str(data_directory / 'webview'),
             icon=str(bundle_directory / windows_client.WINDOW_ICON_PATH),
         )
+        self.assertTrue(str(webview.create_window.call_args.args[1]).endswith('desktop\\ui\\startup.html'))
+        with mock.patch('desktop.windows_client.check_server_connection', return_value=''):
+            start_callback()
+        window.load_url.assert_called_once_with('https://manticore.example.test')
+
+    @mock.patch('desktop.windows_client.save_config')
+    def test_setup_api_validates_and_saves_remote_configuration(self, save_config):
+        api = windows_client.SetupApi({'local_secret_key': 'kept-secret'}, 'configuration')
+
+        result = api.submit_configuration({'mode': 'remote', 'server_url': 'https://example.test/'})
+
+        self.assertTrue(result['ok'])
+        saved = save_config.call_args.args[0]
+        self.assertEqual(saved['server_url'], 'https://example.test')
+        self.assertEqual(saved['update_server_url'], 'https://example.test')
+        self.assertEqual(saved['local_secret_key'], 'kept-secret')
+
+    def test_setup_api_rejects_remote_http(self):
+        api = windows_client.SetupApi({}, 'configuration')
+        result = api.submit_configuration({'mode': 'remote', 'server_url': 'http://example.test'})
+        self.assertFalse(result['ok'])
+        self.assertIn('HTTPS', result['error'])
+
+    def test_setup_api_admin_password_round_trip(self):
+        with tempfile.TemporaryDirectory(prefix='manticore_password_') as directory:
+            result_path = Path(directory) / 'password.secret'
+            api = windows_client.SetupApi({}, 'admin-password', str(result_path))
+            mismatch = api.submit_admin_password('password-one', 'password-two')
+            accepted = api.submit_admin_password('password-one', 'password-one')
+            self.assertFalse(mismatch['ok'])
+            self.assertTrue(accepted['ok'])
+            self.assertEqual(result_path.read_text(encoding='utf-8'), 'password-one')
+
+    @mock.patch('desktop.windows_client.urllib.request.urlopen')
+    def test_connection_check_returns_friendly_error(self, urlopen):
+        urlopen.side_effect = windows_client.urllib.error.URLError('host unavailable')
+        error = windows_client.check_server_connection('https://example.test', timeout=0.1)
+        self.assertIn('Сервер не ответил', error)
 
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
     @mock.patch('desktop.windows_client.win_verify_trust', return_value=windows_client.WINTRUST_UNTRUSTED_ROOT)

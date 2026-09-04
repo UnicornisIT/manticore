@@ -1,23 +1,8 @@
 {% extends "base.html" %}
+{% from "_ui_macros.html" import empty_state %}
 {% block title %}Резервные копии{% endblock %}
 {% block head %}
-<style>
-    .backup-toolbar {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 18px;
-    }
-    .backup-actions {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-    }
-    .backup-actions form {
-        padding: 0;
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/backups.css') }}">
 {% endblock %}
 {% block content %}
 <h1>Резервные копии</h1>
@@ -46,7 +31,7 @@
                 <td>
                     <div class="backup-actions">
                         <a href="{{ url_for('download_backup', backup_name=backup.name) }}" class="btn btn-download">Скачать</a>
-                        <form method="post" action="{{ url_for('restore_backup') }}" onsubmit="return confirm('Восстановить базу из этой копии? Перед восстановлением будет создана ещё одна резервная копия текущей базы.');">
+                        <form method="post" action="{{ url_for('restore_backup') }}" data-confirm="Восстановить базу из этой копии? Перед восстановлением будет создана ещё одна резервная копия текущей базы.">
                             {% include "_csrf_field.html" %}
                             <input type="hidden" name="backup_name" value="{{ backup.name }}">
                             <button type="submit" class="btn btn-danger">Восстановить</button>
@@ -59,6 +44,6 @@
     </table>
 </div>
 {% else %}
-<p>Резервных копий пока нет.</p>
+{{ empty_state('Резервных копий пока нет', 'Создайте первую резервную копию перед крупным импортом или изменением данных.') }}
 {% endif %}
 {% endblock %}

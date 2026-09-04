@@ -1,21 +1,7 @@
 {% extends "base.html" %}
     {% block title %}Дублирующие записи абитуриентов{% endblock %}
     {% block head %}
-    <style>
-        .duplicates-toolbar {
-            margin-bottom: 18px;
-        }
-        .duplicates-actions form {
-            display: inline-flex;
-            gap: 8px;
-            margin: 0;
-        }
-        .duplicates-empty {
-            margin: 18px 0;
-            color: #64748b;
-            text-align: center;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/duplicates_abiturients.css') }}">
     {% endblock %}
     {% block content %}
         <h1>Дублирующие записи абитуриентов</h1>
@@ -23,7 +9,7 @@
         <form method="post" class="duplicates-toolbar">
             {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-            <button type="submit" name="action" value="reject_all" class="btn btn-danger" onclick="return confirm('Отклонить все дублирующиеся записи?');">Отклонить все</button>
+            <button type="submit" name="action" value="reject_all" class="btn btn-danger" data-confirm="Отклонить все дублирующиеся записи?">Отклонить все</button>
         </form>
         <div class="table-scroll">
             <table>

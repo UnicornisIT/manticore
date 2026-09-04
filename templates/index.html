@@ -1,154 +1,8 @@
 {% extends "base.html" %}
+{% from "_ui_macros.html" import empty_state %}
 {% block title %}Панель состояния{% endblock %}
 {% block head %}
-<style>
-    body.home-page .container {
-        overflow-y: auto;
-    }
-    .dashboard-header {
-        margin-bottom: 24px;
-    }
-    .dashboard-title {
-        margin: 0;
-    }
-    .dashboard-header .page-campaign-switcher {
-        margin: 14px 0 0 0;
-    }
-    .metric-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 22px;
-    }
-    .metric {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #f8fafc;
-        padding: 14px;
-    }
-    .metric strong {
-        display: block;
-        color: #2563eb;
-        font-size: 28px;
-        margin-bottom: 4px;
-    }
-    .metric span {
-        color: #475569;
-    }
-    .dashboard-section {
-        border-top: 1px solid #e5e7eb;
-        padding-top: 16px;
-    }
-    .task-center {
-        border-top: 1px solid #e5e7eb;
-        padding-top: 16px;
-        margin-bottom: 22px;
-    }
-    .task-center-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 14px;
-    }
-    .task-center-header h2 {
-        margin: 0;
-    }
-    .task-center-header .btn {
-        min-width: 170px;
-        text-align: center;
-    }
-    .task-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-    }
-    .task-item {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 12px;
-        align-items: center;
-        padding: 12px 14px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #f8fafc;
-    }
-    .task-count {
-        min-width: 42px;
-        color: #2563eb;
-        font-size: 26px;
-        font-weight: 800;
-        line-height: 1;
-        text-align: center;
-    }
-    .task-title {
-        display: block;
-        color: #1f2937;
-        font-size: 16px;
-        font-weight: 800;
-        white-space: normal;
-    }
-    .task-description {
-        display: block;
-        margin-top: 3px;
-        color: #64748b;
-        font-size: 13px;
-        line-height: 1.35;
-        white-space: normal;
-    }
-    .task-item .btn {
-        min-width: 94px;
-        text-align: center;
-    }
-    .dashboard-groups-scroll {
-        --dashboard-group-row-height: 44px;
-        max-height: calc(var(--dashboard-group-row-height) * 11 + 2px);
-        overflow: auto;
-        border: 1px solid #e5e7eb;
-    }
-    .dashboard-groups-scroll table {
-        margin: 0;
-        border: 0;
-    }
-    .dashboard-groups-scroll th,
-    .dashboard-groups-scroll td {
-        box-sizing: border-box;
-        height: var(--dashboard-group-row-height);
-        padding-top: 6px;
-        padding-bottom: 6px;
-    }
-    .dashboard-groups-scroll thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-    }
-    @media (max-width: 900px) {
-        .metric-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .task-grid {
-            grid-template-columns: 1fr;
-        }
-        .task-center-header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-    }
-    @media (max-width: 560px) {
-        .metric-grid {
-            grid-template-columns: 1fr;
-        }
-        .task-item {
-            grid-template-columns: 1fr;
-        }
-        .task-count {
-            text-align: left;
-        }
-        .task-item .btn {
-            width: 100%;
-        }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/index.css') }}">
 {% endblock %}
 {% block content %}
 <div class="dashboard-header">
@@ -197,15 +51,20 @@
             <tbody>
                 {% for group in dashboard.groups %}
                 <tr>
-                    <td>{{ group.name }}</td>
-                    <td>{{ group.fill }}{% if group.is_full %} · заполнена{% endif %}</td>
+                    <td><strong>{{ group.name }}</strong></td>
+                    <td>
+                        <div class="group-capacity{% if group.is_full %} is-full{% endif %}">
+                            <span>{{ group.fill }}{% if group.is_full %} · заполнена{% endif %}</span>
+                            <progress max="{{ group.capacity }}" value="{{ group.count }}" aria-label="Заполненность группы {{ group.name }}: {{ group.fill }}"></progress>
+                        </div>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     {% else %}
-    <p>Группы для текущей кампании пока не заведены.</p>
+    {{ empty_state('Группы пока не созданы', 'Создайте академические группы, чтобы видеть заполненность и предупреждения о переполнении.', url_for('add_group'), 'Создать группы') }}
     {% endif %}
 </section>
 {% endblock %}

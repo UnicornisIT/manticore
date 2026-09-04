@@ -1,19 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Журнал действий{% endblock %}
 {% block head %}
-<style>
-    .audit-toolbar {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 18px;
-    }
-    .audit-details {
-        max-width: 420px;
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/audit_logs.css') }}">
 {% endblock %}
 {% block content %}
 <h1>Журнал действий</h1>

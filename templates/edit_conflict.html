@@ -1,59 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Редактировать конфликт логина{% endblock %}
 {% block head %}
-<style>
-    .conflict-edit-page {
-        max-width: 640px;
-        margin: 0 auto;
-    }
-    .conflict-edit-summary {
-        display: grid;
-        gap: 6px;
-        margin: 16px 0;
-        padding: 16px;
-        border: 1px solid #bfdbfe;
-        border-radius: 8px;
-        background: #eff6ff;
-        color: #1e3a8a;
-    }
-    .conflict-edit-summary p {
-        margin: 0;
-    }
-    .conflict-edit-form {
-        display: grid;
-        gap: 14px;
-        padding: 20px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #f8fafc;
-    }
-    .conflict-edit-field {
-        display: grid;
-        gap: 8px;
-    }
-    .conflict-edit-field label {
-        color: #374151;
-        font-weight: 600;
-    }
-    .conflict-edit-field input {
-        width: 100%;
-    }
-    .conflict-edit-note {
-        margin: 0;
-        color: #64748b;
-        font-size: 14px;
-    }
-    .conflict-edit-actions {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
-    @media (max-width: 520px) {
-        .conflict-edit-actions {
-            grid-template-columns: 1fr;
-        }
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/edit_conflict.css') }}">
 {% endblock %}
 {% block content %}
     <h1>Редактировать запись конфликта</h1>

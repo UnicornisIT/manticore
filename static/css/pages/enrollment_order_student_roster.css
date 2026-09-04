@@ -1,0 +1,216 @@
+.roster-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+    .roster-header h1 {
+        margin-bottom: 8px;
+    }
+    .roster-meta {
+        margin: 0;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+    .roster-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .roster-note {
+        margin: 16px 0;
+        padding: 12px 14px;
+        border: 1px solid var(--info-border);
+        border-radius: 8px;
+        background: var(--info-soft);
+        color: var(--info);
+        line-height: 1.45;
+    }
+    .roster-summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(130px, 1fr));
+        gap: 10px;
+        margin: 18px 0;
+    }
+    .roster-summary-item {
+        padding: 11px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-subtle);
+    }
+    .roster-summary-item strong {
+        display: block;
+        color: var(--accent);
+        font-size: 22px;
+    }
+    .roster-summary-item.warning {
+        border-color: var(--warning-border);
+        background: var(--warning-soft);
+    }
+    .roster-summary-item.warning strong {
+        color: var(--warning);
+    }
+    .roster-groups {
+        display: grid;
+        gap: 12px;
+    }
+    .roster-group {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+        overflow: hidden;
+    }
+    .roster-group summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 13px 15px;
+        background: var(--bg-subtle);
+        cursor: pointer;
+        list-style: none;
+        font-weight: 800;
+    }
+    .roster-group-counts {
+        margin-left: auto;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 600;
+    }
+    .roster-table-wrap {
+        overflow-x: auto;
+        border-top: 1px solid var(--border);
+        background: var(--bg-surface);
+        scrollbar-color: var(--text-muted) var(--bg-subtle);
+        scrollbar-width: thin;
+    }
+    .roster-table-wrap::-webkit-scrollbar {
+        height: 11px;
+    }
+    .roster-table-wrap::-webkit-scrollbar-track {
+        background: var(--bg-subtle);
+    }
+    .roster-table-wrap::-webkit-scrollbar-thumb {
+        border: 2px solid var(--bg-subtle);
+        border-radius: 999px;
+        background: var(--text-muted);
+    }
+    .roster-table {
+        width: max-content;
+        min-width: 2700px;
+        table-layout: auto;
+        margin: 0;
+    }
+    .roster-table th,
+    .roster-table td {
+        overflow-wrap: normal;
+        word-break: normal;
+        hyphens: none;
+    }
+    .roster-table th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 12px 10px;
+        background: var(--bg-subtle);
+        color: var(--text-secondary);
+    }
+    .roster-table td {
+        padding: 12px 10px;
+        vertical-align: top;
+        line-height: 1.45;
+        background: var(--bg-surface);
+    }
+    .roster-table tbody tr:nth-child(even) td {
+        background: var(--bg-subtle);
+    }
+    .roster-table tbody tr:hover td {
+        background: color-mix(in srgb, var(--accent-soft) 65%, var(--bg-surface));
+    }
+    .roster-table .status-badge {
+        max-width: none;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .roster-col-login { min-width: 115px; white-space: nowrap; }
+    .roster-col-password { min-width: 85px; white-space: nowrap; }
+    .roster-col-email { min-width: 210px; }
+    .roster-col-lastname { min-width: 190px; white-space: nowrap; }
+    .roster-col-firstname { min-width: 240px; }
+    .roster-col-group { min-width: 165px; white-space: nowrap; }
+    .roster-col-cohort2 { min-width: 225px; white-space: nowrap; }
+    .roster-col-order { min-width: 180px; white-space: nowrap; }
+    .roster-col-row { min-width: 75px; text-align: center; white-space: nowrap; }
+    .roster-col-specialty { min-width: 260px; max-width: 300px; }
+    .roster-col-dogovor { min-width: 190px; white-space: nowrap; }
+    .roster-col-payment { min-width: 145px; }
+    .roster-col-state { min-width: 185px; }
+    .roster-col-distribution { min-width: 240px; }
+    .roster-col-review { min-width: 390px; max-width: 420px; }
+    .roster-col-firstname,
+    .roster-col-specialty,
+    .roster-col-payment,
+    .roster-col-state,
+    .roster-col-distribution,
+    .roster-col-review {
+        white-space: normal;
+    }
+    .roster-fio {
+        font-weight: 700;
+    }
+    .roster-contact {
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .roster-muted {
+        color: var(--text-muted);
+    }
+    .fio-review-card {
+        min-width: 350px;
+        max-width: 400px;
+        padding: 9px 10px;
+        border: 1px solid var(--warning-border);
+        border-radius: 8px;
+        background: var(--warning-soft);
+        line-height: 1.4;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .fio-review-card strong,
+    .fio-review-card span {
+        display: block;
+    }
+    .fio-review-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+    }
+    .fio-review-actions form {
+        margin: 0;
+    }
+    .fio-review-actions .btn {
+        padding: 7px 10px;
+        font-size: 13px;
+    }
+    .fio-review-card .fio-review-skipped {
+        display: flex;
+        width: 100%;
+        box-sizing: border-box;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    @media (max-width: 900px) {
+        .roster-summary {
+            grid-template-columns: repeat(2, minmax(130px, 1fr));
+        }
+    }
+    @media (max-width: 560px) {
+        .roster-summary {
+            grid-template-columns: 1fr;
+        }
+    }

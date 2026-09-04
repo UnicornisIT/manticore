@@ -1,0 +1,103 @@
+.students-filter {
+        margin-bottom: 18px;
+    }
+    .students-filter-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .students-filter-row input,
+    .students-filter-row select,
+    .students-filter-row .btn {
+        box-sizing: border-box;
+        height: 38px;
+        margin: 0;
+        font-size: 15px;
+    }
+    .students-filter-row input,
+    .students-filter-row select {
+        min-width: 180px;
+        padding: 8px 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--bg-surface);
+    }
+    .students-filter-row select {
+        min-width: 120px;
+    }
+    .students-filter-row .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 18px;
+        line-height: 1;
+    }
+    .students-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-surface);
+    }
+    .students-table {
+        min-width: 1260px;
+    }
+    .students-table td:nth-child(4),
+    .students-table td:nth-child(5) {
+        min-width: 140px;
+        white-space: normal;
+    }
+    .students-table-actions,
+    .students-table .table-actions-heading {
+        position: sticky;
+        right: 0;
+        z-index: 4;
+        min-width: 108px;
+        width: 108px;
+        white-space: nowrap;
+        background: var(--bg-surface);
+        box-shadow: -1px 0 0 var(--border);
+        text-align: center;
+    }
+    .students-table .table-actions-heading {
+        z-index: 7;
+        background: var(--bg-subtle) !important;
+    }
+    .students-table tbody tr:hover .students-table-actions {
+        background: color-mix(in srgb, var(--accent-soft) 48%, var(--bg-surface));
+    }
+    .students-order-cell {
+        min-width: 170px;
+        white-space: normal;
+    }
+    .students-order-cell strong,
+    .students-order-cell small {
+        display: block;
+    }
+    .students-order-cell small {
+        margin-top: 3px;
+        color: var(--text-muted);
+    }
+    .password-reveal summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        color: var(--accent);
+        font-weight: 600;
+    }
+    .password-reveal .disclosure-chevron {
+        width: 22px;
+        height: 22px;
+        flex-basis: 22px;
+    }
+    .password-reveal .disclosure-chevron svg {
+        width: 13px;
+        height: 13px;
+    }
+    .password-reveal > span {
+        display: inline-block;
+        margin-top: 6px;
+        font-family: Consolas, monospace;
+    }

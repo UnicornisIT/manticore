@@ -856,7 +856,8 @@ class ManticoreAppTests(unittest.TestCase):
         self.login_session(client)
         list_response = client.get('/abiturients?campaign_year=2026&q=Отзывов&order_by=fio&order_dir=asc')
         list_body = list_response.get_data(as_text=True)
-        self.assertIn('title="Отозвать документы"', list_body)
+        self.assertIn('class="row-action-item is-warning"', list_body)
+        self.assertIn('Отозвать документы', list_body)
         csrf_token = self.csrf_from_response(list_response)
 
         response = client.post(
@@ -1036,8 +1037,10 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertNotIn('Ранний', body)
         self.assertNotIn('Безприказов', body)
         self.assertIn('selected', body)
-        self.assertIn('class="btn action-icon-btn action-icon-edit"', body)
-        self.assertIn('class="btn action-icon-btn action-icon-delete"', body)
+        self.assertIn('class="row-action-trigger"', body)
+        self.assertIn('class="row-action-item"', body)
+        self.assertIn('class="row-action-item is-danger"', body)
+        self.assertNotIn('action-icon-btn', body)
 
         export_response = client.get(
             '/students/download',
@@ -1416,7 +1419,8 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('nav-search', dashboard_body)
         self.assertIn('global-search-modal', dashboard_body)
         self.assertIn('data-search-overlay-url="/search_overlay"', dashboard_body)
-        self.assertIn('fetch(searchUrl.toString()', dashboard_body)
+        self.assertIn('/static/js/app.js', dashboard_body)
+        self.assertIn('global-search-palette-input', dashboard_body)
         self.assertIn('Мастер миграции', dashboard_body)
         self.assertIn('Контингент', dashboard_body)
         self.assertIn('Операции', dashboard_body)
@@ -1424,7 +1428,7 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('Проверка данных', dashboard_body)
         self.assertIn('Ручное создание логина', dashboard_body)
         self.assertIn('nav-dropdown', dashboard_body)
-        self.assertIn("otherDropdown.open = false", dashboard_body)
+        self.assertIn('/static/css/modern.css', dashboard_body)
         self.assertNotIn('nav-menu', dashboard_body)
         self.assertNotIn('Что требует внимания', dashboard_body)
         self.assertIn('Центр задач', dashboard_body)

@@ -1,0 +1,51 @@
+.conflict-edit-page {
+        max-width: 640px;
+        margin: 0 auto;
+    }
+    .conflict-edit-summary {
+        display: grid;
+        gap: 6px;
+        margin: 16px 0;
+        padding: 16px;
+        border: 1px solid var(--info-border);
+        border-radius: 8px;
+        background: var(--info-soft);
+        color: var(--info);
+    }
+    .conflict-edit-summary p {
+        margin: 0;
+    }
+    .conflict-edit-form {
+        display: grid;
+        gap: 14px;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-subtle);
+    }
+    .conflict-edit-field {
+        display: grid;
+        gap: 8px;
+    }
+    .conflict-edit-field label {
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+    .conflict-edit-field input {
+        width: 100%;
+    }
+    .conflict-edit-note {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 14px;
+    }
+    .conflict-edit-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    @media (max-width: 520px) {
+        .conflict-edit-actions {
+            grid-template-columns: 1fr;
+        }
+    }

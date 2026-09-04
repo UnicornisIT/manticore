@@ -1,57 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Просмотр приказа{% endblock %}
 {% block head %}
-<style>
-    .order-detail-header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-        flex-wrap: wrap;
-        margin-bottom: 18px;
-    }
-    .order-detail-actions {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-    }
-    .order-detail-actions form {
-        margin: 0;
-    }
-    .order-summary {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin: 18px 0;
-    }
-    .order-summary-item {
-        min-width: 130px;
-        padding: 10px 12px;
-        border: 1px solid #dbeafe;
-        border-radius: 8px;
-        background: #eff6ff;
-    }
-    .order-summary-item strong {
-        display: block;
-        color: #2563eb;
-        font-size: 20px;
-    }
-    .order-meta {
-        margin: 0;
-        color: #475569;
-        line-height: 1.5;
-    }
-    .order-rows-wrap {
-        overflow-x: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background: #fff;
-    }
-    .order-rows-table {
-        min-width: 1100px;
-    }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/enrollment_order_upload.css') }}">
 {% endblock %}
 {% block content %}
 <div class="order-detail-header">
@@ -70,7 +20,7 @@
         {% if upload.stored_filename %}
         <a href="{{ url_for('download_enrollment_order_upload', upload_id=upload.id) }}" class="btn btn-download">Скачать файл</a>
         {% endif %}
-        <form method="post" action="{{ url_for('delete_enrollment_order_upload_route', upload_id=upload.id) }}" onsubmit="return confirm('Удалить этот приказ из сверки? Статусы кандидатов будут пересчитаны.');">
+        <form method="post" action="{{ url_for('delete_enrollment_order_upload_route', upload_id=upload.id) }}" data-confirm="Удалить этот приказ из сверки? Статусы кандидатов будут пересчитаны.">
             {% include "_csrf_field.html" %}
             <button type="submit" class="btn btn-danger">Удалить</button>
         </form>
