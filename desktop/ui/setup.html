@@ -54,9 +54,8 @@
             <input id="database-path" type="text" spellcheck="false" autocomplete="off">
             <button type="button" class="button secondary" id="browse-database">Выбрать…</button>
           </div>
-          <label for="update-server-url">Сервер обновлений <span>необязательно</span></label>
-          <input id="update-server-url" type="url" spellcheck="false" autocomplete="url" placeholder="https://manticore.example.ru">
-          <p class="field-hint">Пустое значение использует настройки локального сервера.</p>
+          <input id="update-server-url" type="hidden">
+          <p class="field-hint">Desktop-обновления загружаются из официального GitHub Releases Manticore.</p>
         </div>
 
         <div class="form-error" id="configuration-error" role="alert" hidden></div>

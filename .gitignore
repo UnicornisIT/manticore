@@ -44,6 +44,7 @@ uploads/*
 logs/
 *.pid
 *.lock
+!requirements-desktop.lock
 
 # Local copies and temporary packaging output
 _clean_copy/
@@ -68,3 +69,4 @@ desktop.ini
 # Codex/local agent state
 .agents/
 .codex/
+.ui-audit-data/

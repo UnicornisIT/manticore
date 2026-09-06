@@ -149,7 +149,7 @@
 {% endif %}
 
 {% if not active_file_section %}
-<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+<hr class="section-divider">
 {% endif %}
 
 {% if not active_file_section or active_file_section == 'updates' %}
@@ -280,7 +280,7 @@
 {% endif %}
 
 {% if not active_file_section %}
-<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+<hr class="section-divider">
 {% endif %}
 
 {% if not active_file_section or active_file_section == 'orders' %}
@@ -466,7 +466,7 @@
 {% endif %}
 
 {% if not active_file_section %}
-<hr style="margin: 32px 0; border: 1px solid #e5e7eb;">
+<hr class="section-divider">
 {% endif %}
 
 {% if not active_file_section or active_file_section == 'students' %}
@@ -477,7 +477,7 @@
     {% else %}
     <p class="file-hint">Файл студентов должен содержать <b>username, password, email, firstname, lastname, cohort1</b>. Можно добавить необязательные поля <b>source_dogovor</b> и <b>source_fio</b>, чтобы студенты участвовали в проверке договоров.</p>
     {% endif %}
-    <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-download upload-template-link">Скачать шаблон CSV</a></p>
+    <p><a href="{{ url_for('static', filename='students_template.csv') }}" class="btn btn-download upload-template-link" download="students_template.csv">Скачать шаблон CSV</a></p>
     <form action="{{ url_for('students_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
         {% include "_csrf_field.html" %}
         <input type="hidden" name="students_import_action" value="preview">
@@ -569,6 +569,10 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
+
+{% if not active_file_section or active_file_section == 'contingent' %}
+{% include '_contingent.html' %}
 {% endif %}
 
 {% if abiturients_import_result_ready %}

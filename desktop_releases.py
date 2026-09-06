@@ -15,7 +15,7 @@ from pathlib import Path
 
 DEFAULT_GITHUB_REPOSITORY = "UnicornisIT/manticore"
 APPROVAL_FILENAME = "desktop_release_approval.json"
-VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
+VERSION_PATTERN = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 MAX_INSTALLER_SIZE = 256 * 1024 * 1024
@@ -59,9 +59,9 @@ def normalize_repository(value: str) -> str:
 
 def version_key(value: str):
     version = normalize_version(value)
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+]([0-9A-Za-z.-]+))?", version)
-    major, minor, patch, suffix = match.groups()
-    return int(major), int(minor), int(patch), 1 if suffix is None else 0, suffix or ""
+    major, minor, patch, suffix, _build = VERSION_PATTERN.fullmatch(version).groups()
+    identifiers = tuple((0, int(part)) if part.isdigit() else (1, part) for part in (suffix or "").split("."))
+    return int(major), int(minor), int(patch), int(suffix is None), identifiers if suffix else ()
 
 
 def is_newer(candidate: str, current: str) -> bool:
@@ -92,14 +92,16 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
         raise
 
 
-def _validated_release_payload(payload: dict, repository: str) -> dict:
+def _validated_release_payload(payload: dict, repository: str, *, stable_client: bool = False) -> dict:
     if payload.get("draft") or payload.get("prerelease"):
         raise DesktopReleaseError("Черновик или prerelease нельзя публиковать для Windows-клиентов.")
-    if payload.get("immutable") is not True:
+    if not stable_client and payload.get("immutable") is not True:
         raise DesktopReleaseError(
             "GitHub Release не помечен как Immutable. Включите immutable releases в настройках репозитория."
         )
     tag_name = str(payload.get("tag_name") or "").strip()
+    if stable_client and VERSION_PATTERN.fullmatch(normalize_version(tag_name)).group(4) is not None:
+        raise DesktopReleaseError("Latest содержит предварительную версию. Требуется стабильный релиз vX.Y.Z.")
     version = installer_version_from_tag(tag_name)
     expected_names = {
         f"Manticore-Setup-{version}.exe",
@@ -141,6 +143,8 @@ def _validated_release_payload(payload: dict, repository: str) -> dict:
         raise DesktopReleaseError("Установщик должен скачиваться непосредственно с github.com по HTTPS.")
     if not urllib.parse.unquote(parsed_url.path).casefold().startswith(expected_prefix):
         raise DesktopReleaseError("Ссылка установщика не принадлежит настроенному GitHub-репозиторию.")
+    if stable_client and (parsed_url.port not in (None, 443) or urllib.parse.unquote(parsed_url.path) != f"/{repository}/releases/download/{tag_name}/{asset['name']}"):
+        raise DesktopReleaseError("Ссылка установщика не соответствует тегу и имени файла релиза.")
 
     try:
         release_id = int(payload.get("id") or 0)
@@ -159,7 +163,7 @@ def _validated_release_payload(payload: dict, repository: str) -> dict:
         "notes": str(payload.get("body") or "")[:4000],
         "html_url": str(payload.get("html_url") or ""),
         "published_at": str(payload.get("published_at") or ""),
-        "immutable": True,
+        "immutable": payload.get("immutable") is True,
         "asset_id": asset_id,
         "asset_name": str(asset.get("name") or ""),
         "download_url": download_url,
@@ -168,7 +172,7 @@ def _validated_release_payload(payload: dict, repository: str) -> dict:
     }
 
 
-def _fetch_release_api(api_url: str, repository: str, timeout: float) -> dict:
+def _fetch_release_api(api_url: str, repository: str, timeout: float, *, stable_client: bool = False) -> dict:
     repository = normalize_repository(repository)
     request = urllib.request.Request(
         api_url,
@@ -184,11 +188,22 @@ def _fetch_release_api(api_url: str, repository: str, timeout: float) -> dict:
         if len(raw_payload) > 2 * 1024 * 1024:
             raise DesktopReleaseError("Ответ GitHub API слишком большой.")
         payload = json.loads(raw_payload.decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise DesktopReleaseError(f"Не удалось проверить последний GitHub Release: {exc}") from exc
+    except urllib.error.HTTPError as exc:
+        messages = {403: "GitHub ограничил запросы. Повторите проверку позже.", 429: "Превышен лимит GitHub API. Повторите позже.", 404: "Стабильный публичный GitHub Release не найден."}
+        raise DesktopReleaseError(messages.get(exc.code, f"GitHub временно недоступен (HTTP {exc.code}).")) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise DesktopReleaseError("GitHub вернул повреждённые сведения о релизе. Повторите проверку позже.") from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise DesktopReleaseError("Не удалось связаться с GitHub. Проверьте подключение к интернету и повторите попытку.") from exc
     if not isinstance(payload, dict):
         raise DesktopReleaseError("GitHub API вернул некорректный ответ.")
-    return _validated_release_payload(payload, repository)
+    return _validated_release_payload(payload, repository, stable_client=stable_client)
+
+
+def fetch_stable_release(timeout: float = 8.0) -> dict:
+    """The desktop stable channel has exactly one, compile-time public source."""
+    repository = DEFAULT_GITHUB_REPOSITORY
+    return _fetch_release_api(f"https://api.github.com/repos/{repository}/releases/latest", repository, timeout, stable_client=True)
 
 
 def fetch_latest_release(repository: str = DEFAULT_GITHUB_REPOSITORY, timeout: float = 8.0) -> dict:

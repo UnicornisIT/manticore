@@ -54,4 +54,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(project_root / "desktop" / "manticore.ico"),
+    version=str(project_root / "build" / "windows-version.txt"),
 )

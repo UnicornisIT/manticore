@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Управление{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="page-eyebrow">{{ app_metadata.name }}</p><h1>Управление</h1><p>Управление системой и настройки этого устройства.</p></div></header>
+<div class="management-layout">
+{% if can_administer %}{% include '_management_admin.html' %}{% endif %}
+{% include '_management_settings.html' %}
+{% include '_management_about.html' %}
+</div>
+<script src="{{ url_for('static', filename='js/desktop-settings.js') }}" defer></script>
+{% endblock %}

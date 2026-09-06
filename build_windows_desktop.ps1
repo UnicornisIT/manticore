@@ -16,12 +16,9 @@ $Repository = 'UnicornisIT/manticore'
 if ($Version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') {
     throw "Файл VERSION должен содержать версию в формате 1.2.3."
 }
-if (-not $CertificateThumbprint -and -not $UnsignedDevelopmentBuild) {
-    throw "Для безопасной сборки укажите -CertificateThumbprint. Для тестового EXE без обновлений явно укажите -UnsignedDevelopmentBuild."
-}
 
 $Certificate = $null
-$SignerSha256 = '0' * 64
+$SignerSha256 = ''
 $SignTool = $null
 if ($CertificateThumbprint) {
     $NormalizedThumbprint = $CertificateThumbprint.Replace(' ', '').ToUpperInvariant()
@@ -58,6 +55,11 @@ $BuildDirectory = Join-Path $ProjectRoot 'build'
 New-Item -ItemType Directory -Force -Path $BuildDirectory | Out-Null
 $PyInstallerWorkDirectory = Join-Path $BuildDirectory 'Manticore'
 if (Test-Path -LiteralPath $PyInstallerWorkDirectory) {
+    $ResolvedWorkDirectory = (Resolve-Path -LiteralPath $PyInstallerWorkDirectory).Path
+    $ExpectedWorkDirectory = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'build\Manticore'))
+    if ($ResolvedWorkDirectory -ne $ExpectedWorkDirectory -or (Get-Item -LiteralPath $PyInstallerWorkDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Unsafe PyInstaller work directory.'
+    }
     Get-ChildItem -LiteralPath $PyInstallerWorkDirectory -Force -Recurse | ForEach-Object {
         $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
     }
@@ -68,6 +70,7 @@ if (Test-Path -LiteralPath $PyInstallerWorkDirectory) {
 $TrustPolicy = [ordered]@{
     github_repository = $Repository
     signer_certificate_sha256 = $SignerSha256
+    allow_unsigned_updates = (-not [bool]$CertificateThumbprint)
 }
 $TrustPolicy | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BuildDirectory 'trusted_update.json') -Encoding UTF8
 
@@ -82,22 +85,35 @@ function Sign-Binary([string]$Path) {
 }
 
 if (-not (Test-Path -LiteralPath $Python)) {
-    $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
-    if ($PyLauncher) {
-        & $PyLauncher.Source -3 -m venv $VirtualEnvironment
+    $ProjectPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $ProjectPython) {
+        & $ProjectPython -m venv $VirtualEnvironment
     } else {
-        $SystemPython = Get-Command python -ErrorAction Stop
-        & $SystemPython.Source -m venv $VirtualEnvironment
+        $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+        if ($PyLauncher) {
+            & $PyLauncher.Source -3 -m venv $VirtualEnvironment
+        }
+        if (-not (Test-Path -LiteralPath $Python)) {
+            $SystemPython = Get-Command python -ErrorAction SilentlyContinue
+            if ($SystemPython) {
+                & $SystemPython.Source -m venv $VirtualEnvironment
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $Python)) {
+        throw 'Не удалось создать Python-окружение для Desktop-сборки. Установите Python 3.11 x64.'
     }
 }
 
 if (-not $SkipDependencies) {
-    & $Python -m pip install --upgrade pip
-    & $Python -m pip install -r (Join-Path $ProjectRoot 'requirements-desktop.txt')
+    & $Python -m pip install -r (Join-Path $ProjectRoot 'requirements-desktop.lock')
+    if ($LASTEXITCODE -ne 0) { throw 'Desktop dependencies installation failed.' }
 }
 
 Push-Location $ProjectRoot
 try {
+    & $Python desktop/release_tools.py --version-resource
+    if ($LASTEXITCODE -ne 0) { throw 'Version resource generation failed.' }
     & $Python -m PyInstaller --clean --noconfirm (Join-Path $ProjectRoot 'desktop\Manticore.spec')
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller завершился с ошибкой $LASTEXITCODE."
@@ -114,11 +130,19 @@ try {
         if (-not $Compiler) {
             throw "Inno Setup 6 не найден. Установите его или запустите скрипт с -SkipInstaller."
         }
-        & $Compiler "/DMyAppVersion=$Version" (Join-Path $ProjectRoot 'desktop\Manticore.iss')
+        $InstallerStage = Join-Path $BuildDirectory ('installer-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $InstallerStage | Out-Null
+        & $Compiler "/O$InstallerStage" "/DMyAppVersion=$Version" (Join-Path $ProjectRoot 'desktop\Manticore.iss')
         if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup завершился с ошибкой $LASTEXITCODE."
         }
-        Sign-Binary (Join-Path $ProjectRoot "dist\installer\Manticore-Setup-$Version.exe")
+        $StagedInstaller = Join-Path $InstallerStage "Manticore-Setup-$Version.exe"
+        Sign-Binary $StagedInstaller
+        $InstallerOutput = Join-Path $ProjectRoot 'dist\installer'
+        New-Item -ItemType Directory -Force -Path $InstallerOutput | Out-Null
+        Move-Item -LiteralPath $StagedInstaller -Destination (Join-Path $InstallerOutput "Manticore-Setup-$Version.exe") -Force
+        & $Python desktop/release_tools.py --metadata
+        if ($LASTEXITCODE -ne 0) { throw 'Release metadata generation failed.' }
     }
 } finally {
     Pop-Location

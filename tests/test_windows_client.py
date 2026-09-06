@@ -29,27 +29,19 @@ class WindowsClientTests(unittest.TestCase):
         self.assertGreater(windows_client.version_key("2.0.0"), windows_client.version_key("1.9.9"))
         self.assertGreater(windows_client.version_key("1.0.0"), windows_client.version_key("1.0.0-rc.1"))
 
-    @mock.patch('desktop.windows_client.threading.Timer')
-    @mock.patch('desktop.windows_client.offer_and_install_update', return_value=True)
-    def test_desktop_api_starts_approved_update_and_closes_windows(self, install_update, timer):
+    def test_desktop_api_never_installs_before_download(self):
         api = windows_client.DesktopApi('https://manticore.example.test')
-
-        result = api.install_approved_update()
-
-        self.assertTrue(result['started'])
-        install_update.assert_called_once_with(
-            'https://manticore.example.test',
-            ask_confirmation=False,
-            show_check_errors=True,
-            allow_same_version_rebuild=True,
-        )
-        timer.return_value.start.assert_called_once_with()
+        with mock.patch('desktop.windows_client.launch_installer_after_exit') as launch:
+            result = api.install_approved_update()
+            self.assertEqual(result['state'], 'disabled')
+            launch.assert_not_called()
 
     @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
     @mock.patch('desktop.windows_client.installed_scope_switch', return_value='/ALLUSERS')
     @mock.patch('desktop.windows_client.subprocess.Popen')
     def test_installer_launcher_waits_for_current_process(self, popen, _scope, _powershell):
-        windows_client.launch_installer_after_exit(Path(r'C:\Temp\Manticore-Setup-2.0.0.exe'))
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)):
+            windows_client.launch_installer_after_exit(Path(r'C:\Temp\Manticore-Setup-2.0.0.exe'))
 
         command_arguments = popen.call_args.args[0]
         encoded_command = command_arguments[-1]
@@ -58,10 +50,13 @@ class WindowsClientTests(unittest.TestCase):
         self.assertIn('Start-Process -FilePath', command)
         self.assertIn('Manticore-Setup-2.0.0.exe', command)
         self.assertIn("'/ALLUSERS'", command)
-        self.assertIn("'/RESTARTAPPLICATIONS'", command)
+        self.assertIn("'/NORESTARTAPPLICATIONS'", command)
+        self.assertIn('-PassThru -Wait', command)
+        self.assertIn('--skip-update', command)
+        self.assertIn('/DIR=', command)
 
     def test_desktop_window_uses_bundled_icon(self):
-        webview = mock.Mock()
+        webview = mock.MagicMock()
         window = webview.create_window.return_value
         with tempfile.TemporaryDirectory(prefix='manticore_window_') as directory:
             root = Path(directory)
@@ -74,6 +69,10 @@ class WindowsClientTests(unittest.TestCase):
             ):
                 windows_client.open_desktop_window('https://manticore.example.test')
 
+        webview.settings.__setitem__.assert_has_calls([
+            mock.call('ALLOW_DOWNLOADS', True),
+            mock.call('OPEN_EXTERNAL_LINKS_IN_BROWSER', True),
+        ])
         start_callback = webview.start.call_args.args[0]
         webview.start.assert_called_once_with(
             start_callback,
@@ -86,8 +85,9 @@ class WindowsClientTests(unittest.TestCase):
             start_callback()
         window.load_url.assert_called_once_with('https://manticore.example.test')
 
+    @mock.patch('desktop.windows_client.threading.Timer')
     @mock.patch('desktop.windows_client.save_config')
-    def test_setup_api_validates_and_saves_remote_configuration(self, save_config):
+    def test_setup_api_validates_and_saves_remote_configuration(self, save_config, timer):
         api = windows_client.SetupApi({'local_secret_key': 'kept-secret'}, 'configuration')
 
         result = api.submit_configuration({'mode': 'remote', 'server_url': 'https://example.test/'})
@@ -97,6 +97,8 @@ class WindowsClientTests(unittest.TestCase):
         self.assertEqual(saved['server_url'], 'https://example.test')
         self.assertEqual(saved['update_server_url'], 'https://example.test')
         self.assertEqual(saved['local_secret_key'], 'kept-secret')
+        timer.assert_called_once_with(0.05, api._close_window)
+        timer.return_value.start.assert_called_once_with()
 
     def test_setup_api_rejects_remote_http(self):
         api = windows_client.SetupApi({}, 'configuration')
@@ -104,7 +106,8 @@ class WindowsClientTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertIn('HTTPS', result['error'])
 
-    def test_setup_api_admin_password_round_trip(self):
+    @mock.patch('desktop.windows_client.threading.Timer')
+    def test_setup_api_admin_password_round_trip(self, timer):
         with tempfile.TemporaryDirectory(prefix='manticore_password_') as directory:
             result_path = Path(directory) / 'password.secret'
             api = windows_client.SetupApi({}, 'admin-password', str(result_path))
@@ -113,6 +116,8 @@ class WindowsClientTests(unittest.TestCase):
             self.assertFalse(mismatch['ok'])
             self.assertTrue(accepted['ok'])
             self.assertEqual(result_path.read_text(encoding='utf-8'), 'password-one')
+            timer.assert_called_once_with(0.05, api._close_window)
+            timer.return_value.start.assert_called_once_with()
 
     @mock.patch('desktop.windows_client.urllib.request.urlopen')
     def test_connection_check_returns_friendly_error(self, urlopen):
@@ -144,98 +149,15 @@ class WindowsClientTests(unittest.TestCase):
                 'a' * 64,
             )
 
-    @mock.patch('desktop.windows_client.load_trust_policy')
-    @mock.patch('desktop.windows_client.desktop_releases.fetch_release_by_tag')
-    @mock.patch('desktop.windows_client.urllib.request.urlopen')
-    def test_update_must_match_server_approval_and_github_release(self, urlopen, fetch_release, trust_policy):
-        trust_policy.return_value = {
-            'github_repository': 'UnicornisIT/manticore',
-            'signer_certificate_sha256': 'b' * 64,
-        }
-        approval = {
-            'repository': 'UnicornisIT/manticore',
-            'release_id': 100,
-            'tag_name': 'v9.8.7',
-            'version': '9.8.7',
-            'asset_id': 200,
-            'asset_name': 'Manticore-Setup-9.8.7.exe',
-            'sha256': 'a' * 64,
-            'size': 1234,
-        }
-        server_response = mock.MagicMock()
-        server_response.__enter__.return_value.read.return_value = json.dumps({
-            'repository': 'UnicornisIT/manticore',
-            'approved': True,
-            'approval': approval,
-        }).encode('utf-8')
-        urlopen.return_value = server_response
-        fetch_release.return_value = {
-            **approval,
-            'notes': 'Исправления',
-            'download_url': 'https://github.com/UnicornisIT/manticore/releases/download/v9.8.7/Manticore-Setup-9.8.7.exe',
-        }
-
-        manifest = windows_client.fetch_update_manifest('https://manticore.example.test')
-
-        self.assertEqual(manifest['version'], '9.8.7')
-        self.assertEqual(manifest['sha256'], 'a' * 64)
-        self.assertEqual(manifest['signer_certificate_sha256'], 'b' * 64)
-
-        fetch_release.return_value['sha256'] = 'c' * 64
-        with self.assertRaises(ValueError):
-            windows_client.fetch_update_manifest('https://manticore.example.test')
-
-    @mock.patch('desktop.windows_client.current_version', return_value='9.8.7')
-    @mock.patch('desktop.windows_client.load_trust_policy')
-    @mock.patch('desktop.windows_client.desktop_releases.fetch_release_by_tag')
-    @mock.patch('desktop.windows_client.urllib.request.urlopen')
-    def test_same_version_rebuild_is_available_only_for_manual_install(
-        self,
-        urlopen,
-        fetch_release,
-        trust_policy,
-        _current_version,
-    ):
-        trust_policy.return_value = {
-            'github_repository': 'UnicornisIT/manticore',
-            'signer_certificate_sha256': 'b' * 64,
-        }
-        approval = {
-            'repository': 'UnicornisIT/manticore',
-            'release_id': 101,
-            'tag_name': 'v9.8.7-rebuild',
-            'version': '9.8.7',
-            'asset_id': 201,
-            'asset_name': 'Manticore-Setup-9.8.7.exe',
-            'sha256': 'a' * 64,
-            'size': 1234,
-        }
-        server_response = mock.MagicMock()
-        server_response.__enter__.return_value.read.return_value = json.dumps({
-            'repository': 'UnicornisIT/manticore',
-            'approved': True,
-            'approval': approval,
-        }).encode('utf-8')
-        urlopen.return_value = server_response
-        fetch_release.return_value = {
-            **approval,
-            'is_rebuild': True,
-            'notes': 'Исправленная сборка',
-            'download_url': (
-                'https://github.com/UnicornisIT/manticore/releases/download/'
-                'v9.8.7-rebuild/Manticore-Setup-9.8.7.exe'
-            ),
-        }
-
-        self.assertEqual(windows_client.fetch_update_manifest('https://manticore.example.test'), {})
-        manifest = windows_client.fetch_update_manifest(
-            'https://manticore.example.test',
-            allow_same_version_rebuild=True,
-        )
-
-        self.assertEqual(manifest['version'], '9.8.7')
-        self.assertEqual(manifest['tag_name'], 'v9.8.7-rebuild')
-        self.assertTrue(manifest['is_rebuild'])
+    @mock.patch('desktop.windows_client.current_version', return_value='1.0.0')
+    @mock.patch('desktop.windows_client.load_trust_policy', return_value={'signer_certificate_sha256': ''})
+    @mock.patch('desktop.windows_client.desktop_releases.fetch_stable_release')
+    def test_direct_latest_supports_version_jump_and_blocks_downgrade(self, fetch, _policy, _version):
+        for version, expected in [('1.5.0', True), ('1.0.0', False), ('0.9.0', False)]:
+            fetch.return_value = {'version': version}
+            result = windows_client.fetch_update_manifest('https://ignored.example.test')
+            self.assertEqual(bool(result), expected)
+        self.assertEqual(fetch.call_args, mock.call())
 
 
 if __name__ == "__main__":

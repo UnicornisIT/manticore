@@ -12,12 +12,20 @@
     {% block head %}{% endblock %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css') }}">
 </head>
-<body class="{% if session.get('user') %}app-authenticated {% endif %}{% if request.endpoint == 'index' %}home-page{% elif request.endpoint == 'login' %}login-page-body{% endif %}">
+{% set reconciliation_page = request.blueprint == 'contingent' %}
+{% set data_page_endpoints = [
+    'abiturients', 'students', 'students_list', 'file_work', 'data_checks',
+    'abiturients_to_students', 'duplicates', 'students_duplicates',
+    'duplicates_abiturients', 'login_conflicts', 'enrollment_order_upload_detail',
+    'enrollment_order_student_roster', 'add_group', 'campaigns', 'audit_logs',
+    'backups', 'admin_panel', 'administration_tools', 'approve_users', 'search'
+] %}
+<body class="{% if session.get('user') %}app-authenticated {% endif %}{% if request.endpoint in data_page_endpoints or reconciliation_page %}data-page {% endif %}{% if request.endpoint in ['login', 'register'] %}auth-page {% endif %}{% if request.endpoint == 'index' %}home-page{% elif request.endpoint == 'login' %}login-page-body{% endif %}">
     <div class="container">
         {% if session.get('user') %}
         {% set migration_nav_endpoints = ['migration_wizard', 'abiturients_to_students', 'duplicates', 'students_duplicates', 'duplicates_abiturients'] %}
         {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list'] %}
-        {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints %}
+        {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints + ([request.endpoint] if reconciliation_page else []) %}
         {% set file_work_nav_section = request.view_args.get('section') if request.view_args else None %}
         <ul class="main-nav">
             <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
@@ -46,7 +54,7 @@
                     </summary>
                     <div class="nav-dropdown-panel">
                         <div class="nav-submenu">
-                            <a href="{{ url_for('file_work') }}" class="nav-submenu-main{% if request.endpoint == 'file_work' %} active{% endif %}">
+                            <a href="{{ url_for('file_work') }}" class="nav-submenu-main{% if request.endpoint == 'file_work' or reconciliation_page %} active{% endif %}">
                                 <span>Работа с файлами</span>
                                 <svg class="nav-submenu-caret" viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="m6 9 6 6 6-6"></path>
@@ -57,6 +65,7 @@
                                 <a href="{{ url_for('file_work', section='updates') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'updates' %}class="active"{% endif %}>Обновление почты и оплаты</a>
                                 <a href="{{ url_for('file_work', section='orders') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'orders' %}class="active"{% endif %}>Приказ о зачислении</a>
                                 <a href="{{ url_for('file_work', section='students') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'students' %}class="active"{% endif %}>Загрузка студентов</a>
+                                <a href="{{ url_for('file_work', section='contingent') }}" {% if reconciliation_page or (request.endpoint == 'file_work' and file_work_nav_section == 'contingent') %}class="active"{% endif %}>Сверка контингента</a>
                             </div>
                         </div>
                         <a href="{{ url_for('data_checks') }}" {% if request.endpoint == 'data_checks' %}class="active"{% endif %}>Проверка данных</a>
@@ -85,17 +94,6 @@
                     <input id="global-search-input" class="nav-search-input" type="search" name="q" value="{{ request.args.get('q', '') if request.endpoint == 'search' else '' }}" placeholder="ФИО, договор, логин, email" autocomplete="off">
                 </form>
             </li>
-            {% if session.get('role') == 'admin' %}
-            <li>
-                <a href="{{ url_for('admin_panel') }}" class="nav-icon-link{% if request.endpoint in ['admin_panel', 'approve_users', 'add_user', 'edit_user', 'campaigns', 'login_generation_setup', 'backups', 'audit_logs'] %} active{% endif %}" aria-label="Панель администратора" title="Панель администратора">
-                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path>
-                        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.04.04a2 2 0 1 1-3.92 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1l-.04-.04a2 2 0 1 1 0-3.92L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.04-.04a2 2 0 1 1 3.92 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.18.37.4.7.6 1l.04.04a2 2 0 1 1 0 3.92L20 14a1.7 1.7 0 0 0-.6 1Z"></path>
-                    </svg>
-                    <span class="nav-label">Администрирование</span>
-                </a>
-            </li>
-            {% endif %}
             <li>
                 <a href="{{ url_for('documentation') }}" class="nav-icon-link{% if request.endpoint == 'documentation' %} active{% endif %}" aria-label="Документация" title="Документация">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -107,9 +105,9 @@
                 </a>
             </li>
             <li>
-                <a href="{{ url_for('desktop_settings') }}" class="nav-icon-link{% if request.endpoint == 'desktop_settings' %} active{% endif %}" aria-label="Настройки приложения" title="Настройки приложения">
+                <a href="{{ url_for('management') }}" class="nav-icon-link{% if request.endpoint in ['management', 'administration_tools', 'approve_users', 'add_user', 'edit_user', 'campaigns', 'login_generation_setup', 'backups', 'audit_logs'] %} active{% endif %}" aria-label="Управление" title="Управление">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 14.8 6L14.5 3h-5L9.2 6a7 7 0 0 0-1.7 1.1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 9.2 18l.3 3h5l.3-3a7 7 0 0 0 1.7-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"></path></svg>
-                    <span class="nav-label">Настройки</span>
+                    <span class="nav-label">Управление</span>
                 </a>
             </li>
             <li class="sidebar-meta"><span>Manticore {{ app_version }}</span></li>
@@ -121,23 +119,36 @@
             'data_checks': 'Проверка данных', 'manual_create': 'Ручное создание',
             'migration_wizard': 'Мастер миграции', 'admin_panel': 'Администрирование',
             'campaigns': 'Кампании', 'search': 'Поиск', 'person_card': 'Карточка человека',
-            'documentation': 'Документация', 'desktop_settings': 'Настройки приложения'
+            'documentation': 'Документация', 'desktop_settings': 'Управление', 'management': 'Управление', 'administration_tools': 'Пользователи и обслуживание'
         } %}
         <header class="app-topbar">
             <button type="button" class="topbar-icon sidebar-toggle" aria-label="Свернуть боковую панель" title="Свернуть боковую панель" aria-expanded="true" data-sidebar-toggle>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
-            <div class="topbar-title">{{ page_titles.get(request.endpoint, 'Manticore') }}</div>
-            <button type="button" class="topbar-search nav-search-toggle-proxy" aria-label="Открыть глобальный поиск">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-                <span>Поиск по людям, договорам, логинам…</span><kbd>Ctrl K</kbd>
-            </button>
-            <button type="button" class="topbar-icon theme-toggle" aria-label="Изменить тему" title="Тема: системная" data-theme-toggle>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg>
-            </button>
-            <div class="topbar-user" title="Текущий пользователь">
-                <span class="user-avatar" aria-hidden="true">{{ session.get('user', 'M')[:1]|upper }}</span>
-                <span>{{ session.get('user') }}</span>
+            <div class="topbar-title">{{ 'Сверка контингента' if reconciliation_page else page_titles.get(request.endpoint, 'Manticore') }}</div>
+            <div class="topbar-search-slot">
+                <button type="button" class="topbar-icon topbar-search nav-search-toggle-proxy" title="Глобальный поиск (Ctrl+K)" aria-label="Открыть глобальный поиск" aria-haspopup="dialog" aria-controls="global-search-modal" data-global-search-open>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <span>Поиск по людям, договорам, логинам…</span><kbd>Ctrl K</kbd>
+                </button>
+            </div>
+            <div class="topbar-actions">
+                <button type="button" class="topbar-icon theme-toggle" aria-label="Изменить тему" title="Тема: системная" data-theme-toggle>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg>
+                </button>
+                <details class="user-menu">
+                    <summary class="topbar-user" aria-label="Меню пользователя">
+                        <span class="user-avatar" aria-hidden="true">{{ session.get('user', 'M')[:1]|upper }}</span>
+                        <span>{{ session.get('user') }}</span>
+                    </summary>
+                    <nav class="user-menu-links" aria-label="Меню пользователя">
+                        <a href="{{ url_for('file_work', section='contingent') }}">Сверка контингента</a>
+                        {% if can_administer %}<a href="{{ url_for('management', _anchor='administration') }}">Администрирование</a>{% endif %}
+                        <a href="{{ url_for('management', _anchor='settings') }}">Настройки</a>
+                        <a href="{{ url_for('management', _anchor='about') }}">О программе</a>
+                        <a href="{{ url_for('logout') }}">Выйти</a>
+                    </nav>
+                </details>
             </div>
         </header>
         <div class="global-search-modal" id="global-search-modal" hidden>
@@ -151,7 +162,7 @@
                     <button type="button" class="global-search-close" aria-label="Закрыть поиск" data-global-search-close>&times;</button>
                 </div>
                 <div class="global-search-meta" id="global-search-meta"></div>
-                <div class="global-search-results" id="global-search-results"></div>
+                <div class="global-search-results" id="global-search-results" role="listbox" aria-live="polite" aria-label="Результаты глобального поиска"></div>
             </section>
         </div>
         <div class="confirm-modal" id="confirm-modal" hidden>
@@ -179,24 +190,18 @@
         </main>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/table-selection.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/modern-ui.js') }}" defer></script>
-    {% if request.endpoint in ['index', 'login'] %}
+    <script src="{{ url_for('static', filename='js/user-menu.js') }}" defer></script>
+    {% if request.endpoint == 'login' %}
+    {% from '_developer_links.html' import developer_links %}
     <footer id="main-footer">
         <div class="footer-inner">
-            <div>
-                Разработано UnicornisIT • 
-                <a href="https://github.com/UnicornisIT" class="footer-link" title="GitHub репозиторий">GitHub</a> • 
-                <a href="https://t.me/unicornis_pulse" class="footer-link" title="Telegram канал">Telegram</a> • 
-                <a href="mailto:dev-eva@outlook.com" class="footer-link" title="Email">Email</a>
-                {% if session.get('user') %}
-                    <br>
-                    <span class="footer-user">Вы вошли под пользователем: <span style="font-weight:600;">{{ session.get('user') }}</span></span>
-                {% endif %}
-                <br>
-                <span class="footer-version">manticore v{{ app_version }}</span>
-            </div>
+            <p>© {{ app_metadata.name }} <span class="footer-version">{{ app_version }}</span> · Разработчик: {{ app_metadata.developer_name }}</p>
+            <nav aria-label="Контакты разработчика">{{ developer_links(app_metadata) }}</nav>
         </div>
     </footer>
     {% endif %}
+<script src="{{ url_for('static', filename='js/desktop-updater.js') }}" defer></script>
 </body>
 </html>

@@ -187,10 +187,12 @@
     })();
     (function() {
         const searchForm = document.querySelector('.nav-search');
-        if (!searchForm) {
+        if (!searchForm || searchForm.dataset.globalSearchInitialized === 'true') {
             return;
         }
+        searchForm.dataset.globalSearchInitialized = 'true';
         const toggle = searchForm.querySelector('.nav-search-toggle');
+        const openControls = Array.from(document.querySelectorAll('[data-global-search-open]'));
         const sourceInput = searchForm.querySelector('.nav-search-input');
         const input = document.getElementById('global-search-palette-input') || sourceInput;
         const modal = document.getElementById('global-search-modal');
@@ -200,6 +202,23 @@
         const endpoint = searchForm.dataset.searchOverlayUrl;
         const personUrlTemplate = searchForm.dataset.personUrlTemplate;
         let lastController = null;
+        let selectedResultIndex = -1;
+        let restoreFocus = null;
+
+        function selectResult(index) {
+            const results = Array.from(resultsBox.querySelectorAll('.global-search-result'));
+            if (!results.length) {
+                selectedResultIndex = -1;
+                return;
+            }
+            selectedResultIndex = (index + results.length) % results.length;
+            results.forEach(function(result, resultIndex) {
+                const selected = resultIndex === selectedResultIndex;
+                result.classList.toggle('is-selected', selected);
+                result.setAttribute('aria-selected', String(selected));
+                if (selected) result.scrollIntoView({ block: 'nearest' });
+            });
+        }
 
         function personUrl(item) {
             const kind = encodeURIComponent(String(item.kind ?? ''));
@@ -210,15 +229,19 @@
         }
 
         function openSearch() {
+            if (modal.hidden) {
+                restoreFocus = document.activeElement;
+            }
             searchForm.classList.add('is-open');
             toggle.setAttribute('aria-expanded', 'true');
-            openModal();
+            modal.hidden = false;
+            document.body.classList.add('global-search-lock');
             if (sourceInput.value && !input.value) {
                 input.value = sourceInput.value;
             }
-            window.setTimeout(function() {
+            if (document.activeElement !== input) {
                 input.focus();
-            }, 0);
+            }
         }
 
         function collapseSearch() {
@@ -229,20 +252,24 @@
             toggle.setAttribute('aria-expanded', 'false');
         }
 
-        function openModal() {
-            modal.hidden = false;
-            document.body.classList.add('global-search-lock');
-        }
-
         function closeModal() {
+            if (modal.hidden) {
+                return;
+            }
             modal.hidden = true;
             document.body.classList.remove('global-search-lock');
-            (document.querySelector('.nav-search-toggle-proxy') || toggle).focus();
+            toggle.setAttribute('aria-expanded', 'false');
+            const previousFocus = restoreFocus;
+            restoreFocus = null;
+            (previousFocus && previousFocus.isConnected
+                ? previousFocus
+                : document.querySelector('.nav-search-toggle-proxy') || toggle).focus();
         }
 
         function renderResults(payload) {
             const query = payload.query || input.value.trim();
             const results = Array.isArray(payload.results) ? payload.results : [];
+            selectedResultIndex = -1;
             if (!results.length) {
                 meta.textContent = 'По запросу «' + query + '» ничего не найдено';
                 const empty = document.createElement('p');
@@ -254,7 +281,7 @@
             meta.textContent = 'Найдено: ' + results.length + ' по запросу «' + query + '»';
             const fragment = document.createDocumentFragment();
             results.forEach(function(item) {
-                const article = document.createElement('article'); article.className = 'global-search-result';
+                const article = document.createElement('article'); article.className = 'global-search-result'; article.setAttribute('role', 'option'); article.setAttribute('aria-selected', 'false');
                 const details = document.createElement('div');
                 const status = document.createElement('span'); status.className = 'global-search-result-status'; status.textContent = item.status || 'Запись';
                 const title = document.createElement('span'); title.className = 'global-search-result-title'; title.textContent = item.title || 'Без названия';
@@ -270,10 +297,8 @@
             sourceInput.value = query;
             openSearch();
             if (!query) {
-                input.focus();
                 return;
             }
-            openModal();
             meta.textContent = 'Ищу...';
             resultsBox.replaceChildren();
 
@@ -308,7 +333,7 @@
 
         toggle.addEventListener('click', function(event) {
             event.preventDefault();
-            if (!searchForm.classList.contains('is-open')) {
+            if (modal.hidden) {
                 openSearch();
                 return;
             }
@@ -319,27 +344,49 @@
             input.focus();
         });
 
+        openControls.forEach(function(control) {
+            control.addEventListener('click', function() {
+                openSearch();
+            });
+        });
+
+        document.addEventListener('keydown', function(event) {
+            // Physical KeyK works in every layout, including Russian (event.key === 'л').
+            if ((event.ctrlKey || event.metaKey) && event.code === 'KeyK') {
+                event.preventDefault();
+                if (!event.repeat) {
+                    openSearch();
+                }
+            } else if (event.key === 'Escape' && !modal.hidden) {
+                event.preventDefault();
+                closeModal();
+            }
+        });
+
         searchForm.addEventListener('submit', function(event) {
             event.preventDefault();
             runSearch();
         });
 
         input.addEventListener('keydown', function(event) {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                const count = resultsBox.querySelectorAll('.global-search-result').length;
+                if (count) {
+                    event.preventDefault();
+                    selectResult(selectedResultIndex + (event.key === 'ArrowDown' ? 1 : -1));
+                }
+                return;
+            }
             if (event.key === 'Enter') {
                 event.preventDefault();
+                const selectedLink = resultsBox.querySelector('.global-search-result.is-selected a');
+                if (selectedLink) {
+                    selectedLink.click();
+                    return;
+                }
                 runSearch();
                 return;
             }
-            if (event.key !== 'Escape') {
-                return;
-            }
-            if (!modal.hidden) {
-                closeModal();
-                return;
-            }
-            input.value = '';
-            collapseSearch();
-            toggle.focus();
         });
 
         input.addEventListener('blur', function() {
@@ -350,9 +397,4 @@
             control.addEventListener('click', closeModal);
         });
 
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape' && !modal.hidden) {
-                closeModal();
-            }
-        });
     })();

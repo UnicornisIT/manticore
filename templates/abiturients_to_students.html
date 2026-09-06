@@ -56,7 +56,7 @@
     <p class="groups-empty">Для выбранной специальности в папке {{ group_year }} пока нет подходящих академических групп.</p>
     {% endif %}
 
-    <form method="post" target="_blank" rel="noopener">
+    <form method="post" target="_blank" rel="noopener" data-table-selection>
         {% include "_csrf_field.html" %}
         <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
         <input type="hidden" name="group_year" value="{{ group_year }}">
@@ -90,13 +90,16 @@
         {% endif %}
 
         <div class="migration-table-block">
-            <label class="migration-table-title">Кандидаты к зачислению:</label>
+            <div class="migration-table-heading">
+                <span class="migration-table-title">Кандидаты к зачислению:</span>
+                <span class="selection-count" aria-live="polite">Выбрано: <strong data-selection-count>0</strong></span>
+            </div>
             <div class="migration-table-wrapper">
                 <table class="migration-table candidates-migration-table">
                     <thead>
                         <tr>
                             <th>
-                                <input type="checkbox" id="select_all_ready" title="Выбрать всех сверенных">
+                                <input type="checkbox" id="select_all_ready" data-select-all title="Выбрать всех отображаемых сверенных" aria-label="Выбрать всех отображаемых сверенных">
                             </th>
                             <th><button type="button" class="sort-button" data-sort-key="fio" data-sort-target="abiturients_table_body">ФИО</button></th>
                             <th><button type="button" class="sort-button" data-sort-key="specialty" data-sort-target="abiturients_table_body">Специальность</button></th>
@@ -109,6 +112,7 @@
                     <tbody id="abiturients_table_body">
                         {% for candidate in candidates %}
                         <tr
+                            data-record-id="{{ candidate.id }}"
                             data-fio="{{ (candidate.fio or '')|lower }}"
                             data-specialty="{{ (candidate.specialty or '')|lower }}"
                             data-login="{{ (candidate.login or '')|lower }}"
@@ -117,7 +121,7 @@
                             data-status="{{ (candidate.status_label or '')|lower }}"
                         >
                             <td>
-                                <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" {% if candidate.id|string in selected_candidate_ids %}checked{% endif %} {% if not candidate.can_migrate %}disabled{% endif %}>
+                                <input type="checkbox" name="candidate_ids" value="{{ candidate.id }}" data-row-select aria-label="Выбрать {{ candidate.fio }}" {% if candidate.id|string in selected_candidate_ids %}checked{% endif %} {% if not candidate.can_migrate %}disabled{% endif %}>
                             </td>
                             <td>{{ candidate.fio }}</td>
                             <td>{{ candidate.specialty }}</td>
@@ -139,8 +143,8 @@
         </div>
 
         <div class="migration-actions">
-            <button type="submit" class="btn btn-success manual-mode-only" {% if not suggested_groups %}disabled{% endif %}>2. Перенести сверенных в студенты</button>
-            <button type="submit" name="distribution_action" value="preview_login_groups" class="btn btn-success login-mode-only" formtarget="_self">2. Предпросмотр по логинам</button>
+            <button type="submit" class="btn btn-success manual-mode-only" data-selection-action {% if not suggested_groups %}disabled{% endif %}>2. Перенести сверенных в студенты</button>
+            <button type="submit" name="distribution_action" value="preview_login_groups" class="btn btn-success login-mode-only" data-selection-action formtarget="_self">2. Предпросмотр по логинам</button>
         </div>
     </form>
 
@@ -249,15 +253,6 @@
 </div>
 
 <script>
-const selectAllReady = document.getElementById('select_all_ready');
-if (selectAllReady) {
-    selectAllReady.addEventListener('change', function() {
-        document.querySelectorAll('input[name="candidate_ids"]:not(:disabled)').forEach(function(input) {
-            input.checked = selectAllReady.checked;
-        });
-    });
-}
-
 const sortButtons = document.querySelectorAll('.sort-button[data-sort-key]');
 const sortState = {};
 

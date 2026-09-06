@@ -214,6 +214,7 @@
         accent-color: var(--warning);
         flex: 0 0 auto;
     }
+    .manual-optional { color: var(--text-muted); font-weight: 400; }
     [hidden] { display: none !important; }
     @media (max-width: 720px) {
         .manual-mode-grid,

@@ -1,0 +1,11 @@
+{% from '_developer_links.html' import external_link %}
+  <section class="settings-card" id="about" tabindex="-1" aria-labelledby="about-title">
+    <div class="settings-card-heading"><div><h2 id="about-title">О программе</h2><p>{{ app_metadata.name }}</p></div></div>
+    <dl class="settings-details">
+      <div><dt>Версия приложения</dt><dd>{{ app_version }}</dd></div>
+      <div><dt>Разработчик</dt><dd>{{ app_metadata.developer_name }}</dd></div>
+      <div><dt>GitHub</dt><dd>{{ external_link(app_metadata.github_url, app_metadata.github_url|replace('https://', '')) }}</dd></div>
+      <div><dt>Telegram</dt><dd>{{ external_link(app_metadata.telegram_url, '@' ~ app_metadata.telegram_url.rsplit('/', 1)[-1]) }}</dd></div>
+      <div><dt>Email</dt><dd>{{ external_link('mailto:' ~ app_metadata.developer_email, app_metadata.developer_email) }}</dd></div>
+    </dl>
+  </section>

@@ -9,8 +9,8 @@
         padding: 32px 40px;
         border: 1px solid var(--border);
         border-radius: 8px;
-        background: var(--bg-surface);
-        box-shadow: 0 4px 18px rgba(44, 62, 80, 0.08);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-md);
     }
     .register-form label {
         color: var(--text-secondary);

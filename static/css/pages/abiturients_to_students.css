@@ -87,6 +87,20 @@
     .migration-table-block {
         margin-bottom: 18px;
     }
+    .migration-table-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .selection-count {
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
+    }
+    .selection-count strong {
+        color: var(--accent);
+    }
     .migration-table-wrapper {
         max-height: clamp(260px, calc(100vh - 620px), 420px);
         overflow: auto;
@@ -275,7 +289,7 @@
         background: var(--text-muted);
     }
     .login-preview-table {
-        width: max-content;
+        width: 100%;
         min-width: 1580px;
         margin: 0;
         table-layout: auto;

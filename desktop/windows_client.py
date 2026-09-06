@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -29,7 +30,7 @@ import desktop_releases
 APP_NAME = "Manticore"
 CONFIG_FILENAME = "desktop-config.json"
 UPDATE_ENDPOINT = "/api/desktop/releases/windows"
-VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
+VERSION_PATTERN = desktop_releases.VERSION_PATTERN
 MAX_INSTALLER_SIZE = 256 * 1024 * 1024
 TRUST_POLICY_PATH = Path("desktop") / "trusted_update.json"
 WINDOW_ICON_PATH = Path("desktop") / "manticore.ico"
@@ -66,9 +67,14 @@ def load_trust_policy() -> dict:
         raise ValueError("В клиент не встроена политика доверенных обновлений.") from exc
     repository = desktop_releases.normalize_repository(payload.get("github_repository", ""))
     signer_sha256 = str(payload.get("signer_certificate_sha256") or "").strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", signer_sha256) or signer_sha256 == "0" * 64:
-        raise ValueError("В клиенте не настроен сертификат издателя обновлений.")
+    if repository != desktop_releases.DEFAULT_GITHUB_REPOSITORY:
+        raise ValueError("Недоверенный источник обновлений.")
+    if signer_sha256 and (not re.fullmatch(r"[0-9a-f]{64}", signer_sha256) or signer_sha256 == "0" * 64):
+        raise ValueError("Некорректный сертификат издателя обновлений.")
+    if not signer_sha256 and payload.get("allow_unsigned_updates") is not True:
+        raise ValueError("В сборке не настроена политика подписи обновлений.")
     return {"github_repository": repository, "signer_certificate_sha256": signer_sha256}
+
 
 
 def application_data_directory() -> Path:
@@ -358,68 +364,23 @@ def prompt_initial_admin_password() -> str | None:
 
 
 def version_key(value: str):
-    value = str(value or "").strip().lstrip("vV")
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+]([0-9A-Za-z.-]+))?", value)
-    if not match:
-        return None
-    major, minor, patch, suffix = match.groups()
-    return int(major), int(minor), int(patch), 1 if suffix is None else 0, suffix or ""
+    return desktop_releases.version_key(value)
 
 
-def fetch_update_manifest(server_url: str, *, allow_same_version_rebuild: bool = False) -> dict:
+def fetch_update_manifest(server_url: str = "", *, allow_same_version_rebuild: bool = False) -> dict:
+    # Legacy arguments are retained for old callers, never used as update sources.
     trust_policy = load_trust_policy()
-    endpoint = server_url.rstrip("/") + UPDATE_ENDPOINT
-    request = urllib.request.Request(
-        endpoint,
-        headers={"Accept": "application/json", "User-Agent": f"Manticore-Desktop/{current_version()}"},
-    )
-    with urllib.request.urlopen(request, timeout=8) as response:
-        raw_payload = response.read(1024 * 1024 + 1)
-    if len(raw_payload) > 1024 * 1024:
-        raise ValueError("Ответ сервера обновлений слишком большой.")
-    payload = json.loads(raw_payload.decode("utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("Сервер вернул некорректную политику обновлений.")
-    if payload.get("repository") != trust_policy["github_repository"]:
-        raise ValueError("Сервер обновлений указал недоверенный GitHub-репозиторий.")
-    if not payload.get("approved") or not isinstance(payload.get("approval"), dict):
+    release = desktop_releases.fetch_stable_release()
+    if version_key(release["version"]) <= version_key(current_version()):
         return {}
-    approval = payload["approval"]
-    if approval.get("repository") != trust_policy["github_repository"]:
-        raise ValueError("Разрешение обновления относится к другому репозиторию.")
-
-    release = desktop_releases.fetch_release_by_tag(
-        trust_policy["github_repository"],
-        str(approval.get("tag_name") or ""),
-        timeout=8,
-    )
-    exact_fields = ("release_id", "asset_id", "asset_name", "version", "size")
-    if any(approval.get(field) != release.get(field) for field in exact_fields):
-        raise ValueError("Данные разрешённого релиза не совпадают с Immutable Release в GitHub.")
-    if not hmac.compare_digest(str(approval.get("sha256") or ""), release["sha256"]):
-        raise ValueError("SHA-256 разрешённого установщика не совпадает с GitHub.")
-
-    latest_key = version_key(release["version"])
-    installed_key = version_key(current_version())
-    if latest_key is not None and installed_key is not None and latest_key <= installed_key:
-        same_version_rebuild = bool(release.get("is_rebuild")) and latest_key == installed_key
-        if not (allow_same_version_rebuild and same_version_rebuild):
-            return {}
-    return {
-        "version": release["version"],
-        "tag_name": release["tag_name"],
-        "is_rebuild": bool(release.get("is_rebuild")),
-        "sha256": release["sha256"],
-        "size": release["size"],
-        "notes": release["notes"],
-        "download_url": release["download_url"],
-        "signer_certificate_sha256": trust_policy["signer_certificate_sha256"],
-    }
+    return {**release, "signer_certificate_sha256": trust_policy["signer_certificate_sha256"]}
 
 
 def download_installer(manifest: dict, progress=None) -> Path:
     update_directory = application_data_directory() / "updates"
     update_directory.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(update_directory).free < manifest["size"] * 3 + 64 * 1024 * 1024:
+        raise OSError("Недостаточно свободного места для скачивания и распаковки обновления.")
     fd, temporary_name = tempfile.mkstemp(
         prefix=f"Manticore-Setup-{manifest['version']}-",
         suffix=".exe",
@@ -468,24 +429,47 @@ def installed_scope_switch() -> str:
     for hive, switch in ((winreg.HKEY_LOCAL_MACHINE, "/ALLUSERS"), (winreg.HKEY_CURRENT_USER, "/CURRENTUSER")):
         for view in registry_views:
             try:
-                with winreg.OpenKey(hive, UNINSTALL_REGISTRY_KEY, 0, winreg.KEY_READ | view):
-                    return switch
+                with winreg.OpenKey(hive, UNINSTALL_REGISTRY_KEY, 0, winreg.KEY_READ | view) as key:
+                    location, _ = winreg.QueryValueEx(key, "InstallLocation")
+                    if Path(location).resolve() == Path(sys.executable).resolve().parent:
+                        return switch
             except OSError:
                 continue
     return "/CURRENTUSER"
 
 
-def launch_installer_after_exit(installer_path: Path) -> None:
+def launch_installer_after_exit(installer_path: Path, version: str = "") -> None:
     """Wait for this process to exit, then replace the existing installation safely."""
-    path_literal = "'" + str(installer_path).replace("'", "''") + "'"
+    def literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    path_literal = literal(installer_path)
+    executable = Path(sys.executable).resolve()
+    log_path = application_data_directory() / "logs" / "installer.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path = application_data_directory() / "updates" / "install-result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
     scope_switch = installed_scope_switch()
+    directory_argument = literal('/DIR="' + str(executable.parent) + '"')
+    log_argument = literal('/LOG="' + str(log_path) + '"')
+    parent_wait = ""
+    if getattr(sys, "frozen", False):
+        parent_wait = f"if (Get-Process -Id {os.getppid()} -ErrorAction SilentlyContinue) {{ Wait-Process -Id {os.getppid()} -Timeout 120 }}; "
     arguments = (
         "@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"
-        f"'{scope_switch}','/CLOSEAPPLICATIONS','/RESTARTAPPLICATIONS')"
+        f"'{scope_switch}','/CLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',"
+        f"{directory_argument},{log_argument})"
     )
     command = (
-        f"Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue; "
-        f"Start-Process -FilePath {path_literal} -ArgumentList {arguments}"
+        f"$ErrorActionPreference='Stop'; $result=@{{ok=$false;exit_code=-1;version={literal(version)}}}; "
+        "try { "
+        f"if (Get-Process -Id {os.getpid()} -ErrorAction SilentlyContinue) {{ Wait-Process -Id {os.getpid()} -Timeout 120 }}; "
+        + parent_wait +
+        f"$installer = Start-Process -FilePath {path_literal} -ArgumentList {arguments} -WindowStyle Hidden -PassThru -Wait; "
+        "$result.exit_code=$installer.ExitCode; $result.ok=($installer.ExitCode -eq 0); "
+        "} catch { $result.message=$_.Exception.Message }; "
+        f"$result | ConvertTo-Json | Set-Content -LiteralPath {literal(result_path)} -Encoding UTF8; "
+        f"Start-Process -FilePath {literal(executable)} -ArgumentList '--skip-update' -WindowStyle Hidden"
     )
     encoded_command = base64.b64encode(command.encode("utf-16le")).decode("ascii")
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -599,60 +583,107 @@ def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: 
         )
 
 
-def offer_and_install_update(
-    server_url: str,
-    *,
-    ask_confirmation: bool = True,
-    show_check_errors: bool = False,
-    allow_same_version_rebuild: bool = False,
-) -> bool:
-    if not server_url:
-        if show_check_errors:
-            show_native_message("Не удалось проверить обновление", "Сервер обновлений не настроен.", error=True)
-        return False
-    try:
-        manifest = fetch_update_manifest(
-            server_url,
-            allow_same_version_rebuild=allow_same_version_rebuild,
-        )
-    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
-        logging.warning("Update check failed: %s", exc)
-        if show_check_errors:
-            show_native_message("Не удалось проверить обновление", str(exc), error=True)
-        return False
-    if not manifest:
-        if show_check_errors:
-            show_native_message(
-                "Обновление Manticore",
-                "Разрешённая новая версия не найдена. На этом компьютере уже установлена последняя разрешённая версия либо администратор ещё не разрешил новый релиз.",
-            )
-        return False
+class DesktopUpdater:
+    """Single serialized updater; renderer receives status, never executable paths."""
 
-    if manifest.get("is_rebuild") and manifest["version"] == current_version():
-        details = f"Доступна исправленная сборка версии {manifest['version']}."
-    else:
-        details = f"Доступна версия {manifest['version']} (установлена {current_version()})."
-    if manifest["notes"]:
-        details += f"\n\n{manifest['notes']}"
-    details += "\n\nСкачать и установить обновление сейчас?"
-    if ask_confirmation and not confirm_native_message("Обновление Manticore", details):
-        return False
+    def __init__(self, close_windows):
+        self._lock = threading.RLock()
+        self._close_windows = close_windows
+        self._manifest = None
+        self._installer = None
+        self._state = {"state": "idle" if getattr(sys, "frozen", False) else "disabled",
+                       "current_version": current_version(), "version": "", "notes": "",
+                       "downloaded": 0, "total": 0, "percent": 0, "error": ""}
 
-    try:
-        installer_path = download_installer(manifest)
-        verify_authenticode_signature(installer_path, manifest["signer_certificate_sha256"])
-        launch_installer_after_exit(installer_path)
-        return True
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        logging.exception("Update installation failed")
-        if 'installer_path' in locals():
-            try:
-                installer_path.unlink()
-            except OSError:
-                pass
-        if show_check_errors:
-            show_native_message("Не удалось обновить Manticore", str(exc), error=True)
-        return False
+    def status(self):
+        with self._lock:
+            return dict(self._state)
+
+    def _set(self, **values):
+        with self._lock:
+            self._state.update(values)
+
+    def _error(self, exc):
+        logging.exception("[Updater] Operation failed")
+        message = str(exc) if isinstance(exc, ValueError) else "Проверьте подключение к интернету и свободное место. Подробности — в журнале клиента."
+        self._set(state="error", error=message)
+
+    def check(self):
+        with self._lock:
+            if self._state["state"] in {"disabled", "checking", "downloading", "downloaded", "installing"}:
+                return self.status()
+            self._set(state="checking", error="", version="", notes="")
+            threading.Thread(target=self._check, name="manticore-update-check", daemon=True).start()
+            return self.status()
+
+    def _check(self):
+        try:
+            logging.info("[Updater] Checking stable GitHub release; current=%s", current_version())
+            manifest = fetch_update_manifest()
+            with self._lock:
+                self._manifest = manifest or None
+                self._set(state="available" if manifest else "current", version=manifest.get("version", ""), notes=manifest.get("notes", ""))
+            logging.info("[Updater] %s version=%s", self.status()["state"], self.status()["version"])
+        except Exception as exc:
+            self._error(exc)
+
+    def download(self):
+        with self._lock:
+            if self._state["state"] != "available" or not self._manifest:
+                return self.status()
+            self._set(state="downloading", downloaded=0, total=self._manifest["size"], percent=0, error="")
+            threading.Thread(target=self._download, name="manticore-update-download", daemon=True).start()
+            return self.status()
+
+    def _verify(self, path):
+        manifest = self._manifest
+        with path.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        if path.stat().st_size != manifest["size"] or not hmac.compare_digest(digest, manifest["sha256"]):
+            raise ValueError("Проверка целостности установщика не пройдена. Повторите проверку и скачивание.")
+        if manifest["signer_certificate_sha256"]:
+            verify_authenticode_signature(path, manifest["signer_certificate_sha256"])
+
+    def _download(self):
+        path = None
+        try:
+            last_logged = -1
+            def progress(done, total):
+                nonlocal last_logged
+                percent = min(100, int(done * 100 / total))
+                self._set(downloaded=done, total=total, percent=percent)
+                if percent // 10 != last_logged:
+                    logging.info("[Updater] Download %s%%", percent)
+                    last_logged = percent // 10
+            path = download_installer(self._manifest, progress)
+            self._verify(path)
+            self._installer = path
+            self._set(state="downloaded", percent=100)
+            logging.info("[Updater] Update downloaded and verified")
+        except Exception as exc:
+            if path:
+                path.unlink(missing_ok=True)
+            self._error(exc)
+
+    def install(self):
+        with self._lock:
+            if self._state["state"] != "downloaded" or not self._installer:
+                return self.status()
+            self._set(state="installing")
+        try:
+            # Native confirmation also protects against unsolicited renderer calls.
+            if not confirm_native_message("Обновление Manticore", f"Установить версию {self._manifest['version']} и перезапустить приложение? Сохраните незавершённую работу."):
+                self._set(state="downloaded")
+                return self.status()
+            self._verify(self._installer)
+            launch_installer_after_exit(self._installer, self._manifest["version"])
+            logging.info("[Updater] Installing %s", self._manifest["version"])
+            timer = threading.Timer(0.5, self._close_windows)
+            timer.daemon = True
+            timer.start()
+        except Exception as exc:
+            self._error(exc)
+        return self.status()
 
 
 class DesktopApi:
@@ -662,6 +693,7 @@ class DesktopApi:
         self.update_server_url = update_server_url
         self.target_url = target_url
         self.connection_error = ""
+        self._updater = DesktopUpdater(self._close_windows)
 
     @staticmethod
     def _close_windows() -> None:
@@ -688,22 +720,14 @@ class DesktopApi:
             "log_path": str(application_data_directory() / "logs" / "client.log"),
         }
 
+    def get_update_status(self) -> dict:
+        return self._updater.status()
+
     def check_for_update(self) -> dict:
-        try:
-            manifest = fetch_update_manifest(self.update_server_url, allow_same_version_rebuild=True)
-        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
-            logging.warning("Manual update check failed: %s", exc)
-            return {"ok": False, "error": str(exc), "current_version": current_version()}
-        if not manifest:
-            return {"ok": True, "available": False, "current_version": current_version()}
-        return {
-            "ok": True,
-            "available": True,
-            "current_version": current_version(),
-            "version": manifest["version"],
-            "notes": manifest.get("notes", ""),
-            "is_rebuild": bool(manifest.get("is_rebuild")),
-        }
+        return self._updater.check()
+
+    def download_update(self) -> dict:
+        return self._updater.download()
 
     def open_log(self) -> dict:
         log_path = application_data_directory() / "logs" / "client.log"
@@ -737,17 +761,7 @@ class DesktopApi:
         return {"ok": True}
 
     def install_approved_update(self) -> dict:
-        started = offer_and_install_update(
-            self.update_server_url,
-            ask_confirmation=False,
-            show_check_errors=True,
-            allow_same_version_rebuild=True,
-        )
-        if started:
-            timer = threading.Timer(0.25, self._close_windows)
-            timer.daemon = True
-            timer.start()
-        return {"started": started, "current_version": current_version()}
+        return self._updater.install()
 
 
 def check_server_connection(url: str, timeout: float = 5.0) -> str:
@@ -798,8 +812,16 @@ class LocalServer:
         self._thread.join(timeout=5)
 
 
-def open_desktop_window(url: str, update_server_url: str | None = None) -> None:
+def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_update: bool = False) -> None:
     import webview
+
+    # pywebview disables downloads by default. On Windows, enabling this delegates
+    # HTTP, authenticated and blob downloads to WebView2's native streaming
+    # download handler and Save As dialog, preserving the response filename.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+    # Links with target="_blank" use pywebview's NewWindowRequested handler:
+    # Windows opens HTTPS in the system browser and mailto in the mail app.
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
 
     storage_path = application_data_directory() / "webview"
     storage_path.mkdir(parents=True, exist_ok=True)
@@ -816,13 +838,34 @@ def open_desktop_window(url: str, update_server_url: str | None = None) -> None:
         js_api=api,
     )
 
+    def install_updater_ui() -> None:
+        # Keep the updater usable with older remote server templates as well.
+        try:
+            current = window.get_current_url() or ""
+            target = urllib.parse.urlsplit(url)
+            page = urllib.parse.urlsplit(current)
+            # pywebview serves local HTML through its private loopback server.
+            # Resolve only our two fixed bundled paths, never a renderer-supplied URL.
+            bundled_page = current in {window._resolve_url(str(startup_page)), window._resolve_url(str(error_page))}
+            if bundled_page or (page.scheme, page.netloc) == (target.scheme, target.netloc):
+                script = (bundle_root() / "static" / "js" / "desktop-updater.js").read_text(encoding="utf-8")
+                window.evaluate_js(script)
+        except Exception:
+            logging.exception("[Updater] Could not initialize bundled update UI")
+
+    window.events.loaded += install_updater_ui
+
     def finish_startup() -> None:
         connection_error = check_server_connection(url)
         if connection_error:
             api.connection_error = connection_error
             window.load_url(str(error_page))
-            return
-        window.load_url(url)
+        else:
+            window.load_url(url)
+        if not skip_update and getattr(sys, "frozen", False):
+            timer = threading.Timer(4, api.check_for_update)
+            timer.daemon = True
+            timer.start()
 
     webview.start(
         finish_startup,
@@ -853,9 +896,7 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
             config = configured
             save_config(config)
             return run_configured_client(config, args)
-        if not args.skip_update and offer_and_install_update(target_url):
-            return 0
-        open_desktop_window(target_url, target_url)
+        open_desktop_window(target_url, target_url, skip_update=args.skip_update)
         return 0
 
     database_path = normalize_database_path(config.get("database_path") or default_database_path())
@@ -872,9 +913,7 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
     local_server.start()
     try:
         update_server = config.get("update_server_url") or local_server.url
-        if not args.skip_update and offer_and_install_update(update_server):
-            return 0
-        open_desktop_window(local_server.url, update_server)
+        open_desktop_window(local_server.url, update_server, skip_update=args.skip_update)
     finally:
         local_server.stop()
     return 0
@@ -891,6 +930,18 @@ def main() -> int:
     if not acquire_single_instance():
         show_native_message("Manticore", "Приложение уже запущено.")
         return 0
+    result_path = application_data_directory() / "updates" / "install-result.json"
+    if result_path.is_file():
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+            if not result.get("ok") or result.get("version") != current_version():
+                logging.error("[Updater] Installer did not complete: %s", result)
+                show_native_message("Обновление Manticore", "Обновление не завершено: установка отменена, заблокирована Windows или требует перезагрузки. Подробности: logs/installer.log в папке данных Manticore.", error=True)
+            else:
+                logging.info("[Updater] Successfully restarted version %s", current_version())
+            result_path.unlink()
+        except (OSError, ValueError):
+            logging.exception("[Updater] Could not read installation result")
     config = load_config()
     if args.configure or config.get("mode") not in {"remote", "local"}:
         configured = show_configuration_dialog(config)

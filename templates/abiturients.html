@@ -82,10 +82,11 @@
             </div>
         </form>
     </details>
+    <div data-table-selection>
     {% if can_select_rows %}
-    <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar" data-bulk-toolbar hidden>
+    <form id="bulk_abiturients_form" method="post" action="{{ url_for('bulk_abiturients') }}" class="bulk-toolbar" data-bulk-toolbar data-selection-toolbar hidden>
         {% include "_csrf_field.html" %}
-        <span class="bulk-toolbar-label">Выбрано: <strong data-bulk-count>0</strong></span>
+        <span class="bulk-toolbar-label">Выбрано: <strong data-bulk-count data-selection-count>0</strong></span>
         <span class="bulk-select-shell">
             <select name="bulk_action" required>
                 <option value="">Выберите действие</option>
@@ -97,7 +98,7 @@
                 {% endif %}
             </select>
         </span>
-        <button type="submit" class="btn" data-confirm="Выполнить действие для выбранных записей?">Выполнить</button>
+        <button type="submit" class="btn" data-selection-action data-confirm="Выполнить действие для выбранных записей?">Выполнить</button>
     </form>
     {% endif %}
     <div class="abiturients-table-wrap">
@@ -105,7 +106,7 @@
             <thead>
             <tr>
                 {% if can_select_rows %}
-                <th class="selection-cell"><input type="checkbox" id="select_all_abiturients" title="Выбрать все" aria-label="Выбрать все записи"></th>
+                <th class="selection-cell"><input type="checkbox" id="select_all_abiturients" data-select-all title="Выбрать все отображаемые записи" aria-label="Выбрать все отображаемые записи"></th>
                 {% endif %}
                 <th class="fio-header">{{ sort_link('fio', 'ФИО') }}</th>
                 <th>{{ sort_link('campaign_year', 'Кампания') }}</th>
@@ -120,9 +121,9 @@
             </thead>
             <tbody>
             {% for a in abiturients %}
-            <tr>
+            <tr data-record-id="{{ a['id'] }}">
                 {% if can_select_rows %}
-                <td class="selection-cell"><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form" aria-label="Выбрать {{ a['fio'] }}"></td>
+                <td class="selection-cell"><input type="checkbox" name="abiturient_ids" value="{{ a['id'] }}" form="bulk_abiturients_form" data-row-select aria-label="Выбрать {{ a['fio'] }}"></td>
                 {% endif %}
                 <td class="fio-cell">{{ a['fio'] }}</td>
                 <td>{{ a['campaign_year'] }}</td>
@@ -238,30 +239,5 @@
             </tbody>
         </table>
     </div>
-    <script>
-    const selectAllAbiturients = document.getElementById('select_all_abiturients');
-    const abiturientCheckboxes = Array.from(document.querySelectorAll('input[name="abiturient_ids"][form="bulk_abiturients_form"]'));
-    const bulkToolbar = document.querySelector('[data-bulk-toolbar]');
-    const bulkCount = bulkToolbar?.querySelector('[data-bulk-count]');
-    const syncBulkToolbar = function() {
-        const selected = abiturientCheckboxes.filter(function(input) { return input.checked; }).length;
-        if (bulkCount) bulkCount.textContent = String(selected);
-        if (bulkToolbar) bulkToolbar.hidden = selected === 0;
-        if (selectAllAbiturients) {
-            selectAllAbiturients.checked = selected > 0 && selected === abiturientCheckboxes.length;
-            selectAllAbiturients.indeterminate = selected > 0 && selected < abiturientCheckboxes.length;
-        }
-    };
-    if (selectAllAbiturients) {
-        selectAllAbiturients.addEventListener('change', function() {
-            abiturientCheckboxes.forEach(function(input) {
-                input.checked = selectAllAbiturients.checked;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-            syncBulkToolbar();
-        });
-    }
-    abiturientCheckboxes.forEach(function(input) { input.addEventListener('change', syncBulkToolbar); });
-    syncBulkToolbar();
-    </script>
+    </div>
     {% endblock %}

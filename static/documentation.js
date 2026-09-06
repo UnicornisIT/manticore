@@ -76,15 +76,10 @@
 
     searchInput.addEventListener('input', filterSections);
     document.addEventListener('keydown', function (event) {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-            event.preventDefault();
-            searchInput.focus();
-            if (window.innerWidth <= 980) {
-                app.classList.add('is-menu-open');
-                menuButton.setAttribute('aria-expanded', 'true');
-            }
-        }
+        // Ctrl+K belongs to the shared global palette, also on this page.
         if (event.key === 'Escape') {
+            const globalSearch = document.getElementById('global-search-modal');
+            if (event.defaultPrevented || (globalSearch && !globalSearch.hidden)) return;
             if (lightbox && !lightbox.hidden) {
                 closeLightbox();
                 return;

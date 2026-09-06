@@ -113,9 +113,6 @@ html {
             transition: background 0.2s;
             display: inline-block;
         }
-        ul li a:hover, ul li a.active {
-            background: #e0e7ff;
-        }
         ul li a.nav-brand {
             position: relative;
             color: #111827;
@@ -210,11 +207,6 @@ html {
         .nav-dropdown-summary::-webkit-details-marker {
             display: none;
         }
-        .nav-dropdown-summary:hover,
-        .nav-dropdown-summary.active,
-        .nav-dropdown[open] .nav-dropdown-summary {
-            background: #e0e7ff;
-        }
         .nav-dropdown-panel {
             position: absolute;
             top: calc(100% + 8px);
@@ -222,9 +214,9 @@ html {
             z-index: 50;
             min-width: 230px;
             padding: 6px;
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            background: #fff;
+            background: var(--bg-elevated);
             box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
         }
         .nav-dropdown-panel a {
@@ -341,10 +333,6 @@ html {
             background: transparent;
             color: #2563eb;
             margin: 0;
-        }
-        .nav-icon-link:hover,
-        .nav-icon-link.active {
-            background: #e0e7ff;
         }
         .nav-icon {
             width: 18px;
@@ -1185,8 +1173,8 @@ html {
             justify-content: space-between;
             gap: 14px;
             padding: 18px 20px 12px 20px;
-            background: #fff;
-            border-bottom: 1px solid #e5e7eb;
+            background: var(--bg-elevated);
+            border-bottom: 1px solid var(--border);
         }
         .global-search-header h2 {
             margin: 0;
@@ -1201,19 +1189,19 @@ html {
             margin: 0;
             border: 0;
             border-radius: 6px;
-            background: #f3f4f6;
-            color: #334155;
+            background: var(--bg-subtle);
+            color: var(--text-secondary);
             font-size: 24px;
             line-height: 1;
         }
         button.global-search-close:hover,
         button.global-search-close:focus {
-            background: #e5e7eb;
-            color: #111827;
+            background: var(--bg-hover);
+            color: var(--text-primary);
         }
         .global-search-meta {
             padding: 12px 20px 0 20px;
-            color: #64748b;
+            color: var(--text-muted);
             font-size: 14px;
         }
         .global-search-results {
@@ -1227,13 +1215,13 @@ html {
             gap: 12px;
             align-items: center;
             padding: 12px;
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            background: #f8fafc;
+            background: var(--bg-surface);
         }
         .global-search-result-title {
             display: block;
-            color: #111827;
+            color: var(--text-primary);
             font-size: 16px;
             font-weight: 700;
             white-space: normal;
@@ -1241,14 +1229,14 @@ html {
         .global-search-result-subtitle {
             display: block;
             margin-top: 4px;
-            color: #475569;
+            color: var(--text-secondary);
             font-size: 14px;
             white-space: normal;
         }
         .global-search-result-status {
             display: inline-block;
             margin-bottom: 5px;
-            color: #2563eb;
+            color: var(--accent);
             font-size: 13px;
             font-weight: 700;
         }
@@ -1260,10 +1248,10 @@ html {
         .global-search-error {
             margin: 0;
             padding: 14px 0;
-            color: #64748b;
+            color: var(--text-muted);
         }
         .global-search-error {
-            color: #991b1b;
+            color: var(--danger);
         }
         @media (max-width: 1100px) {
             .main-nav {

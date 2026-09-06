@@ -4,6 +4,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/login_rules_setup.css') }}">
 {% endblock %}
 {% block content %}
+{% from '_developer_links.html' import external_link %}
 <section class="rules-page">
     <div class="rules-header">
         <h1>{% if setup_completed %}Правила логинов{% else %}Первичная настройка правил логинов{% endif %}</h1>
@@ -41,7 +42,7 @@
         <section class="rules-panel">
             <h2>Свои правила</h2>
             <div class="rules-notice">
-                Если организации нужен свой вид логинов, напишите разработчику на <a href="mailto:dev-eva@outlook.com">dev-eva@outlook.com</a>. После связи настройка логинов будет выполнена в индивидуальном порядке.
+                Если организации нужен свой вид логинов, напишите разработчику на {{ external_link('mailto:' ~ app_metadata.developer_email, app_metadata.developer_email) }}. После связи настройка логинов будет выполнена в индивидуальном порядке.
             </div>
             <div class="rules-preview">
                 <div>Текущий пример договора: <code>{{ sample_dogovor }}</code></div>
@@ -120,7 +121,7 @@
                 <div class="rules-actions">
                     <button type="submit" class="btn">Сохранить правила</button>
                     {% if setup_completed %}
-                    <a href="{{ url_for('admin_panel') }}" class="btn btn-secondary">Вернуться в админку</a>
+                    <a href="{{ url_for('management', _anchor='administration') }}" class="btn btn-secondary">Вернуться в админку</a>
                     {% endif %}
                 </div>
             </form>

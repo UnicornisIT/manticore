@@ -1,0 +1,17 @@
+<section id="administration" class="management-section" tabindex="-1" aria-labelledby="administration-title">
+<h2 id="administration-title">Администрирование</h2>
+<div class="settings-layout">
+{% for endpoint, label, description in [
+    ('administration_tools', 'Пользователи и обслуживание', 'Роли, доступ, обновления сервера, разрешение Windows-релизов и очистка кампании.'),
+    ('approve_users', 'Заявки пользователей', 'Одобрение доступа к системе.'),
+    ('campaigns', 'Кампании', 'Активный год и архив кампаний.'),
+    ('add_group', 'Академические группы', 'Создание и настройка групп.'),
+    ('abiturients_to_students', 'Миграция абитуриентов', 'Перевод абитуриентов в студенты.'),
+    ('login_generation_setup', 'Правила логинов', 'Настройка формирования логинов.'),
+    ('backups', 'Резервные копии', 'Скачивание и восстановление базы.'),
+    ('audit_logs', 'Журнал действий', 'История операций в системе.')
+] %}
+<a class="settings-card management-link" href="{{ url_for(endpoint) }}"><h3>{{ label }}</h3><p>{{ description }}</p></a>
+{% endfor %}
+</div>
+</section>

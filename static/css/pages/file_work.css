@@ -144,7 +144,7 @@
         min-width: 1120px;
     }
     .abiturients-preview-table {
-        width: max-content;
+        width: 100%;
         min-width: 1480px !important;
         table-layout: auto;
         margin: 0;
@@ -329,7 +329,7 @@
         color: var(--text-primary);
     }
     .email-source-preview-table {
-        width: max-content;
+        width: 100%;
         min-width: 1320px !important;
         table-layout: auto;
         margin: 0;
@@ -359,6 +359,26 @@
     .email-source-current-email {
         color: var(--text-secondary);
         overflow-wrap: anywhere;
+    }
+    .section-divider {
+        margin: 32px 0;
+        border: 0;
+        border-top: 1px solid var(--border);
+    }
+    [data-result-filters] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: var(--space-3, 12px);
+    }
+    [data-result-filters] label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1, 4px);
+        max-width: 100%;
+    }
+    #file-section-contingent .preview-table-wrap select {
+        max-width: 100%;
     }
     @media (max-width: 640px) {
         .upload-row .btn {

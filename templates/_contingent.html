@@ -1,0 +1,84 @@
+<section class="upload-section" id="file-section-contingent">
+<h2>Сверка контингента</h2>
+<p class="file-hint">Сравнение списков заведующих отделениями с фактическими студентами и академическими группами Manticore.</p>
+<form method="post" action="{{ url_for('contingent.upload') }}" enctype="multipart/form-data" class="upload-form">
+  {% include '_csrf_field.html' %}
+  <div class="upload-row">
+    <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите список контингента">
+      <input type="file" name="file" id="contingent-file" accept=".docx" required data-file-name-target="contingent-filename">
+      <label for="contingent-file" class="file-picker-button">Выберите файл</label>
+      <span class="file-picker-drop-text">или перетащите сюда DOCX</span>
+      <span id="contingent-filename" class="file-picker-name">Файл не выбран</span>
+    </span>
+    <button class="btn" type="submit">Проверить файл</button>
+  </div>
+</form>
+{% if contingent %}
+{% set doc = contingent.document %}
+<h3>Предварительный разбор списка</h3>
+<p>Файл: {{ doc.source_filename }} · Тип: {{ 'Сводный список контингента' if doc.document_type == 'DEPARTMENT_CONTINGENT_TABLES' else 'Список одной группы' }}</p>
+<p>Учебный год: {{ doc.academic_year or 'Не указан' }} · Период обучения: {{ doc.education_period or 'Не указан' }}</p>
+<div class="preview-stats">
+  <div class="preview-stat"><strong>{{ doc.specialties|length }}</strong>Специальностей</div>
+  <div class="preview-stat"><strong>{{ contingent_groups|rejectattr('is_legacy')|list|length }}</strong>Актуальных групп</div>
+  <div class="preview-stat"><strong>{{ contingent_groups|selectattr('is_legacy')|list|length }}</strong>Legacy-групп проигнорировано</div>
+  <div class="preview-stat"><strong>{{ contingent_groups|rejectattr('is_legacy')|map(attribute='students')|map('length')|sum }}</strong>Студентов для сверки</div>
+  <div class="preview-stat"><strong>{{ contingent_groups|selectattr('mapping_status', 'equalto', 'AUTO_NORMALIZED_GROUP')|list|length }}</strong>Автоматически нормализовано</div>
+  <div class="preview-stat"><strong>{{ contingent_groups|selectattr('mapping_status', 'equalto', 'GROUP_MAPPING_REQUIRED')|list|length }}</strong>Групп требуют проверки</div>
+</div>
+{% for warning in doc.warnings %}<p class="status-badge status-warning">{{ warning }}</p>{% endfor %}
+<form method="post" action="{{ url_for('contingent.detail', token=contingent.token) }}">
+{% include '_csrf_field.html' %}
+<label>Контекст сверки — год набора <input type="number" name="year" min="2000" max="2099" value="{{ contingent.year }}" required></label>
+{% if doc.metadata_conflict %}<label><input type="checkbox" name="metadata_confirmed" value="yes" required> Подтверждаю выбранный контекст при несовпадении года в документе и имени файла</label>{% endif %}
+<div class="preview-table-wrap"><table>
+<thead><tr><th>Группа из документа</th><th>Специальность</th><th>Студентов</th><th>Сопоставление</th></tr></thead>
+<tbody>{% for group in contingent_groups if not group.is_legacy %}
+<tr><td>{{ group.source_name }}</td><td>{{ group.specialty or '—' }}</td><td>{{ group.students|length }}</td><td>
+<label>{{ contingent_labels.get(group.mapping_status, 'Группа сопоставлена') }}
+<select name="group:{{ group.id }}"><option value="">Автоматически / не выбрано</option>{% for name in group.candidates %}<option value="{{ name }}" {% if name == group.target %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+</td></tr>{% endfor %}</tbody></table></div>
+<details><summary>Пропущенные legacy-группы</summary>{% for group in contingent_groups if group.is_legacy %}<p>{{ group.source_name }} · {{ group.specialty }} · {{ group.students|length }} студентов</p>{% endfor %}</details>
+{% for row in contingent.get('rows', []) if row.candidates|length > 1 %}
+<p><label>{{ row.fio }} · {{ row.source_group }}: <select name="student:{{ row.id }}"><option value="">Выберите студента</option>{% for candidate in row.candidates %}<option value="{{ candidate.username }}" {% if contingent.choices.get(row.id) == candidate.username %}selected{% endif %}>{{ candidate.fio }} · {{ candidate.username }} · {{ candidate.group }}</option>{% endfor %}</select></label></p>
+{% endfor %}
+<button class="btn" type="submit">Выполнить сверку</button>
+</form>
+{% if contingent.outcomes %}<h3>Результат применения</h3>{% for outcome in contingent.outcomes %}<p class="{{ 'status-success' if outcome.ok else 'status-danger' }}">{{ outcome.fio }}: {{ outcome.message }}</p>{% endfor %}{% endif %}
+{% if confirmation %}
+<section class="import-preview" aria-label="Подтверждение переводов">
+<h3>Подтверждение выбранных переводов</h3>
+<p>Выбрано: {{ contingent.prepared|length }}. Без проблем: {{ contingent.prepared|rejectattr('error')|selectattr('capacity_state', 'equalto', 'available')|list|length }}.
+В заполненные группы: {{ contingent.prepared|selectattr('capacity_state', 'equalto', 'full')|list|length }}.
+В переполненные: {{ contingent.prepared|selectattr('capacity_state', 'equalto', 'over')|list|length }}.
+Конфликтов: {{ contingent.prepared|selectattr('error')|list|length }}.</p>
+{% for row in contingent.prepared %}<p>{{ row.fio }}: {{ row.current_group }} → {{ row.target_group }}. {{ row.error or row.message }} {% if row.capacity_state == 'full' %}Целевая группа заполнена.{% elif row.capacity_state == 'over' %}Целевая группа переполнена.{% endif %}</p>{% endfor %}
+<form method="post" action="{{ url_for('contingent.apply', token=contingent.token) }}">
+{% include '_csrf_field.html' %}<input type="hidden" name="confirmation" value="{{ contingent.confirmation }}">
+{% if contingent.prepared|rejectattr('capacity_state', 'equalto', 'available')|list %}<p><label><input type="checkbox" name="capacity_override" value="yes" required> Административное подтверждение: разрешаю превышение вместимости указанных групп</label></p>{% endif %}
+<a class="btn btn-muted" href="{{ url_for('contingent.detail', token=contingent.token) }}">Отмена</a>
+<button class="btn btn-danger" type="submit">Применить выбранные переводы{% if contingent.prepared|rejectattr('capacity_state', 'equalto', 'available')|list %} с разрешением переполнения{% endif %}</button>
+</form></section>
+{% endif %}
+{% if 'rows' in contingent %}
+<section data-contingent-results>
+<h3>Результаты сверки</h3>
+<div class="preview-stats"><button class="preview-stat" type="button" data-status-filter=""><strong>{{ contingent.rows|length }}</strong>Всего сверено</button>{% for status, count in contingent_counts.items() %}<button class="preview-stat" type="button" data-status-filter="{{ status }}"><strong>{{ count }}</strong>{{ contingent_labels[status] }}</button>{% endfor %}</div>
+<p><a class="btn btn-download" href="{{ url_for('contingent.export', token=contingent.token) }}">Скачать результат сверки</a> <a class="btn btn-download" href="{{ url_for('contingent.export', token=contingent.token, discrepancies=1) }}">Скачать только расхождения</a></p>
+<p><label>Поиск <input type="search" data-result-search placeholder="ФИО, группа, примечание"></label> <label><input type="checkbox" data-discrepancies> Только расхождения</label> <button type="button" class="btn btn-muted" data-reset-filters>Сбросить фильтры</button></p>
+<div data-result-filters></div><p data-visible-count aria-live="polite"></p>
+<form method="post" action="{{ url_for('contingent.prepare', token=contingent.token) }}" data-table-selection>
+{% include '_csrf_field.html' %}
+{% if session.role == 'admin' %}<div data-selection-toolbar hidden>Выбрано: <span data-selection-count>0</span> <button class="btn" type="submit" data-selection-action>Подготовить переводы</button></div>{% endif %}
+<div class="preview-table-wrap"><table data-result-table><thead><tr>
+<th><input type="checkbox" data-select-all aria-label="Выбрать доступные переводы"></th><th data-filter-key="specialty">Специальность</th><th data-filter-key="sourceGroup">Группа из документа</th><th>Группа Manticore</th><th data-filter-key="fio">ФИО</th><th data-filter-key="currentGroup">Текущая группа</th><th data-filter-key="status">Статус</th><th>Примечание</th><th>Источник</th>
+</tr></thead><tbody>{% for row in contingent.rows %}
+<tr data-result-row data-specialty="{{ row.specialty }}" data-source-group="{{ row.source_group }}" data-current-group="{{ row.current_group }}" data-fio="{{ row.fio }}" data-status="{{ row.status }}">
+<td>{% if row.status == 'WRONG_GROUP' and session.role == 'admin' %}<input type="checkbox" name="selected" value="{{ row.id }}" data-row-select aria-label="Подготовить перевод {{ row.fio }}">{% endif %}</td>
+<td>{{ row.specialty or '—' }}</td><td>{{ row.source_group }}</td><td>{{ row.target_group or '—' }}</td><td>{{ row.fio }}</td><td>{{ row.current_group or '—' }}</td><td><span class="status-badge {{ 'status-success' if row.status == 'MATCHED' else 'status-warning' }}">{{ contingent_labels[row.status] }}</span></td><td>{{ row.source_note or '—' }}</td><td><details><summary>{{ row.source_position or 'Manticore' }}</summary>{{ row.raw_text }}</details></td>
+</tr>{% endfor %}</tbody></table></div>
+</form></section>
+<script src="{{ url_for('static', filename='js/contingent.js') }}" defer></script>
+{% endif %}
+{% endif %}
+</section>

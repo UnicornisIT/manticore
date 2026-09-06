@@ -44,15 +44,6 @@
     });
   });
 
-  const searchToggle = document.querySelector('.nav-search-toggle');
-  document.querySelector('.nav-search-toggle-proxy')?.addEventListener('click', () => searchToggle?.click());
-  document.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-      event.preventDefault();
-      searchToggle?.click();
-    }
-  });
-
   const themeToggle = document.querySelector('[data-theme-toggle]');
   const themeLabels = { system: 'системная', light: 'светлая', dark: 'тёмная' };
   const syncThemeTitle = () => {
@@ -82,14 +73,27 @@
     const accept = confirmModal.querySelector('[data-confirm-accept]');
     const cancelControls = confirmModal.querySelectorAll('[data-confirm-cancel]');
     let pending = null;
+    let resolveConfirm = null;
     let restoreFocus = null;
-    const closeConfirm = () => { confirmModal.hidden = true; document.body.classList.remove('modal-lock'); pending = null; restoreFocus?.focus(); };
+    const closeConfirm = () => {
+      confirmModal.hidden = true;
+      document.body.classList.remove('modal-lock');
+      pending = null;
+      restoreFocus?.focus();
+      const resolve = resolveConfirm;
+      resolveConfirm = null;
+      resolve?.(false);
+    };
     const openConfirm = (control) => {
       pending = control; restoreFocus = document.activeElement;
       message.textContent = control.dataset.confirm || 'Продолжить выполнение действия?';
       accept.textContent = control.dataset.confirmAction || (control.matches('.btn-danger,[data-danger]') ? 'Удалить' : 'Продолжить');
       confirmModal.hidden = false; document.body.classList.add('modal-lock'); accept.focus();
     };
+    window.ManticoreConfirm = (text, action = 'Продолжить') => new Promise(resolve => {
+      openConfirm({ dataset: { confirm: text, confirmAction: action } });
+      resolveConfirm = resolve;
+    });
     document.addEventListener('click', event => {
       const control = event.target.closest('[data-confirm]');
       if (!control || control.dataset.confirmBypass === 'true') return;
@@ -102,6 +106,7 @@
     }, true);
     accept.addEventListener('click', () => {
       if (!pending) return;
+      if (resolveConfirm) { const resolve = resolveConfirm; resolveConfirm = null; closeConfirm(); resolve(true); return; }
       const target = pending; target.dataset.confirmBypass = 'true';
       if (target.tagName === 'FORM') target.requestSubmit();
       else if (target.tagName === 'BUTTON' || target.tagName === 'INPUT') target.click();
@@ -110,7 +115,16 @@
       closeConfirm();
     });
     cancelControls.forEach(control => control.addEventListener('click', closeConfirm));
-    document.addEventListener('keydown', event => { if (event.key === 'Escape' && !confirmModal.hidden) closeConfirm(); });
+    document.addEventListener('keydown', event => {
+      if (confirmModal.hidden) return;
+      if (event.key === 'Escape') { event.preventDefault(); closeConfirm(); }
+      if (event.key === 'Tab') {
+        const controls = Array.from(confirmModal.querySelectorAll('button:not([disabled])'));
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    });
   }
 
   document.querySelectorAll('input[type="file"]').forEach((input) => {
@@ -119,22 +133,7 @@
       if (!file) return;
       input.title = `${file.name} · ${(file.size / 1024).toFixed(file.size > 1048576 ? 0 : 1)} КБ`;
     });
-    const form = input.closest('form');
-    if (form) {
-      ['dragenter','dragover'].forEach(type => form.addEventListener(type, event => { event.preventDefault(); form.classList.add('is-dragover'); }));
-      ['dragleave','drop'].forEach(type => form.addEventListener(type, event => { event.preventDefault(); form.classList.remove('is-dragover'); }));
-      form.addEventListener('drop', event => {
-        const files = event.dataTransfer?.files;
-        if (!files?.length) return;
-        const transfer = new DataTransfer(); transfer.items.add(files[0]); input.files = transfer.files;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    }
-  });
-
-  document.querySelectorAll('tbody input[type="checkbox"]').forEach(checkbox => {
-    const sync = () => checkbox.closest('tr')?.classList.toggle('is-selected', checkbox.checked);
-    checkbox.addEventListener('change', sync); sync();
+    // app.js owns drop handling and accept validation on each .file-picker.
   });
 
   document.querySelectorAll('form').forEach((form) => {

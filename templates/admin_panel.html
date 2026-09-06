@@ -1,21 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Администрирование{% endblock %}
+{% block title %}Пользователи и обслуживание{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/admin_panel.css') }}">
 {% endblock %}
 {% block content %}
-<h1 class="admin-panel-title">Панель администратора</h1>
+<a href="{{ url_for('management', _anchor='administration') }}">Управление → Администрирование</a>
+<h1 class="admin-panel-title">Пользователи и обслуживание</h1>
 {% include "_campaign_switcher.html" %}
 <div class="admin-panel-card">
     <div class="admin-toolbar">
-        <a href="{{ url_for('approve_users') }}" class="btn admin-action">Одобрить заявки пользователей</a>
         <a href="{{ url_for('add_user') }}" class="btn admin-action">Добавить пользователя</a>
-        <a href="{{ url_for('abiturients_to_students') }}" class="btn admin-action">Миграция абитуриентов</a>
-        <a href="{{ url_for('add_group') }}" class="btn admin-action">Академические группы</a>
-        <a href="{{ url_for('campaigns') }}" class="btn admin-action">Кампании</a>
-        <a href="{{ url_for('login_generation_setup') }}" class="btn admin-action">Правила логинов</a>
-        <a href="{{ url_for('backups') }}" class="btn admin-action">Резервные копии</a>
-        <a href="{{ url_for('audit_logs') }}" class="btn admin-action">Журнал действий</a>
         <form method="post" action="{{ url_for('clear_abiturients') }}">
             {% include "_csrf_field.html" %}
             <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
@@ -236,6 +230,13 @@
     let latestApproved = false;
 
     function updateInstallButton(installedVersion, approved) {
+        if (window.pywebview?.api?.get_update_status) {
+            installButton.disabled = false;
+            installButton.textContent = 'Открыть обновления Desktop';
+            installButton.removeAttribute('data-confirm');
+            installNote.textContent = 'Проверка, скачивание и перезапуск доступны в настройках Desktop.';
+            return;
+        }
         if (!latestRelease || !latestRelease.version) {
             return;
         }
@@ -266,6 +267,10 @@
     }
 
     installButton.addEventListener('click', async function () {
+        if (window.pywebview?.api?.get_update_status) {
+            window.location.href = {{ url_for('management', _anchor='settings') | tojson }};
+            return;
+        }
         installButton.disabled = true;
         installButton.textContent = 'Загрузка и проверка обновления…';
         installNote.textContent = 'Не закрывайте приложение: установщик скачивается и проверяется.';

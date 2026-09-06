@@ -1,0 +1,11 @@
+{% macro external_link(url, label, class_name='') -%}
+<a href="{{ url }}" class="{{ class_name }}" target="_blank" rel="noopener noreferrer" data-external-link>{{ label }}</a>
+{%- endmacro %}
+
+{% macro developer_links(metadata) -%}
+{{ external_link(metadata.github_url, 'GitHub', 'footer-link') }}
+<span aria-hidden="true">·</span>
+{{ external_link(metadata.telegram_url, 'Telegram', 'footer-link') }}
+<span aria-hidden="true">·</span>
+{{ external_link('mailto:' ~ metadata.developer_email, 'Email', 'footer-link') }}
+{%- endmacro %}

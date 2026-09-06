@@ -22,7 +22,7 @@
                 <input type="checkbox" name="show_hidden" value="1" onchange="this.form.submit()" {% if show_hidden %}checked{% endif %}>
                 Показать скрытые
             </label>
-            <a href="{{ url_for('admin_panel') }}" class="btn btn-secondary">Назад</a>
+            <a href="{{ url_for('management', _anchor='administration') }}" class="btn btn-secondary">Назад</a>
         </form>
 
         <div class="groups-layout">
@@ -52,7 +52,7 @@
                     <label for="source_group_force">Исходная группа:</label>
                     <select id="source_group_force" name="source_group" required {% if not visible_groups %}disabled{% endif %}>
                         {% for group in visible_groups %}
-                        <option value="{{ group.name }}">{{ group.name }} ({{ group.fill }})</option>
+                        <option value="{{ group.name }}">{{ group.name }} ({{ group.fill }}{% if group.is_over_capacity %} · переполнена{% elif group.is_full %} · заполнена{% endif %})</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -103,11 +103,11 @@
                             {% if group.is_hidden %}<span class="groups-status">скрыта</span>{% endif %}
                         </td>
                         <td>
-                            <span style="font-weight:600; {% if group.is_full %}color:#b91c1c;{% else %}color:#166534;{% endif %}">
-                                {{ group.fill }}
+                            <span class="groups-capacity-status {% if group.is_over_capacity %}is-over-capacity{% elif group.is_full %}is-full{% else %}has-space{% endif %}">
+                                {{ group.fill }}{% if group.is_over_capacity %} · переполнена{% elif group.is_full %} · заполнена{% endif %}
                             </span>
                         </td>
-                        <td class="groups-table-actions">
+                        <td><div class="groups-action-cell"><div class="groups-table-actions">
                             {% if group.can_create_next %}
                             <form method="post">
                                 {% include "_csrf_field.html" %}
@@ -117,10 +117,6 @@
                                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
                                 <button type="submit" class="btn">Создать {{ group.next_name }}</button>
                             </form>
-                            {% elif group.is_full %}
-                            <span style="color:#64748b;">Следующая подгруппа создана</span>
-                            {% else %}
-                            <span style="color:#64748b;">Есть места</span>
                             {% endif %}
                             {% if group.is_hidden %}
                             <form method="post">
@@ -149,7 +145,7 @@
                                 {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
                                 <button type="submit" class="btn btn-danger">Удалить</button>
                             </form>
-                        </td>
+                        </div><span class="groups-capacity-status groups-action-status {% if group.is_over_capacity %}is-over-capacity{% elif group.is_full %}is-full{% else %}has-space{% endif %}">{% if group.is_over_capacity %}Переполнена{% elif group.is_full %}Заполнена{% else %}Есть места{% endif %}</span></div></td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -2,130 +2,142 @@ name: Windows desktop release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write
   id-token: write
   attestations: write
 
-jobs:
-  build-sign-release:
-    runs-on: windows-latest
-    steps:
-      - name: Check out tagged source
-        uses: actions/checkout@v4
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+jobs:
+  build-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-desktop.txt
-
-      - name: Verify tag matches VERSION
-        shell: powershell
-        run: |
-          $version = (Get-Content VERSION -Raw).Trim().TrimStart('v', 'V')
-          $tag = '${{ github.ref_name }}'
-          $escapedVersion = [Regex]::Escape($version)
-          if ($tag -ne "v$version" -and $tag -notmatch "^v$escapedVersion-rebuild(?:\.\d+)?$") {
-            throw "Tag ${{ github.ref_name }} does not match VERSION ($version)."
-          }
-
-      - name: Install Inno Setup
-        shell: powershell
-        run: choco install innosetup --yes --no-progress
-
-      - name: Import code-signing certificate
-        id: certificate
-        shell: powershell
-        timeout-minutes: 2
+          cache-dependency-path: requirements-desktop.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate release tag against VERSION
+        shell: pwsh
         env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python desktop/release_tools.py --check-tag $env:RELEASE_TAG --allow-prerelease
+      - name: Install locked dependencies
+        shell: pwsh
         run: |
-          if (-not $env:WINDOWS_CERTIFICATE_BASE64 -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
-            throw 'Configure WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD repository secrets.'
+          python -m venv .venv-desktop
+          .venv-desktop/Scripts/python.exe -m pip install -r requirements-desktop.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          .venv-desktop/Scripts/python.exe -m pip check
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts' }
+      - name: Syntax checks and existing test suite
+        shell: pwsh
+        run: |
+          .venv-desktop/Scripts/python.exe -m compileall -q app.py desktop desktop_releases.py
+          if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed' }
+          foreach ($file in (Get-ChildItem static/js -Filter *.js)) {
+            node --check $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
+          }
+          .venv-desktop/Scripts/python.exe -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+      - name: Import optional signing certificate
+        id: certificate
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:CERTIFICATE_BASE64) {
+            if ($env:CERTIFICATE_PASSWORD) { throw 'Certificate secret is missing' }
+            Write-Host 'Building without code signing; GitHub HTTPS and SHA-256 remain required.'
+            exit 0
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.pfx'
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
           "pfx_path=$certificatePath" >> $env:GITHUB_OUTPUT
-          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $importedCertificates = @(Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
-          $certificate = $importedCertificates | Where-Object { $_.HasPrivateKey } | Select-Object -First 1
-          if (-not $certificate) {
-            throw 'The PFX does not contain an importable certificate with a private key.'
-          }
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString $env:CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificates = @(Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+          $certificate = $certificates | Where-Object HasPrivateKey | Select-Object -First 1
+          if (-not $certificate) { throw 'Signing private key missing from PFX' }
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-          Write-Host "Imported code-signing certificate $($certificate.Thumbprint)."
-
-          if ($certificate.Subject -eq $certificate.Issuer) {
-            $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'manticore-code-signing.cer'
-            Export-Certificate -Cert $certificate -FilePath $publicCertificatePath | Out-Null
-            "cer_path=$publicCertificatePath" >> $env:GITHUB_OUTPUT
-            Write-Host 'Trusting the self-signed certificate for this runner job.'
-            & certutil.exe -f -addstore Root $publicCertificatePath
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Could not add the self-signed certificate to the local-machine Root store.'
-            }
-            & certutil.exe -f -addstore TrustedPublisher $publicCertificatePath
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Could not add the self-signed certificate to the local-machine TrustedPublisher store.'
-            }
-            Write-Host 'The self-signed certificate is trusted for this runner job.'
-          }
-
-      - name: Build and sign Windows installer
-        shell: powershell
-        run: .\build_windows_desktop.ps1 -CertificateThumbprint '${{ steps.certificate.outputs.thumbprint }}'
-
-      - name: Verify Authenticode signature
-        shell: powershell
+      - name: Build Windows application and installer
+        shell: pwsh
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
+        run: ./build_windows_desktop.ps1 -SkipDependencies -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+      - name: Verify optional signature
+        if: steps.certificate.outputs.thumbprint != ''
+        shell: pwsh
         run: |
-          $version = (Get-Content VERSION -Raw).Trim().TrimStart('v', 'V')
-          $installer = "dist\installer\Manticore-Setup-$version.exe"
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($signature.Status -ne 'Valid') {
-            throw "Installer signature is not valid: $($signature.StatusMessage)"
+          $version = (Get-Content VERSION -Raw).Trim()
+          foreach ($path in @('dist/Manticore.exe', "dist/installer/Manticore-Setup-$version.exe")) {
+            if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid') { throw "Invalid signature: $path" }
           }
-
-      - name: Generate build provenance attestation
-        uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v3
         with:
           subject-path: dist/installer/Manticore-Setup-*.exe
-
-      - name: Publish GitHub Release asset
-        shell: powershell
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/installer/*
+          if-no-files-found: error
+      - name: Stage and verify release, then publish to its channel
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: UnicornisIT/manticore
         run: |
-          $installer = Get-ChildItem 'dist\installer\Manticore-Setup-*.exe' | Select-Object -ExpandProperty FullName -First 1
-          if (-not $installer) {
-            throw 'The Windows installer was not found.'
+          $tag = $env:RELEASE_TAG
+          $metadata = Get-Content dist/installer/desktop-update.json -Raw | ConvertFrom-Json
+          $existing = gh release view $tag --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Refusing to replace a published release; increment VERSION.' }
+          } else {
+            gh release create $tag --draft --verify-tag --generate-notes --title $tag
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft' }
           }
-          gh release create '${{ github.ref_name }}' $installer --verify-tag --generate-notes --title '${{ github.ref_name }}'
-
-      - name: Remove certificate material
+          gh release upload $tag "dist/installer/$($metadata.asset)" dist/installer/desktop-update.json dist/installer/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $raw = gh api "repos/$env:GH_REPO/releases/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
+          $release = $raw | ConvertFrom-Json
+          if (@($release.assets | Where-Object { $_.name -like '*.exe' }).Count -ne 1) { throw 'Draft must contain exactly one installer EXE' }
+          if (@($release.assets | Where-Object { $_.name -in @('desktop-update.json', 'SHA256SUMS.txt') }).Count -ne 2) { throw 'Release metadata assets are missing' }
+          $installer = @($release.assets | Where-Object name -eq $metadata.asset)
+          if ($installer.Count -ne 1 -or $installer[0].size -ne $metadata.size -or $installer[0].digest -ne "sha256:$($metadata.sha256)") { throw 'Uploaded installer does not match local metadata' }
+          if ($metadata.version.Contains('-')) {
+            gh release edit $tag --draft=false --prerelease --latest=false
+          } else {
+            gh release edit $tag --draft=false --prerelease=false --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing release failed' }
+      - name: Remove signing material
         if: always()
-        shell: powershell
+        shell: pwsh
         env:
           CERTIFICATE_PATH: ${{ steps.certificate.outputs.pfx_path }}
-          PUBLIC_CERTIFICATE_PATH: ${{ steps.certificate.outputs.cer_path }}
           CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
         run: |
-          foreach ($path in @($env:CERTIFICATE_PATH, $env:PUBLIC_CERTIFICATE_PATH)) {
-            if ($path -and (Test-Path -LiteralPath $path)) {
-              Remove-Item -LiteralPath $path -Force
-            }
-          }
-
+          if ($env:CERTIFICATE_PATH -and (Test-Path -LiteralPath $env:CERTIFICATE_PATH)) { Remove-Item -LiteralPath $env:CERTIFICATE_PATH -Force }
           if ($env:CERTIFICATE_THUMBPRINT -match '^[0-9A-Fa-f]{40}$') {
-            foreach ($store in @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\Root', 'Cert:\LocalMachine\TrustedPublisher')) {
-              $certificateItem = Join-Path $store $env:CERTIFICATE_THUMBPRINT
-              if (Test-Path -LiteralPath $certificateItem) {
-                Remove-Item -LiteralPath $certificateItem -Force
-              }
-            }
+            $certificateItem = "Cert:\CurrentUser\My\$env:CERTIFICATE_THUMBPRINT"
+            if (Test-Path -LiteralPath $certificateItem) { Remove-Item -LiteralPath $certificateItem -Force }
           }

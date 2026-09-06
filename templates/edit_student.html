@@ -30,7 +30,7 @@
     </div>
     <div class="student-edit-field">
         <label for="cohort1">Группа:</label>
-        <input type="text" id="cohort1" name="cohort1" value="{{ student[5] }}" class="form-control">
+        <input type="text" id="cohort1" name="cohort1" value="{{ student[5] }}" class="form-control" readonly>
     </div>
     {% if course_groups_enabled %}
     <div class="student-edit-field">
@@ -46,15 +46,15 @@
 <div class="student-transfer-panel">
     <section class="student-transfer-card">
         <h3>Перевод по приказу</h3>
-        <form method="post" action="{{ url_for('transfer_student_group', username=student[0]) }}" enctype="multipart/form-data" class="student-transfer-form">
+        <form method="post" action="{{ url_for('transfer_student_group', username=student[0]) }}" enctype="multipart/form-data" class="student-transfer-form" data-source="{{ student[5] }}">
             {% include "_csrf_field.html" %}
             <div class="student-transfer-field">
                 <label for="new_cohort1">Новая академическая группа:</label>
                 <select name="new_cohort1" id="new_cohort1" required>
                     <option value="">Выберите группу</option>
                     {% for group in transfer_groups %}
-                    <option value="{{ group.name }}" data-cohort2="{{ group.cohort2 }}" {% if group.name == student[5] or group.is_full %}disabled{% endif %}>
-                        {{ group.name }}{% if group.is_full %} · заполнена{% endif %}
+                    <option value="{{ group.name }}" data-cohort2="{{ group.cohort2 }}" data-count="{{ group.count }}" data-capacity="{{ group.capacity }}" {% if group.name == student[5] %}disabled{% endif %}>
+                        {{ group.name }} — {{ group.fill }}{% if group.is_over_capacity %} · переполнена{% elif group.is_full %} · заполнена{% endif %}{% if group.name == student[5] %} · текущая{% endif %}
                     </option>
                     {% endfor %}
                 </select>
@@ -71,7 +71,13 @@
                     <span id="transfer_order_file_name" class="file-picker-name">Файл не выбран</span>
                 </span>
             </div>
-            <button type="submit" class="btn btn-success" {% if not transfer_groups %}disabled{% endif %}>Оформить перевод</button>
+            <div id="transfer-capacity-preview" class="student-transfer-preview" aria-live="polite"></div>
+            <div class="student-transfer-field">
+                <label for="transfer-comment">Причина / комментарий (необязательно):</label>
+                <input id="transfer-comment" name="comment" maxlength="1000">
+            </div>
+            <p id="transfer-error" role="alert" hidden></p>
+            <button type="submit" data-keep-enabled class="btn btn-success" {% if not transfer_groups %}disabled{% endif %}>Оформить перевод</button>
         </form>
     </section>
 
@@ -107,4 +113,5 @@ if (transferGroupSelect) {
 }
 </script>
 {% endif %}
+<script src="{{ url_for('static', filename='js/student-transfer.js') }}" defer></script>
 {% endblock %}

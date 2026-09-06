@@ -18,7 +18,7 @@
     <div class="roster-actions">
         <a href="{{ url_for('data_checks', campaign_year=upload.campaign_year) }}" class="btn btn-secondary">Назад к проверке</a>
         <a href="{{ url_for('enrollment_order_upload_detail', upload_id=upload.id) }}" class="btn btn-secondary">Открыть приказ</a>
-        <a href="{{ url_for('download_enrollment_order_student_roster', upload_id=upload.id) }}" class="btn btn-success btn-download">Скачать Excel</a>
+        <a href="{{ url_for('download_enrollment_order_student_roster', upload_id=upload.id) }}" class="btn btn-success btn-download">Скачать весь список</a>
     </div>
 </div>
 
@@ -36,18 +36,28 @@
     <div class="roster-summary-item"><strong>{{ summary.virtual_group_count }}</strong>Справочных групп</div>
     <div class="roster-summary-item"><strong>{{ summary.student_count }}</strong>Уже студенты</div>
     <div class="roster-summary-item"><strong>{{ summary.ready_count }}</strong>Готовы к переносу</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.missing_email_count }}</strong>Без почты</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.unpaid_count }}</strong>Без оплаты</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.not_found_count }}</strong>Не найдены в базе</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.unassigned_count }}</strong>Не распределены</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.fio_review_count }}</strong>Сверить ФИО</div>
-    <div class="roster-summary-item"><strong>{{ summary.fio_review_linked_count }}</strong>Логин присвоен после сверки</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.specialty_conflict_count }}</strong>Конфликт специальности</div>
-    <div class="roster-summary-item warning"><strong>{{ summary.attention_count }}</strong>Требуют внимания</div>
+    {% set issue_counts = {'missing_email': summary.missing_email_count, 'unpaid': summary.unpaid_count, 'not_found': summary.not_found_count, 'unassigned': summary.unassigned_count, 'name_review': summary.fio_review_count, 'specialty_conflict': summary.specialty_conflict_count, 'attention_required': summary.attention_count} %}
+    {% for code, count in issue_counts.items() %}
+    <button type="button" class="roster-summary-item warning issue-kpi" data-issue-code="{{ code }}" data-issue-url="{{ url_for('enrollment_order_student_roster_issue', upload_id=upload.id, issue_code=code) }}" {% if not count %}disabled{% endif %} aria-haspopup="dialog">
+        <strong>{{ count }}</strong>{{ issue_types[code].label }}
+    </button>
+    {% if code == 'name_review' %}<div class="roster-summary-item"><strong>{{ summary.fio_review_linked_count }}</strong>Логин присвоен после сверки</div>{% endif %}
+    {% endfor %}
 </div>
 
 {% if groups %}
-<div class="roster-groups">
+<section class="roster-tools" aria-label="Фильтры списка">
+    <label class="roster-search">Поиск<input type="search" id="roster-search" placeholder="ФИО, договор, email, группа…"></label>
+    <label>Email<select id="roster-email-filter"><option value="">Все</option><option value="__empty__">Пусто</option><option value="__not_empty__">Не пусто</option></select></label>
+    <label>Группа<select id="roster-group-filter" multiple size="3">{% for group in groups %}<option value="{{ group.name }}">{{ group.name }}</option>{% endfor %}</select></label>
+    <label>Статус<input type="search" id="roster-status-filter" placeholder="Содержит…"></label>
+    <details class="column-chooser"><summary class="btn btn-secondary">Столбцы</summary><div class="column-chooser-panel" id="column-chooser"></div></details>
+    <button type="button" class="btn btn-secondary" id="roster-reset">Сбросить фильтры</button>
+    <a class="btn btn-success btn-download" id="roster-filtered-export" href="{{ url_for('download_enrollment_order_student_roster', upload_id=upload.id) }}">Скачать текущую выборку</a>
+    <span class="roster-result-count" id="roster-result-count" aria-live="polite"></span>
+</section>
+<div class="active-filter-chips" id="active-filter-chips"></div>
+<div class="roster-groups" id="roster-groups" data-total="{{ roster.rows|length }}">
     {% for group in groups %}
     <details class="roster-group has-disclosure-chevron" {% if loop.first %}open{% endif %}>
         <summary>
@@ -61,7 +71,7 @@
             {{ disclosure_chevron() }}
         </summary>
         <div class="roster-table-wrap">
-            <table class="roster-table">
+            <table class="roster-table" data-roster-table>
                 <thead>
                     <tr>
                         <th class="roster-col-login">Логин</th>
@@ -83,7 +93,7 @@
                 </thead>
                 <tbody>
                     {% for row in group.rows %}
-                    <tr>
+                    <tr data-roster-row data-fio="{{ row.fio }}" data-dogovor="{{ row.dogovor }}" data-login="{{ row.login }}" data-email="{{ row.email }}" data-group="{{ row.group_name }}" data-specialty="{{ row.specialty }}" data-status="{{ row.status }}" data-issues="{{ row.issues_text }}">
                         <td class="roster-col-login">{{ row.login or '-' }}</td>
                         <td class="roster-col-password">cron</td>
                         <td class="roster-contact roster-col-email">
@@ -193,4 +203,14 @@
 {% else %}
 <p>В приказе нет строк, из которых можно сформировать список.</p>
 {% endif %}
+<div class="issue-modal" id="issue-modal" hidden>
+    <button type="button" class="issue-modal-backdrop" data-issue-close aria-label="Закрыть"></button>
+    <section class="issue-dialog" role="dialog" aria-modal="true" aria-labelledby="issue-title">
+        <header class="issue-dialog-header"><div><h2 id="issue-title"></h2><p id="issue-meta"></p><p id="issue-description"></p></div><button type="button" class="global-search-close" data-issue-close aria-label="Закрыть">×</button></header>
+        <div class="issue-dialog-tools"><input type="search" id="issue-search" placeholder="Поиск по выборке…"><a class="btn btn-success btn-download" id="issue-download">Скачать Excel</a></div>
+        <div class="issue-table-wrap"><table><thead><tr><th>ФИО</th><th>Договор</th><th>Логин</th><th>Email</th><th>Группа</th><th>Специальность</th><th>Статус</th><th>Проблемы</th></tr></thead><tbody id="issue-table-body"></tbody></table></div>
+        <footer class="issue-dialog-footer"><button type="button" class="btn btn-secondary" data-issue-close>Закрыть</button></footer>
+    </section>
+</div>
+<script src="{{ url_for('static', filename='js/enrollment-order-roster.js') }}" defer></script>
 {% endblock %}

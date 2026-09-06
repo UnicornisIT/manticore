@@ -24,6 +24,7 @@ from pathlib import Path
 from time import time
 import update_app
 import desktop_releases
+from app_metadata import APP_METADATA
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -84,7 +85,7 @@ APP_DIR = Path(__file__).resolve().parent
 try:
     APP_VERSION = (APP_DIR / 'VERSION').read_text(encoding='utf-8-sig').strip()
 except OSError:
-    APP_VERSION = os.environ.get('APP_VERSION', '1.1.1')
+    APP_VERSION = os.environ.get('APP_VERSION', 'unknown')
 APP_UPDATE_ENABLED = env_bool('APP_UPDATE_ENABLED', os.name != 'nt')
 APP_UPDATE_STALE_SECONDS = env_int('APP_UPDATE_STALE_SECONDS', 3600, minimum=60)
 DESKTOP_GITHUB_REPOSITORY = os.environ.get(
@@ -1387,8 +1388,10 @@ def inject_template_globals():
 
     return {
         'app_version': APP_VERSION,
+        'app_metadata': APP_METADATA,
         'csrf_token': get_csrf_token,
         'role_labels': ROLE_LABELS,
+        'can_administer': current_user_is_admin(),
         'is_campaign_archived': is_campaign_archived,
         'url_for_with_query': url_for_with_query,
         'format_display_date': format_display_date,
@@ -1471,7 +1474,7 @@ def protect_post_requests_with_csrf():
     return redirect(get_safe_referrer(default_endpoint='index'), code=303)
 
 SETUP_ALLOWED_ENDPOINTS = {
-    'static', 'login', 'logout', 'register', 'login_generation_setup', 'documentation'
+    'static', 'login', 'logout', 'register', 'login_generation_setup', 'documentation', 'desktop_settings', 'management'
 }
 
 @app.before_request
@@ -4765,6 +4768,7 @@ def get_groups_with_counts(conn, group_year=None, include_hidden=False):
             'capacity': MAX_GROUP_STUDENTS,
             'fill': f'{count}/{MAX_GROUP_STUDENTS}',
             'is_full': is_full,
+            'is_over_capacity': count > MAX_GROUP_STUDENTS,
             'can_create_next': can_create_next,
             'next_name': get_next_subgroup_name(conn, name, row_group_year) if can_create_next else '',
         })
@@ -5761,6 +5765,14 @@ def build_enrollment_order_student_roster(upload_id):
             roster_rows,
             campaign_year,
         )
+    for row in roster_rows:
+        row['issue_codes'] = classify_enrollment_order_roster_row(row)
+        row['issue_labels'] = [
+            ENROLLMENT_ORDER_ROSTER_ISSUES[code]['label']
+            for code in row['issue_codes'] if code != 'attention_required'
+        ]
+        row['issues_text'] = '; '.join(row['issue_labels'])
+        row['needs_attention'] = bool(row['issue_codes'])
     roster_rows.sort(key=lambda row: (
         natural_text_sort_key(row['group_name']),
         normalize_fio_key(row['fio']),
@@ -5780,6 +5792,10 @@ def build_enrollment_order_student_roster(upload_id):
         for group_name, rows in grouped_rows.items()
     ]
 
+    issue_rows = {
+        code: [row for row in roster_rows if code in row['issue_codes']]
+        for code in ENROLLMENT_ORDER_ROSTER_ISSUES
+    }
     summary = {
         'total_count': len(roster_rows),
         'group_count': sum(1 for group in groups if group['name'] != 'Не распределено'),
@@ -5792,32 +5808,57 @@ def build_enrollment_order_student_roster(upload_id):
             1 for row in roster_rows
             if row['status'] in {'Готов к переносу', 'Кандидат к зачислению'}
         ),
-        'missing_email_count': sum(1 for row in roster_rows if row['missing_email']),
-        'unpaid_count': sum(1 for row in roster_rows if row['unpaid']),
+        'missing_email_count': len(issue_rows['missing_email']),
+        'unpaid_count': len(issue_rows['unpaid']),
         'blocked_count': sum(1 for row in roster_rows if row['is_blocked']),
-        'not_found_count': sum(1 for row in roster_rows if row['record_type'] == 'Не найден в базе'),
-        'attention_count': sum(1 for row in roster_rows if row['needs_attention']),
-        'fio_review_count': sum(
-            1 for row in roster_rows
-            if row['fio_review_kind'] == 'fio_typo'
-            and row['fio_review_status'] not in {'skipped', 'linked'}
-        ),
+        'not_found_count': len(issue_rows['not_found']),
+        'attention_count': len(issue_rows['attention_required']),
+        'fio_review_count': len(issue_rows['name_review']),
         'fio_review_skipped_count': sum(
             1 for row in roster_rows if row['fio_review_status'] == 'skipped'
         ),
         'fio_review_linked_count': sum(
             1 for row in roster_rows if row['fio_review_status'] == 'linked'
         ),
-        'specialty_conflict_count': sum(
-            1 for row in roster_rows if row['fio_review_kind'] == 'specialty_conflict'
-        ),
+        'specialty_conflict_count': len(issue_rows['specialty_conflict']),
     }
     return {
         'upload': upload,
         'rows': roster_rows,
         'groups': groups,
         'summary': summary,
+        'issue_rows': issue_rows,
+        'issue_types': ENROLLMENT_ORDER_ROSTER_ISSUES,
     }
+
+ENROLLMENT_ORDER_ROSTER_ISSUES = {
+    'missing_email': {'label': 'Без почты', 'description': 'Абитуриенты, у которых отсутствует адрес электронной почты.', 'filename': 'без_почты'},
+    'unpaid': {'label': 'Без оплаты', 'description': 'Абитуриенты без подтверждённой оплаты.', 'filename': 'без_оплаты'},
+    'not_found': {'label': 'Не найдены в базе', 'description': 'Строки приказа, для которых не найдена запись в Manticore.', 'filename': 'не_найдены'},
+    'unassigned': {'label': 'Не распределены', 'description': 'Абитуриенты, для которых не удалось определить учебную группу.', 'filename': 'не_распределены'},
+    'name_review': {'label': 'Сверить ФИО', 'description': 'Строки с безопасным предложением для сверки ФИО.', 'filename': 'сверить_фио'},
+    'specialty_conflict': {'label': 'Конфликт специальности', 'description': 'ФИО совпадает, но специальность в приказе и Manticore различается.', 'filename': 'конфликт_специальности'},
+    'attention_required': {'label': 'Требуют внимания', 'description': 'Абитуриенты хотя бы с одной проблемой. Каждый показан один раз.', 'filename': 'требуют_внимания'},
+}
+
+def classify_enrollment_order_roster_row(row):
+    """Return stable issue codes, using the same predicates as the roster KPI."""
+    codes = []
+    if row['missing_email']:
+        codes.append('missing_email')
+    if row['unpaid']:
+        codes.append('unpaid')
+    if row['record_type'] == 'Не найден в базе':
+        codes.append('not_found')
+    if row['group_name'] == 'Не распределено':
+        codes.append('unassigned')
+    if row['fio_review_kind'] == 'fio_typo' and row['fio_review_status'] not in {'skipped', 'linked'}:
+        codes.append('name_review')
+    if row['fio_review_kind'] == 'specialty_conflict':
+        codes.append('specialty_conflict')
+    if codes:
+        codes.append('attention_required')
+    return codes
 
 def enrollment_order_roster_export_rows(roster):
     return [
@@ -5857,9 +5898,62 @@ def enrollment_order_roster_export_rows(roster):
             'Дата приказа': row['order_date'],
             'Строка в приказе': row['row_number'],
             'Статус строки приказа': row['order_row_status'],
+            'Проблемы': row.get('issues_text', ''),
+            'Специальность в Manticore': row.get('suggested_abiturient_specialty', ''),
         }
         for row in roster['rows']
     ]
+
+def filter_enrollment_order_roster_rows(rows, args):
+    """Apply the server-side equivalent of PreviewTableState for trustworthy exports."""
+    result = list(rows)
+    search = str(args.get('search') or '').strip().casefold()
+    if search:
+        result = [row for row in result if search in ' '.join(str(row.get(key) or '') for key in (
+            'fio', 'dogovor', 'login', 'email', 'group_name', 'cohort2', 'specialty',
+            'status', 'record_type', 'issues_text',
+        )).casefold()]
+    field_map = {
+        'fio': 'fio', 'dogovor': 'dogovor', 'login': 'login', 'email': 'email',
+        'group': 'group_name', 'cohort2': 'cohort2', 'specialty': 'specialty',
+        'status': 'status', 'record_type': 'record_type', 'issues': 'issues_text',
+    }
+    for query_name, row_name in field_map.items():
+        value = str(args.get(query_name) or '').strip()
+        if not value:
+            continue
+        if value == '__empty__':
+            result = [row for row in result if not str(row.get(row_name) or '').strip()]
+        elif value == '__not_empty__':
+            result = [row for row in result if str(row.get(row_name) or '').strip()]
+        else:
+            needle = value.casefold()
+            result = [row for row in result if needle in str(row.get(row_name) or '').casefold()]
+    groups = [value.casefold() for value in args.getlist('groups') if value]
+    if groups:
+        result = [row for row in result if str(row.get('group_name') or '').casefold() in groups]
+    sort_key = field_map.get(str(args.get('sort') or ''))
+    if sort_key:
+        result.sort(key=lambda row: natural_text_sort_key(str(row.get(sort_key) or '')), reverse=args.get('direction') == 'desc')
+    return result
+
+def enrollment_order_roster_xlsx(rows, sheet_name='Список по приказу'):
+    export_rows = enrollment_order_roster_export_rows({'rows': rows})
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        pd.DataFrame(export_rows).to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
+        worksheet.freeze_panes = 'A2'
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for cell in worksheet[1]:
+            font = copy.copy(cell.font)
+            font.bold = True
+            cell.font = font
+        for column in worksheet.columns:
+            width = min(48, max(10, max(len(str(cell.value or '')) for cell in column) + 2))
+            worksheet.column_dimensions[column[0].column_letter].width = width
+    output.seek(0)
+    return output
 
 def fix_abiturient_fio_from_enrollment_order_roster(
     upload_id,
@@ -6748,6 +6842,7 @@ FILE_WORK_SECTIONS = (
     {'key': 'updates', 'title': 'Обновление почты и оплаты'},
     {'key': 'orders', 'title': 'Приказ о зачислении'},
     {'key': 'students', 'title': 'Загрузка студентов'},
+    {'key': 'contingent', 'title': 'Сверка контингента'},
 )
 FILE_WORK_SECTION_MAP = {section['key']: section for section in FILE_WORK_SECTIONS}
 
@@ -6994,17 +7089,25 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def current_user_is_admin():
+    """Use the same database authority for navigation and administrative actions."""
+    if not session.get('user'):
+        return False
+    with sqlite3.connect(DB_PATH) as conn:
+        user = conn.execute(
+            'SELECT role, approved FROM users WHERE username=?', (session['user'],)
+        ).fetchone()
+    return bool(user and user[0] == 'admin' and user[1] == 1)
+
+
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
             return redirect(url_for('login'))
-        with sqlite3.connect(DB_PATH) as conn:
-            cur = conn.execute('SELECT role, approved FROM users WHERE username=?', (session['user'],))
-            user = cur.fetchone()
-            if not user or user[0] != 'admin' or user[1] != 1:
-                flash('Недостаточно прав')
-                return redirect(url_for('index'))
+        if not current_user_is_admin():
+            flash('Недостаточно прав')
+            return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -7439,7 +7542,14 @@ def documentation():
 @app.route('/desktop_settings')
 @login_required
 def desktop_settings():
-    return render_template('desktop_settings.html')
+    # No fragment: browsers preserve existing bookmarks such as #about.
+    return redirect(url_for('management'))
+
+
+@app.route('/management')
+@login_required
+def management():
+    return render_template('management.html')
 
 @app.route('/search')
 @login_required
@@ -7725,8 +7835,46 @@ def enrollment_order_student_roster(upload_id):
         upload=roster['upload'],
         groups=roster['groups'],
         summary=roster['summary'],
+        issue_types=roster['issue_types'],
         max_group_students=MAX_GROUP_STUDENTS,
     )
+
+@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>')
+@login_required
+def enrollment_order_student_roster_issue(upload_id, issue_code):
+    roster = build_enrollment_order_student_roster(upload_id)
+    if not roster:
+        return jsonify({'error': 'Загрузка приказа не найдена.'}), 404
+    issue = roster['issue_types'].get(issue_code)
+    if not issue:
+        return jsonify({'error': 'Неизвестный тип проблемы.'}), 404
+    rows = roster['issue_rows'][issue_code]
+    return jsonify({
+        'code': issue_code,
+        'label': issue['label'],
+        'description': issue['description'],
+        'count': len(rows),
+        'rows': [{key: row.get(key, '') for key in (
+            'id', 'fio', 'dogovor', 'login', 'email', 'group_name', 'cohort2',
+            'specialty', 'suggested_abiturient_specialty', 'status', 'record_type',
+            'issues_text', 'person_url',
+        )} for row in rows],
+        'download_url': url_for('download_enrollment_order_student_roster_issue', upload_id=upload_id, issue_code=issue_code),
+    })
+
+@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>/download')
+@login_required
+def download_enrollment_order_student_roster_issue(upload_id, issue_code):
+    roster = build_enrollment_order_student_roster(upload_id)
+    if not roster:
+        return jsonify({'error': 'Загрузка приказа не найдена.'}), 404
+    issue = roster['issue_types'].get(issue_code)
+    if not issue:
+        return jsonify({'error': 'Неизвестный тип проблемы.'}), 404
+    rows = roster['issue_rows'][issue_code]
+    order_name = re.sub(r'[<>:"/\\|?*]+', '_', str(roster['upload'].get('order_numbers') or upload_id)).strip(' ._') or str(upload_id)
+    output = enrollment_order_roster_xlsx(rows, 'Проблемная выборка')
+    return send_file(output, as_attachment=True, download_name=f'{order_name}_{issue["filename"]}.xlsx', mimetype=EXCEL_MIMETYPE)
 
 @app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/fio_review', methods=['POST'])
 @login_required
@@ -7815,24 +7963,18 @@ def download_enrollment_order_student_roster(upload_id):
     if not roster:
         flash('Загрузка приказа не найдена.', 'error')
         return redirect(url_for('data_checks'), code=303)
-    export_rows = enrollment_order_roster_export_rows(roster)
-    output = io.BytesIO()
-    pd.DataFrame(export_rows).to_excel(
-        output,
-        index=False,
-        sheet_name='Список по приказу',
-    )
-    output.seek(0)
+    rows = filter_enrollment_order_roster_rows(roster['rows'], request.args)
+    output = enrollment_order_roster_xlsx(rows)
     log_action(
         'enrollment_order_student_roster_exported',
         'enrollment_order_upload',
         upload_id,
-        f"rows={len(export_rows)}; campaign_year={roster['upload']['campaign_year']}",
+        f"rows={len(rows)}; campaign_year={roster['upload']['campaign_year']}; filtered={bool(request.args)}",
     )
     return send_file(
         output,
         as_attachment=True,
-        download_name=f'enrollment_order_students_{upload_id}.xlsx',
+        download_name=f'enrollment_order_students_{upload_id}{"_filtered" if request.args else ""}.xlsx',
         mimetype=EXCEL_MIMETYPE,
     )
 
@@ -8383,6 +8525,21 @@ def role_required(*roles):
         return decorated_function
     return decorator
 
+def unique_numeric_form_values(field_name):
+    """Return stable, unique positive integer IDs submitted by a multi-value form field."""
+    values = []
+    seen = set()
+    for item in request.form.getlist(field_name):
+        raw_value = str(item).strip()
+        if not raw_value.isdigit() or int(raw_value) <= 0:
+            continue
+        value = str(int(raw_value))
+        if value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
+
 @app.route('/abiturients/bulk', methods=['POST'])
 @login_required
 @role_required('admin', 'assistant', 'operator')
@@ -8397,7 +8554,7 @@ def bulk_abiturients():
     if action == 'delete' and session.get('role') != 'admin':
         flash('Удаление доступно только администратору.', 'error')
         return redirect(url_for('abiturients'), code=303)
-    selected_ids = [item for item in request.form.getlist('abiturient_ids') if str(item).isdigit()]
+    selected_ids = unique_numeric_form_values('abiturient_ids')
     if not selected_ids:
         flash('Выберите хотя бы одну запись.', 'error')
         return redirect(url_for('abiturients'), code=303)
@@ -9118,6 +9275,12 @@ def login_generation_setup():
 @app.route('/admin_panel')
 @admin_required
 def admin_panel():
+    return redirect(url_for('management', _anchor='administration'))
+
+
+@app.route('/management/administration')
+@admin_required
+def administration_tools():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute('SELECT id, username, role, approved FROM users')
         all_users = cur.fetchall()
@@ -9819,6 +9982,13 @@ def edit_student(username):
         student = cur.fetchone()
         transfer_group_year = infer_group_year(student[5], get_active_campaign_year()) if student else get_active_campaign_year()
         transfer_groups = get_groups_with_counts(conn, transfer_group_year)
+        if student:
+            current_base = base_group_name(student[5])
+            transfer_groups.sort(key=lambda group: (
+                base_group_name(group['name']) != current_base,
+                2 if group['is_over_capacity'] else 1 if group['is_full'] else 0,
+                group['name'],
+            ))
     if not student:
         flash('Студент не найден')
         return redirect(url_for('students_list'))
@@ -9828,11 +9998,11 @@ def edit_student(username):
         email = request.form.get('email', '').strip()
         firstname = request.form.get('firstname', '').strip()
         lastname = request.form.get('lastname', '').strip()
-        cohort1 = normalize_group_name(request.form.get('cohort1', ''))
-        cohort2 = get_student_course_group(cohort1)
+        cohort1 = student[5]
+        cohort2 = student[6]
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute('UPDATE students SET password=?, email=?, firstname=?, lastname=?, cohort1=?, cohort2=? WHERE username=?',
-                         (password, email, firstname, lastname, cohort1, cohort2, username))
+            conn.execute('UPDATE students SET password=?, email=?, firstname=?, lastname=? WHERE username=?',
+                         (password, email, firstname, lastname, username))
             log_action(
                 'student_updated',
                 'student',
@@ -9850,108 +10020,139 @@ def edit_student(username):
         transfer_orders=get_student_transfer_orders(username),
     )
 
+class StudentTransferError(Exception):
+    def __init__(self, code, message, status=409, **details):
+        super().__init__(message)
+        self.code, self.status, self.details = code, status, details
+
+
+def transfer_student_to_group(username, selected_group, *, actor_role, order_file=None,
+                              capacity_override=False, expected_source=None, preview=False,
+                              comment=''):
+    """Manual administrative transfer. SQLite write lock precedes every authoritative read.
+
+    Automatic allocation deliberately does not call this operation or receive its override.
+    Specialty/base changes are permitted by the existing manual transfer policy;
+    campaign changes and hidden targets are not.
+    """
+    if actor_role != 'admin':
+        raise StudentTransferError('permission_denied', 'Перевод доступен только администратору.', 403)
+    selected_group = normalize_group_name(selected_group)
+    saved_file = None
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            student = conn.execute(
+                'SELECT cohort1, cohort2, source_campaign_year FROM students WHERE username=?',
+                (username,)).fetchone()
+            if not student:
+                raise StudentTransferError('student_not_found', 'Студент не найден.', 404)
+            old_cohort1, old_cohort2, source_year = student
+            if expected_source is not None and expected_source != old_cohort1:
+                raise StudentTransferError('concurrent_update', 'Группа студента изменилась. Обновите карточку.')
+            target = conn.execute(
+                'SELECT group_year, is_hidden FROM groups WHERE name=?', (selected_group,)).fetchone()
+            if not target or target[1]:
+                raise StudentTransferError('target_group_not_found', 'Выберите новую группу из справочника академических групп.', 404)
+            source = conn.execute('SELECT group_year FROM groups WHERE name=?', (old_cohort1,)).fetchone()
+            group_year = (source[0] if source else None) or infer_group_year(old_cohort1, source_year or get_active_campaign_year())
+            if str(target[0]) != str(group_year):
+                raise StudentTransferError('incompatible_campaign', 'Нельзя перевести студента в группу другой кампании.')
+            if normalize_group_name(old_cohort1).casefold() == selected_group.casefold():
+                raise StudentTransferError('same_group', 'Студент уже находится в этой группе.')
+            source_count = get_group_student_count(conn, old_cohort1)
+            target_count = get_group_student_count(conn, selected_group)
+            full = target_count >= MAX_GROUP_STUDENTS
+            new_cohort2 = get_student_course_group(selected_group)
+            if are_course_groups_enabled() and not new_cohort2:
+                raise StudentTransferError('incompatible_specialty', 'Для выбранной группы не удалось определить глобальную группу курса.')
+            warnings = []
+            old_parts = parse_academic_group_for_cohort2(old_cohort1)
+            new_parts = parse_academic_group_for_cohort2(selected_group)
+            if old_parts and new_parts:
+                if old_parts['specialty'] != new_parts['specialty']:
+                    warnings.append('Вы переводите студента в группу другой специальности.')
+                if old_parts['base'] != new_parts['base']:
+                    warnings.append('Изменяется образовательная база группы.')
+            message = (f'{old_cohort1}: {source_count}/{MAX_GROUP_STUDENTS} → {source_count - 1}/{MAX_GROUP_STUDENTS}. '
+                       f'{selected_group}: {target_count}/{MAX_GROUP_STUDENTS} → {target_count + 1}/{MAX_GROUP_STUDENTS}. ')
+            if full:
+                message = (f'Выбранная группа заполнена: {selected_group}, {target_count}/{MAX_GROUP_STUDENTS}. '
+                           f'После перевода в группе будет {target_count + 1} студентов. ') + message
+            message += ' '.join(warnings)
+            result = dict(old_group=old_cohort1, new_group=selected_group, cohort2=new_cohort2,
+                          source_count=source_count, target_count=target_count,
+                          capacity=MAX_GROUP_STUDENTS, capacity_exceeded=full, message=message)
+            if full and not capacity_override:
+                raise StudentTransferError('capacity_exceeded', message, **{k: v for k, v in result.items() if k != 'message'})
+            if preview:
+                return result
+            backup_path = create_database_backup('before_student_group_transfer')
+            saved_file = (save_student_transfer_order_file(username, order_file)
+                          if order_file and order_file.filename else
+                          dict(filename='', original_filename='', mime_type='', size=0))
+            conn.execute('UPDATE students SET cohort1=?, cohort2=? WHERE username=?',
+                         (selected_group, new_cohort2, username))
+            conn.execute(
+                """INSERT INTO student_group_transfers
+                   (username, movement_type, old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+                    order_source, order_filename, order_original_filename, order_mime_type,
+                    order_size, created_by)
+                   VALUES (?, 'transfer', ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?)""",
+                (username, old_cohort1, old_cohort2, selected_group, new_cohort2,
+                 saved_file['filename'], saved_file['original_filename'], saved_file['mime_type'],
+                 saved_file['size'], session.get('user', '')))
+            log_action('student_group_transferred', 'student', username,
+                       f"old_cohort1={old_cohort1}; old_cohort2={old_cohort2}; "
+                       f"new_cohort1={selected_group}; new_cohort2={new_cohort2}; "
+                       f"source_count={source_count}->{source_count - 1}; "
+                       f"target_count={target_count}->{target_count + 1}; capacity={MAX_GROUP_STUDENTS}; "
+                       f"over_capacity={full}; capacity_override={bool(capacity_override)}; "
+                       f"order={saved_file['original_filename'] or 'not_attached'}; "
+                       f"comment={comment[:1000]}; backup={os.path.basename(backup_path) if backup_path else ''}", conn)
+        return result
+    except Exception:
+        # Includes commit failure: neither the history nor the uploaded PDF may survive rollback.
+        if saved_file and saved_file.get('path') and os.path.exists(saved_file['path']):
+            os.remove(saved_file['path'])
+        raise
+
+
 @app.route('/edit_student/<username>/transfer_group', methods=['POST'])
 @login_required
 @role_required('admin')
 def transfer_student_group(username):
-    selected_group = normalize_group_name(request.form.get('new_cohort1', ''))
-    order_file = request.files.get('transfer_order_file')
-    saved_file = None
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT username, cohort1, cohort2 FROM students WHERE username=?', (username,))
-        student = cur.fetchone()
-        if not student:
-            flash('Студент не найден', 'error')
-            return redirect(url_for('students_list'))
-
-        _username, old_cohort1, old_cohort2 = student
-        group_year = infer_group_year(old_cohort1, get_active_campaign_year())
-        available_group = conn.execute(
-            '''
-            SELECT name
-            FROM groups
-            WHERE name=? AND group_year=? AND COALESCE(is_hidden, 0)=0
-            ''',
-            (selected_group, group_year)
-        ).fetchone()
-        if not selected_group or not available_group:
-            flash('Выберите новую группу из справочника академических групп.', 'error')
-            return redirect(url_for('edit_student', username=username))
-        if normalize_group_name(old_cohort1).casefold() == selected_group.casefold():
-            flash('Новая группа совпадает с текущей.', 'error')
-            return redirect(url_for('edit_student', username=username))
-        if get_group_student_count(conn, selected_group) >= MAX_GROUP_STUDENTS:
-            flash(f'Выбранная группа заполнена: {MAX_GROUP_STUDENTS}/{MAX_GROUP_STUDENTS}.', 'error')
-            return redirect(url_for('edit_student', username=username))
-
-        course_groups_enabled = are_course_groups_enabled()
-        new_cohort2 = (derive_cohort2(selected_group) or '') if course_groups_enabled else ''
-        if course_groups_enabled and not new_cohort2:
-            flash('Для выбранной группы не удалось определить глобальную группу курса.', 'error')
-            return redirect(url_for('edit_student', username=username))
-
-        if order_file and order_file.filename:
-            try:
-                saved_file = save_student_transfer_order_file(username, order_file)
-            except UploadValidationError as exc:
-                flash(str(exc), 'error')
-                return redirect(url_for('edit_student', username=username))
+    wants_json = request.accept_mimetypes.best == 'application/json'
+    try:
+        result = transfer_student_to_group(
+            username, request.form.get('new_cohort1', ''), actor_role=session.get('role'),
+            order_file=request.files.get('transfer_order_file'),
+            capacity_override=request.form.get('capacity_override') == 'true',
+            expected_source=request.form.get('expected_source'),
+            preview=request.form.get('preview') == 'true', comment=request.form.get('comment', '').strip())
+        if request.form.get('preview') == 'true':
+            return jsonify(result)
+    except (StudentTransferError, UploadValidationError, sqlite3.Error, OSError) as exc:
+        if isinstance(exc, StudentTransferError):
+            code, message, status, details = exc.code, str(exc), exc.status, exc.details
+        elif isinstance(exc, UploadValidationError):
+            code, message, status, details = 'invalid_order', str(exc), 400, {}
         else:
-            saved_file = {
-                'filename': '',
-                'original_filename': '',
-                'mime_type': '',
-                'size': 0,
-            }
+            app.logger.exception('Student transfer failed')
+            busy = isinstance(exc, sqlite3.OperationalError) and ('locked' in str(exc) or 'busy' in str(exc))
+            code = 'concurrent_update' if busy else 'database_error'
+            message = 'Данные заняты другой операцией. Повторите перевод.' if busy else 'Не удалось сохранить перевод. Изменения отменены.'
+            status, details = 409 if busy else 500, {}
+        if wants_json:
+            return jsonify(code=code, message=message, **details), status
+        flash(message, 'error')
+        return redirect(url_for('edit_student', username=username))
+    flash(f"Студент переведён: {result['old_group']} → {result['new_group']}.", 'success')
+    if result['capacity_exceeded']:
+        flash(f"Группа теперь переполнена: {result['target_count'] + 1}/{result['capacity']}.", 'warning')
+    destination = url_for('edit_student', username=username)
+    return jsonify(redirect=destination) if wants_json else redirect(destination)
 
-        backup_path = create_database_backup('before_student_group_transfer')
-        try:
-            conn.execute(
-                '''
-                UPDATE students
-                SET cohort1=?, cohort2=?
-                WHERE username=?
-                ''',
-                (selected_group, new_cohort2, username)
-            )
-            conn.execute(
-                '''
-                INSERT INTO student_group_transfers
-                    (username, movement_type, old_cohort1, old_cohort2, new_cohort1, new_cohort2,
-                     order_source,
-                     order_filename, order_original_filename, order_mime_type, order_size,
-                     created_by)
-                VALUES (?, 'transfer', ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?)
-                ''',
-                (
-                    username, old_cohort1, old_cohort2, selected_group, new_cohort2,
-                    saved_file['filename'], saved_file['original_filename'],
-                    saved_file['mime_type'], saved_file['size'], session.get('user', '')
-                )
-            )
-            log_action(
-                'student_group_transferred',
-                'student',
-                username,
-                (
-                    f"old_cohort1={old_cohort1 or ''}; old_cohort2={old_cohort2 or ''}; "
-                    f"new_cohort1={selected_group}; new_cohort2={new_cohort2}; "
-                    f"order={saved_file['original_filename'] or 'not_attached'}; "
-                    f"backup={os.path.basename(backup_path) if backup_path else ''}"
-                ),
-                conn
-            )
-        except Exception:
-            if saved_file and saved_file.get('path') and os.path.exists(saved_file['path']):
-                os.remove(saved_file['path'])
-            raise
-
-    if are_course_groups_enabled():
-        flash(f'Студент переведен в группу {selected_group}. Глобальная группа курса: {new_cohort2}.', 'success')
-    else:
-        flash(f'Студент переведен в группу {selected_group}.', 'success')
-    return redirect(url_for('edit_student', username=username))
 
 @app.route('/student_transfer_orders/<int:transfer_id>/download')
 @login_required
@@ -10109,7 +10310,7 @@ def abiturients_to_students():
             return redirect(url_for('abiturients_to_students', group_year=group_year), code=303)
         distribution_action = request.form.get('distribution_action', '').strip()
         cohort1 = normalize_group_name(request.form.get('cohort1', ''))
-        ids = [item for item in request.form.getlist('candidate_ids') if str(item).isdigit()]
+        ids = unique_numeric_form_values('candidate_ids')
         selected_candidate_ids = ids
         login_distribution_enabled = request.form.get('use_login_distribution') == '1' or distribution_action == 'confirm_login_groups'
         auto_split = request.form.get('auto_split') == '1'
@@ -10598,6 +10799,9 @@ def download_groups_template():
     output = io.BytesIO(build_groups_template_csv(group_year).encode('utf-8-sig'))
     output.seek(0)
     return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
+
+from contingent_web import register_contingent
+register_contingent(app, globals())
 
 if __name__ == "__main__":
     app_host = os.environ.get("APP_HOST", "127.0.0.1")
