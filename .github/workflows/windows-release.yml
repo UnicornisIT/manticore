@@ -87,8 +87,11 @@ jobs:
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           foreach ($path in @('dist/Manticore.exe', "dist/installer/Manticore-Setup-$version.exe")) {
-            if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid') { throw "Invalid signature: $path" }
+            $signature = Get-AuthenticodeSignature -LiteralPath $path
+            Write-Host "$path - Authenticode status: $($signature.Status); $($signature.StatusMessage)"
           }
+          .venv-desktop/Scripts/python.exe desktop/release_tools.py --verify-signatures
+          if ($LASTEXITCODE -ne 0) { throw 'Publisher pin or WinVerifyTrust verification failed' }
       - uses: actions/attest-build-provenance@v3
         with:
           subject-path: dist/installer/Manticore-Setup-*.exe

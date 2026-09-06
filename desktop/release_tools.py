@@ -42,12 +42,28 @@ def metadata(version):
     return payload
 
 
+def verify_release_signatures(version):
+    """Apply the same pinned-certificate trust policy as installed clients."""
+    from desktop.windows_client import verify_authenticode_signature
+
+    policy = json.loads((ROOT / 'build' / 'trusted_update.json').read_text(encoding='utf-8-sig'))
+    fingerprint = str(policy.get('signer_certificate_sha256') or '').lower()
+    if policy.get('github_repository') != DEFAULT_GITHUB_REPOSITORY or not re.fullmatch(r'[0-9a-f]{64}', fingerprint) or fingerprint == '0' * 64:
+        raise ValueError('Signed release verification requires a pinned publisher certificate.')
+    for binary in (ROOT / 'dist' / 'Manticore.exe', ROOT / 'dist' / 'installer' / f'Manticore-Setup-{version}.exe'):
+        if not binary.is_file():
+            raise FileNotFoundError(binary)
+        verify_authenticode_signature(binary, fingerprint)
+        print(f'Publisher pin and WinVerifyTrust: PASS ({binary.name})')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--check-tag')
     parser.add_argument('--allow-prerelease', action='store_true')
     parser.add_argument('--version-resource', action='store_true')
     parser.add_argument('--metadata', action='store_true')
+    parser.add_argument('--verify-signatures', action='store_true')
     args = parser.parse_args()
     raw_version = (ROOT / 'VERSION').read_text(encoding='utf-8-sig').strip()
     version = normalize_version(raw_version)
@@ -59,3 +75,5 @@ if __name__ == '__main__':
         version_resource(version)
     if args.metadata:
         print(json.dumps(metadata(version)))
+    if args.verify_signatures:
+        verify_release_signatures(version)
