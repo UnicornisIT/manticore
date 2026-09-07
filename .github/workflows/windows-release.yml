@@ -3,6 +3,12 @@ name: Windows desktop release
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to build and publish (reuse only a draft)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -10,7 +16,7 @@ permissions:
   attestations: write
 
 concurrency:
-  group: windows-release-${{ github.ref }}
+  group: windows-release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +25,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -30,7 +38,7 @@ jobs:
       - name: Validate release tag against VERSION
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: python desktop/release_tools.py --check-tag $env:RELEASE_TAG --allow-prerelease
       - name: Install locked dependencies
         shell: pwsh
@@ -105,33 +113,99 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           GH_REPO: UnicornisIT/manticore
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          Set-StrictMode -Version Latest
           $tag = $env:RELEASE_TAG
-          $metadata = Get-Content dist/installer/desktop-update.json -Raw | ConvertFrom-Json
-          $existing = gh release view $tag --json isDraft 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Refusing to replace a published release; increment VERSION.' }
-          } else {
-            gh release create $tag --draft --verify-tag --generate-notes --title $tag
-            if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft' }
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($env:GH_REPO -cne 'UnicornisIT/manticore' -or $tag -cne "v$version") { throw 'Repository or VERSION/tag mismatch' }
+          $installerName = "Manticore-Setup-$version.exe"
+          $required = @($installerName, 'desktop-update.json', 'SHA256SUMS.txt')
+          Write-Host "Release tag: $tag; Required assets: $($required -join ', ')"
+          foreach ($name in $required) {
+            if (-not (Test-Path -LiteralPath "dist/installer/$name" -PathType Leaf)) { throw "Missing local asset: $name" }
           }
-          gh release upload $tag "dist/installer/$($metadata.asset)" dist/installer/desktop-update.json dist/installer/SHA256SUMS.txt --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
-          $raw = gh api "repos/$env:GH_REPO/releases/tags/$tag"
-          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
-          $release = $raw | ConvertFrom-Json
-          if (@($release.assets | Where-Object { $_.name -like '*.exe' }).Count -ne 1) { throw 'Draft must contain exactly one installer EXE' }
-          if (@($release.assets | Where-Object { $_.name -in @('desktop-update.json', 'SHA256SUMS.txt') }).Count -ne 2) { throw 'Release metadata assets are missing' }
-          $installer = @($release.assets | Where-Object name -eq $metadata.asset)
-          if ($installer.Count -ne 1 -or $installer[0].size -ne $metadata.size -or $installer[0].digest -ne "sha256:$($metadata.sha256)") { throw 'Uploaded installer does not match local metadata' }
-          if ($metadata.version.Contains('-')) {
-            gh release edit $tag --draft=false --prerelease --latest=false
+          $metadata = Get-Content dist/installer/desktop-update.json -Raw | ConvertFrom-Json
+          $localSize = (Get-Item -LiteralPath "dist/installer/$installerName").Length
+          $localHash = (Get-FileHash -LiteralPath "dist/installer/$installerName" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($metadata.schema_version -ne 1 -or $metadata.repository -cne $env:GH_REPO -or $metadata.version -cne $version -or $metadata.tag -cne $tag -or $metadata.asset -cne $installerName) { throw 'Local desktop-update.json does not describe this release' }
+          if ($localSize -le 0 -or $localSize -gt 256MB -or $metadata.size -ne $localSize -or $metadata.sha256 -cne $localHash) { throw 'Local installer size or SHA256 does not match metadata/updater limits' }
+          if ((Get-Content dist/installer/SHA256SUMS.txt -Raw).TrimEnd("`r", "`n") -cne "$localHash  $installerName") { throw 'Local SHA256SUMS.txt does not match installer' }
+          Write-Host "Installer size: $localSize; Expected SHA256: $localHash"
+          # A fresh directory prevents a failed download from reusing files from an earlier run.
+          $verificationDirectory = Join-Path $env:RUNNER_TEMP ("manticore-release-" + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $verificationDirectory | Out-Null
+          $lookupError = Join-Path $verificationDirectory 'lookup-error.txt'
+          function Assert-Draft($release, $expectedId = 0) {
+            if ($release.tagName -cne $tag -or $release.isDraft -ne $true -or $release.databaseId -le 0) { throw 'Expected the current tag to remain a draft with a valid release ID; refusing to modify a published or different release' }
+            if ($expectedId -and $release.databaseId -ne $expectedId) { throw 'Release ID changed during verification' }
+          }
+          function Read-Draft($expectedId = 0) {
+            $raw = gh release view $tag --repo $env:GH_REPO --json databaseId,assets,isDraft,tagName
+            if ($LASTEXITCODE -ne 0) { throw 'Could not read release draft' }
+            $release = $raw | ConvertFrom-Json
+            Assert-Draft $release $expectedId
+            return $release
+          }
+          $existing = gh release view $tag --repo $env:GH_REPO --json databaseId,assets,isDraft,tagName 2>$lookupError
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            Assert-Draft $release
+            Write-Host 'Release draft found: yes (reusing)'
           } else {
-            gh release edit $tag --draft=false --prerelease=false --latest
+            if ((Get-Content -LiteralPath $lookupError -Raw).Trim() -cne 'release not found') { throw 'Release lookup failed (authentication, permissions, network or API error); draft creation stopped' }
+            Write-Host 'Release draft found: no'
+            gh release create $tag --repo $env:GH_REPO --draft --verify-tag --generate-notes --title $tag
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft' }
+            $release = Read-Draft
+          }
+          $releaseId = $release.databaseId
+          Write-Host "Release ID: $releaseId"
+          # Recheck immediately before replacing only the three named assets of this draft.
+          $release = Read-Draft $releaseId
+          gh release upload $tag --repo $env:GH_REPO "dist/installer/$installerName" dist/installer/desktop-update.json dist/installer/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $release = Read-Draft $releaseId
+          Write-Host "Uploaded assets: $(@($release.assets.name) -join ', ')"
+          if (@($release.assets | Where-Object { $_.name -like '*.exe' }).Count -ne 1) { throw 'Draft must contain exactly one installer EXE' }
+          foreach ($name in $required) {
+            $asset = @($release.assets | Where-Object { $_.name -ceq $name })
+            if ($asset.Count -ne 1) { throw "Expected exactly one uploaded asset: $name" }
+            if ($asset[0].size -ne (Get-Item -LiteralPath "dist/installer/$name").Length) { throw "Uploaded asset size mismatch: $name" }
+          }
+          # downloadCount changes during our own verification; compare asset identity/content only.
+          $assetSnapshot = $release.assets | Sort-Object name | Select-Object id,name,size,digest | ConvertTo-Json -Depth 10 -Compress
+          gh release download $tag --repo $env:GH_REPO --dir $verificationDirectory --pattern $installerName --pattern desktop-update.json --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Downloading uploaded release assets failed' }
+          foreach ($name in $required) {
+            $downloadedPath = Join-Path $verificationDirectory $name
+            if (-not (Test-Path -LiteralPath $downloadedPath -PathType Leaf)) { throw "Downloaded asset missing: $name" }
+            $downloadedHash = (Get-FileHash -LiteralPath $downloadedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expectedHash = (Get-FileHash -LiteralPath "dist/installer/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($name -ceq $installerName) { Write-Host "Downloaded SHA256: $downloadedHash" }
+            if ((Get-Item -LiteralPath $downloadedPath).Length -ne (Get-Item -LiteralPath "dist/installer/$name").Length -or $downloadedHash -cne $expectedHash) { throw "Downloaded asset size or SHA256 mismatch: $name" }
+          }
+          # The client requires the REST asset digest. Read by draft ID, never by tag.
+          # Byte verification above is mandatory even if gh's JSON exporter omits digest.
+          $raw = gh api "repos/$env:GH_REPO/releases/$releaseId"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify updater API metadata by release ID' }
+          $apiRelease = $raw | ConvertFrom-Json -AsHashtable
+          if ($apiRelease.id -ne $releaseId -or $apiRelease.tag_name -cne $tag -or $apiRelease.draft -ne $true) { throw 'Release changed before publication' }
+          $apiInstaller = @($apiRelease.assets | Where-Object { $_.name -ceq $installerName })
+          if ($apiInstaller.Count -ne 1 -or $apiInstaller[0].size -ne $localSize -or $apiInstaller[0].digest -cne "sha256:$localHash" -or $apiInstaller[0].browser_download_url -cne "https://github.com/$env:GH_REPO/releases/download/$tag/$installerName") { throw 'GitHub installer digest, size or URL is incompatible with the updater; leaving draft unpublished' }
+          $release = Read-Draft $releaseId
+          if (($release.assets | Sort-Object name | Select-Object id,name,size,digest | ConvertTo-Json -Depth 10 -Compress) -cne $assetSnapshot) { throw 'Release assets changed during download verification; rerun required' }
+          Write-Host 'Draft verification: PASS'
+          if ($version.Contains('-')) {
+            gh release edit $tag --repo $env:GH_REPO --draft=false --prerelease --latest=false
+          } else {
+            gh release edit $tag --repo $env:GH_REPO --draft=false --prerelease=false --latest
           }
           if ($LASTEXITCODE -ne 0) { throw 'Publishing release failed' }
+          Write-Host 'Release publish: PASS'
       - name: Remove signing material
         if: always()
         shell: pwsh
