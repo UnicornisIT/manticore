@@ -5,9 +5,10 @@ const vm = require('node:vm');
 const source = fs.readFileSync('static/js/desktop-updater.js', 'utf8');
 
 function fixture(initial) {
+  const notes = {hidden:true, dataset:{}, innerHTML:''};
   const nodes = {};
   function element(selector) {
-    return nodes[selector] = {hidden:false, disabled:false, textContent:'', events:{},
+    return nodes[selector] = {hidden:false, disabled:false, textContent:'', events:{}, parentElement:{querySelector:()=>notes},
       addEventListener(name, handler) {this.events[name] = handler;},
       cloneNode() {return element(selector);}, replaceWith() {}};
   }
@@ -23,7 +24,7 @@ function fixture(initial) {
   const window = {pywebview:{api}, addEventListener() {}};
   const context = {window, document:{querySelector:s => s === '[data-desktop-settings]' ? root : null}, setTimeout: fn => {callbacks.push(fn); return callbacks.length;}, clearTimeout() {}};
   vm.runInNewContext(source, context);
-  return {nodes, calls, callbacks, setState: value => {state = value;}, api};
+  return {notes, nodes, calls, callbacks, setState: value => {state = value;}, api};
 }
 
 test('updater renders availability, progress and a separate install action', async () => {
@@ -31,7 +32,8 @@ test('updater renders availability, progress and a separate install action', asy
   await f.callbacks.shift()(); await new Promise(setImmediate);
   assert.equal(f.nodes['[data-install-update]'].hidden, false);
   assert.equal(f.nodes['[data-install-update]'].textContent, 'Скачать обновление');
-  assert.match(f.nodes['[data-update-status]'].textContent, /<img onerror=bad>/); // textContent, never executable HTML
+  assert.doesNotMatch(f.nodes['[data-update-status]'].textContent, /<img/);
+  assert.match(f.notes.innerHTML, /&lt;img onerror=bad&gt;/);
   f.setState({state:'downloading', percent:37, downloaded:37, total:100});
   await f.nodes['[data-install-update]'].events.click({stopImmediatePropagation(){}}); await new Promise(setImmediate);
   assert.deepEqual(f.calls, ['download_update']);
@@ -66,14 +68,15 @@ test('updater shows the installed client channel', async () => {
 function channelFixture(initial) {
   const cards = {};
   for (const channel of ['stable', 'preview']) {
-    const nodes = {};
+    const notes = {hidden:true, dataset:{}, innerHTML:''};
+  const nodes = {};
     function element(selector) {
-      return nodes[selector] = {hidden:false, disabled:false, textContent:'', events:{},
+      return nodes[selector] = {hidden:false, disabled:false, textContent:'', events:{}, parentElement:{querySelector:()=>notes},
         addEventListener(name, handler) {this.events[name] = handler;},
         cloneNode() {return element(selector);}, replaceWith() {}};
     }
     for (const selector of ['h3', '.settings-card-heading p', '[data-update-channel]', '[data-check-update]', '[data-install-update]', '[data-update-status]', '[data-update-badge]', '[data-update-progress]']) element(selector);
-    cards[channel] = {nodes, querySelector: selector => nodes[selector]};
+    cards[channel] = {notes, nodes, querySelector: selector => nodes[selector]};
   }
   const root = {querySelector: selector => selector === '[data-update-card="stable"]' ? cards.stable : selector === '[data-update-card="preview"]' ? cards.preview : cards.stable.nodes[selector]};
   let states = initial;
@@ -114,4 +117,28 @@ test('installation disables actions in both cards and IPC errors allow retry', a
   await f.cards.stable.nodes['[data-check-update]'].events.click({stopImmediatePropagation(){}}); await new Promise(setImmediate);
   assert.equal(f.cards.stable.nodes['[data-check-update]'].disabled, false);
   assert.match(f.cards.stable.nodes['[data-update-status]'].textContent, /Повторите попытку/);
+});
+
+
+test('release notes render Markdown blocks and inline formatting separately from status', async () => {
+  const notes = '# Release\n\n## Changes\n\n- **Bold** and *italic*\n- `code` and ~~removed~~\n\n1. First\n2. Second\n\n> Quote\n\n```js\nconst value = "<test>";\n```\n\n[Details](https://example.test/release)';
+  const f = fixture({state:'available',version:'1.5.0',notes});
+  await f.callbacks.shift()(); await new Promise(setImmediate);
+  for (const html of ['<h3>Release</h3>', '<h4>Changes</h4>', '<ul>', '<ol start="1">', '<strong>Bold</strong>', '<em>italic</em>', '<code>code</code>', '<del>removed</del>', '<blockquote>', '<pre><code>', 'rel="noopener noreferrer"']) assert.ok(f.notes.innerHTML.includes(html), html);
+  assert.equal(f.notes.hidden, false);
+  assert.doesNotMatch(f.nodes['[data-update-status]'].textContent, /Changes/);
+  f.setState({state:'checking',version:'',notes:''});
+  await f.callbacks.shift()(); await new Promise(setImmediate);
+  assert.equal(f.notes.hidden, true);
+});
+
+test('release notes escape HTML, reject executable links and isolate both channels', async () => {
+  const malicious = '<script>alert(1)</script>\n\n[x](javascript:alert(1)) [x](data:text/html,bad) [safe](https://example.test/"onclick="bad)';
+  const f = channelFixture({stable:{state:'available',version:'1.0.0',notes:'## Stable'},preview:{state:'available',version:'1.1.0-alpha',notes:malicious}});
+  await f.callbacks.shift()(); await new Promise(setImmediate);
+  assert.match(f.cards.stable.notes.innerHTML, /<h4>Stable<\/h4>/);
+  const html = f.cards.preview.notes.innerHTML;
+  assert.doesNotMatch(html, /<script|href="javascript:|href="data:|"onclick="/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.match(html, /&quot;onclick=&quot;/);
 });

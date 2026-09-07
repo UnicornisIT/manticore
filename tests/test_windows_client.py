@@ -55,6 +55,22 @@ class WindowsClientTests(unittest.TestCase):
         self.assertIn('--skip-update', command)
         self.assertIn('/DIR=', command)
 
+    @mock.patch('desktop.windows_client.powershell_executable', return_value=r'C:\Windows\powershell.exe')
+    @mock.patch('desktop.windows_client.installed_scope_switch', return_value='/CURRENTUSER')
+    @mock.patch('desktop.windows_client.subprocess.Popen')
+    def test_update_restart_resets_inherited_pyinstaller_environment(self, popen, _scope, _powershell):
+        inherited = {'_PYI_PARENT_PROCESS_LEVEL': '1', '_PYI_APPLICATION_HOME_DIR': 'old-unpacked-app',
+                     'PYINSTALLER_RESET_ENVIRONMENT': '0', 'PATH': 'system-path'}
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
+             mock.patch.dict(windows_client.os.environ, inherited, clear=True):
+            windows_client.launch_installer_after_exit(Path(directory) / 'setup.exe')
+            child_environment = popen.call_args.kwargs['env']
+            self.assertEqual(child_environment['PYINSTALLER_RESET_ENVIRONMENT'], '1')
+            self.assertEqual(child_environment['PATH'], 'system-path')
+            self.assertEqual(dict(windows_client.os.environ), inherited)
+            self.assertIsNot(child_environment, windows_client.os.environ)
+
     def test_desktop_window_uses_bundled_icon(self):
         webview = mock.MagicMock()
         window = webview.create_window.return_value

@@ -8,6 +8,113 @@
   const badge = root?.querySelector('[data-update-badge]');
   const progress = root?.querySelector('[data-update-progress]');
   const channel = root?.querySelector('[data-update-channel]') || badge?.closest('section')?.querySelector('.settings-card-heading p');
+  // Bundled styles also work when the remote server still uses an older template.
+  if (document.head) {
+    const style = document.createElement('style');
+    style.textContent = `
+      .release-notes { margin-top:16px; padding:16px; border:1px solid var(--border, #ccd3dc); border-radius:10px; background:var(--bg-subtle, Canvas); color:var(--text-primary, CanvasText); font-size:14px; line-height:1.65; max-height:360px; overflow:auto; overflow-wrap:anywhere; }
+      .release-notes[hidden] { display:none !important; }
+      .release-notes h3,.release-notes h4,.release-notes h5,.release-notes h6 { margin:18px 0 8px; line-height:1.35; font-weight:650; }
+      .release-notes h3 { font-size:18px; } .release-notes h4 { font-size:16px; }
+      .release-notes h5,.release-notes h6 { font-size:14px; }
+      .release-notes p { margin:8px 0; } .release-notes > :first-child { margin-top:0; } .release-notes > :last-child { margin-bottom:0; }
+      .release-notes ul,.release-notes ol { display:block; padding:0 0 0 24px; margin:8px 0; text-align:left; }
+      .release-notes ul { list-style:disc outside; } .release-notes ol { list-style:decimal outside; }
+      .release-notes li { display:list-item; float:none; padding:0; margin:5px 0; text-align:left; } .release-notes li > p { margin:0; }
+      .release-notes a { color:var(--accent, #315de6); text-decoration:underline; text-underline-offset:3px; }
+      .release-notes code { padding:2px 5px; border-radius:4px; background:var(--bg-canvas, Canvas); font-size:.9em; }
+      .release-notes pre { padding:12px; overflow:auto; border-radius:6px; background:var(--bg-canvas, Canvas); white-space:pre; }
+      .release-notes pre code { padding:0; } .release-notes blockquote { margin:12px 0; padding-left:12px; border-left:3px solid var(--accent, #315de6); color:var(--text-secondary, CanvasText); }
+      .release-notes hr { border:0; border-top:1px solid var(--border, #ccd3dc); margin:16px 0; }
+    `;
+    document.head.append(style);
+  }
+  // Generate only our own HTML tags; release text and attributes are always escaped.
+  function markdown(text) {
+    const escape = value => value.replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+    function inline(value, depth = 0) {
+      if (depth > 8) return escape(value);
+      const tokens = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^\s)]+)\)|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^*\n]+)\*|_([^_\n]+)_/g;
+      let result = '', offset = 0;
+      for (const match of value.matchAll(tokens)) {
+        result += escape(value.slice(offset, match.index));
+        if (match[1] !== undefined) result += '<code>' + escape(match[1]) + '</code>';
+        else if (match[2] !== undefined) {
+          // Never navigate the privileged desktop renderer to an untrusted URL.
+          const url = match[3];
+          result += /^https?:\/\//i.test(url)
+            ? '<a href="' + escape(url) + '" target="_blank" rel="noopener noreferrer">' + inline(match[2], depth + 1) + '</a>'
+            : escape(match[0]);
+        } else {
+          const tag = match[4] !== undefined || match[5] !== undefined ? 'strong' : match[6] !== undefined ? 'del' : 'em';
+          result += '<' + tag + '>' + inline(match[4] ?? match[5] ?? match[6] ?? match[7] ?? match[8], depth + 1) + '</' + tag + '>';
+        }
+        offset = match.index + match[0].length;
+      }
+      return result + escape(value.slice(offset));
+    }
+    function blocks(lines, depth = 0) {
+      if (depth > 8) return '<p>' + inline(lines.join('\n')) + '</p>';
+      let result = '';
+      const list = line => /^(\s*)([-+*]|\d+[.)])\s+(.+)$/.exec(line);
+      const special = line => /^\s*$|^ {0,3}(#{1,6}\s|```|~~~|>|(?:---+|\*\*\*+)\s*$)/.test(line) || list(line);
+      for (let i = 0; i < lines.length;) {
+        const line = lines[i];
+        if (!line.trim()) { i++; continue; }
+        const fence = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+        if (fence) {
+          const content = []; i++;
+          while (i < lines.length && !lines[i].trim().startsWith(fence[1])) content.push(lines[i++]);
+          if (i < lines.length) i++;
+          result += '<pre><code>' + escape(content.join('\n')) + '</code></pre>'; continue;
+        }
+        const heading = /^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+        if (heading) { const level = Math.min(heading[1].length + 2, 6); result += `<h${level}>` + inline(heading[2]) + `</h${level}>`; i++; continue; }
+        if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) { result += '<hr>'; i++; continue; }
+        if (/^ {0,3}>/.test(line)) {
+          const quoted = [];
+          while (i < lines.length && /^ {0,3}>/.test(lines[i])) quoted.push(lines[i++].replace(/^ {0,3}> ?/, ''));
+          result += '<blockquote>' + blocks(quoted, depth + 1) + '</blockquote>'; continue;
+        }
+        const item = list(line);
+        if (item) {
+          const ordered = /^\d/.test(item[2]), tag = ordered ? 'ol' : 'ul', indent = item[1].length;
+          result += '<' + tag + (ordered ? ' start="' + parseInt(item[2], 10) + '"' : '') + '>';
+          while (i < lines.length) {
+            const next = list(lines[i]);
+            if (!next || next[1].length !== indent || /^\d/.test(next[2]) !== ordered) break;
+            const content = [next[3]]; i++;
+            while (i < lines.length && lines[i].trim() && /^\s+/.test(lines[i]) && lines[i].search(/\S/) > indent) content.push(lines[i++].slice(indent + 2));
+            result += '<li>' + blocks(content, depth + 1) + '</li>';
+          }
+          result += '</' + tag + '>'; continue;
+        }
+        const paragraph = [line]; i++;
+        while (i < lines.length && !special(lines[i])) paragraph.push(lines[i++]);
+        result += '<p>' + inline(paragraph.join('\n')).replace(/ {2}\n/g, '<br>') + '</p>';
+      }
+      return result;
+    }
+    return blocks(String(text).slice(0, 4000).replace(/\r\n?/g, '\n').split('\n'));
+  }
+  function releaseNotes(anchor, value) {
+    if (!anchor) return;
+    let panel = anchor.parentElement?.querySelector('[data-release-notes]');
+    if (!panel && anchor.after) {
+      panel = document.createElement('section');
+      panel.className = 'release-notes'; panel.setAttribute('data-release-notes', '');
+      panel.setAttribute('aria-label', 'Описание релиза');
+      panel.tabIndex = 0;
+      anchor.after(panel);
+    }
+    if (!panel) return;
+    const text = value.version ? String(value.notes || '').trim() : '';
+    panel.hidden = !text;
+    if (panel.dataset.markdown !== text) {
+      panel.innerHTML = markdown(text);
+      panel.dataset.markdown = text;
+    }
+  }
   // Remove handlers from older server templates: the bundled desktop UI owns these actions.
   function button(selector) {
     const old = root?.querySelector(selector);
@@ -35,13 +142,14 @@
       disabled: 'Обновления доступны в установленной Desktop-версии приложения.',
       checking: `Текущая версия: ${value.current_version}. Проверяем GitHub Releases…`,
       current: `Установлена актуальная версия: ${value.current_version}.`,
-      available: `Текущая версия: ${value.current_version}. Доступна версия ${value.version}. ${value.notes || ''}`,
+      available: `Текущая версия: ${value.current_version}. Доступна версия ${value.version}.`,
       downloading: `Скачивание обновления: ${value.percent}% — ${(value.downloaded / 1048576).toFixed(1)} МБ из ${(value.total / 1048576).toFixed(1)} МБ.`,
       downloaded: `Версия ${value.version} загружена и готова к установке.`,
       installing: 'Подтвердите установку в окне Manticore. После подтверждения приложение закроется и перезапустится.',
       error: `Не удалось выполнить обновление. ${value.error || 'Повторите проверку.'}`
     };
     if (status) status.textContent = messages[value.state] || '';
+    releaseNotes(status, value);
     if (progress) { progress.hidden = value.state !== 'downloading'; progress.value = value.percent; }
     if (value.state === 'available' && notified !== value.version && !root) {
       notified = value.version;
@@ -57,6 +165,7 @@
     const notice = document.querySelector('.desktop-update-notice');
     if (notice && !root) {
       notice.querySelector('p').textContent = messages[value.state];
+      releaseNotes(notice.querySelector('p'), value);
       const next = notice.querySelector('button');
       next.disabled = busy;
       next.textContent = value.state === 'downloaded' ? 'Перезапустить и установить' : value.state === 'error' ? 'Повторить проверку' : 'Скачать обновление';
@@ -142,13 +251,14 @@
           disabled: 'Обновления доступны в установленной Desktop-версии приложения.',
           checking: 'Проверяем GitHub Releases…',
           current: `Новых ${name === 'stable' ? 'стабильных' : 'тестовых'} обновлений нет. Текущая версия: ${value.current_version}.`,
-          available: `Текущая версия: ${value.current_version}. Доступна версия ${value.version}. ${value.notes || ''}`,
+          available: `Текущая версия: ${value.current_version}. Доступна версия ${value.version}.`,
           downloading: `Скачивание обновления: ${value.percent}% — ${(value.downloaded / 1048576).toFixed(1)} МБ из ${(value.total / 1048576).toFixed(1)} МБ.`,
           downloaded: `Версия ${value.version} загружена и готова к установке.`,
           installing: 'Подтвердите установку в окне Manticore. После подтверждения приложение перезапустится.',
           error: `Не удалось выполнить обновление. ${value.error || 'Повторите проверку.'}`
         };
         nodes['update-status'].textContent = messages[value.state] || '';
+        releaseNotes(nodes['update-status'], value);
         nodes['update-progress'].hidden = value.state !== 'downloading';
         nodes['update-progress'].value = value.percent || 0;
       }

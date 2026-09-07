@@ -479,10 +479,16 @@ def launch_installer_after_exit(installer_path: Path, version: str = "") -> None
     )
     encoded_command = base64.b64encode(command.encode("utf-16le")).decode("ascii")
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    # PowerShell outlives this onefile process and launches the updated EXE.
+    # Its child must unpack as a fresh application, not reuse the old process's
+    # _PYI_* state and temporary directory after that process has exited.
+    restart_environment = dict(os.environ)
+    restart_environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     subprocess.Popen(
         [powershell_executable(), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded_command],
         close_fds=True,
         creationflags=creation_flags,
+        env=restart_environment,
     )
 
 
