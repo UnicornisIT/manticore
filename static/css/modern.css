@@ -436,6 +436,10 @@ summary:hover .disclosure-chevron,summary:focus-visible .disclosure-chevron { bo
 /* Keep update channels side by side, stacking only on small screens. */
 @media (min-width: 761px) { .settings-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .settings-layout { grid-template-columns: 1fr; } }
-[data-update-card] .settings-card-heading { flex-wrap: wrap; }
+[data-update-card] .settings-card-heading { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 15px; }
+[data-update-card] .settings-card-heading > div { display:contents; }
+[data-update-card] .settings-card-heading h3 { grid-column:1; grid-row:1; margin:0; }
+[data-update-card] .settings-card-heading p { grid-column:1 / -1; grid-row:2; }
+[data-update-card] .settings-card-heading [data-update-badge] { grid-column:2; grid-row:1; align-self:start; }
 [data-update-card] .settings-status { overflow-wrap: anywhere; }
 [data-install-update][hidden], [data-update-progress][hidden] { display: none !important; }

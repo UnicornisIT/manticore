@@ -56,6 +56,19 @@ def student_row(text, position):
     note_match = re.search(r'(?i)\s+(?=(?:пр\.|приб\.|перевод\b|приказ\b|отчисл\w*\b))', value)
     name = value[:note_match.start()] if note_match else value
     note = value[note_match.end():] if note_match else ''
+    # A roster may append an arbitrary comment, not just a known order keyword.
+    # Keep the original text and comment for review, matching only the FIO.
+    word = r"[^\W\d_]+(?:[-’'][^\W\d_]+)*"
+    bracket = re.search(r'[\(\[]', name)
+    if bracket:
+        name = name[:bracket.start()].rstrip()
+    full_name = re.match(
+        rf"^({word}\s+{word}\s+{word}(?:\s+(?i:оглы|кызы|уулу|кыз))?)(?=$|[\s,;:.(\[])", name
+    )
+    if full_name:
+        name = full_name[1]
+    if name != value:
+        note = value[len(name):].strip()
     number = re.search(r'№\s*([^\s,;]+)', note)
     date = re.search(r'\b(\d{2}\.\d{2}\.\d{2}(?:\d{2})?)\b', note)
     order_date = None
@@ -102,9 +115,17 @@ def parse_docx(data, filename):
                 result['specialties'].append(specialty)
             current = None
             return
-        if group_kind(value):
-            current = dict(source_name=text, normalized_name=normalize_group(value), specialty=specialty,
-                           students=[], is_legacy=group_kind(value) == 'legacy', id=str(len(result['groups'])))
+        group_name = re.sub(r'(?i)^группа\s*(?:№\s*|:\s*)?', '', value).strip()
+        if group_kind(group_name):
+            # A cover heading and the roster heading may name the same group.
+            # Reuse only an empty section; populated sections retain their identity.
+            if (current and not current['students']
+                    and current['normalized_name'] == normalize_group(group_name)
+                    and current['specialty'] == specialty):
+                table_groups |= table
+                return
+            current = dict(source_name=text, normalized_name=normalize_group(group_name), specialty=specialty,
+                           students=[], is_legacy=group_kind(group_name) == 'legacy', id=str(len(result['groups'])))
             result['groups'].append(current)
             table_groups |= table
             return

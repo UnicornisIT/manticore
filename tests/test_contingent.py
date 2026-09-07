@@ -53,6 +53,53 @@ class ContingentEngineTests(unittest.TestCase):
         self.assertEqual(row['order_number'], '2204-У')
         self.assertIn('\u00a0', row['raw_text'])
 
+    def test_arbitrary_notes_after_fio(self):
+        for note in ['(зач.приказом № 1808-У от 18.08.2026)', 'документы предоставлены',
+                     'ЛЮБОЙ ДОПОЛНИТЕЛЬНЫЙ ТЕКСТ', '— примечание', ', уточнить сведения']:
+            with self.subTest(note=note):
+                row = student_row('1. Тестов Иван Иванович ' + note, 'p1')
+                self.assertTrue(row['valid'])
+                self.assertEqual(row['normalized_full_name'], 'тестов иван иванович')
+                self.assertEqual(row['source_note'], note)
+        row = student_row('Тестов Иван Иванович(зач.приказом № 1808-У от 18.08.2026)', 'p1')
+        self.assertEqual(row['order_number'], '1808-У')
+        self.assertEqual(row['order_date'], '2026-08-18')
+        self.assertEqual(row['normalized_full_name'], 'тестов иван иванович')
+
+    def test_compound_names_and_patronymic_suffix(self):
+        for name in ['Тестова-Примерова Анна-Мария Ивановна', 'Тестов Иван', 'Тестов Али Мамед оглы']:
+            row = student_row(name, 'p1')
+            self.assertTrue(row['valid'])
+            self.assertEqual(row['normalized_full_name'], name.casefold())
+        self.assertFalse(student_row('Неразборчиво ???', 'p1')['valid'])
+
+    def test_group_prefix_and_notes_in_single_group_document(self):
+        for title in ['ГРУППА 26ФМ -  11 И', 'Группа № 26ФМ-11И', 'Группа: 26ФМ-11И']:
+            doc = Document()
+            for text in [title, '2026-2027 учебный год', 'Начало обучения: осень 2026 года',
+                         'Срок обучения – 1 год 10 месяцев', 'ВЫПУСК - июнь 2028 года',
+                         'Тестов Иван Иванович (зач.приказом № 1808-У от 18.08.2026)']:
+                doc.add_paragraph(text)
+            stream = io.BytesIO(); doc.save(stream)
+            parsed = parse_docx(stream.getvalue(), 'single-group.docx')
+            group = parsed['groups'][0]
+            self.assertEqual(group['normalized_name'], '26ФМ-11И')
+            self.assertEqual(len(group['students']), 1)
+            mapped = map_groups(parsed, [{'name': '26ФМ-11И-1'}])
+            rows = reconcile(mapped, [dict(username='test', fio='Тестов Иван Иванович', group='26ФМ-11И-1')])
+            self.assertEqual(rows[0]['status'], 'MATCHED')
+
+    def test_repeated_heading_does_not_create_empty_group(self):
+        doc = Document()
+        for text in ['26СтО -11', 'ГРУППА 26СтО - 11', '2026-2027 учебный год',
+                     'Тестов Иван Иванович', '26СтО -11', 'Примеров Петр Петрович']:
+            doc.add_paragraph(text)
+        stream = io.BytesIO(); doc.save(stream)
+        groups = parse_docx(stream.getvalue(), 'repeated-heading.docx')['groups']
+        self.assertEqual(len(groups), 2)
+        self.assertEqual([len(group['students']) for group in groups], [1, 1])
+        self.assertEqual([group['id'] for group in groups], ['0', '1'])
+
     def test_short_group_and_legacy_policy(self):
         source = document([('26ЛД - 9 И', ['Тестов Иван'])])
         groups = [{'name': '26ЛД-9И-1'}]
