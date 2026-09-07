@@ -91,6 +91,11 @@ elif cmd == 'api':
     if mode == 'api_no_digest': item.pop('digest')
     if mode == 'api_wrong_digest': item['digest'] = 'sha256:' + '0' * 64
     if mode == 'api_wrong_url': item['browser_download_url'] = 'https://example.com/setup.exe'
+    if mode == 'draft_url': item['browser_download_url'] = item['browser_download_url'].replace(state['tag'], 'untagged-60c7d2dd614974ca77b8')
+    if mode == 'api_wrong_tag': item['browser_download_url'] = item['browser_download_url'].replace(state['tag'], 'v9.9.9')
+    if mode == 'api_wrong_repo': item['browser_download_url'] = item['browser_download_url'].replace('UnicornisIT/manticore', 'other/repository')
+    if mode == 'api_wrong_filename': item['browser_download_url'] += '.other'
+    if mode == 'api_url_query': item['browser_download_url'] += '?redirect=other'
     print(json.dumps(result))
 elif cmd == 'edit':
     assert state.get('downloaded') and '--draft=false' in args
@@ -142,7 +147,7 @@ class ReleasePublishingTests(unittest.TestCase):
     def test_create_and_reuse_drafts_in_all_channels(self):
         for mode, version in [('new', '0.0.3-alpha'), ('reuse', '0.0.3-beta'),
                               ('reuse', '0.0.3-rc.1'), ('reuse', '0.0.3'),
-                              ('cli_without_digest', '0.0.3-alpha')]:
+                              ('cli_without_digest', '0.0.3-alpha'), ('draft_url', '0.0.3-alpha')]:
             with self.subTest(mode=mode, version=version):
                 result, calls = self.run_release(mode, version)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -158,6 +163,7 @@ class ReleasePublishingTests(unittest.TestCase):
                      'upload_error', 'view_error', 'download_error', 'api_error', 'missing_asset',
                      'extra_exe', 'remote_size', 'corrupt_installer', 'corrupt_metadata', 'corrupt_sums',
                      'download_missing', 'api_no_digest', 'api_wrong_digest', 'api_wrong_url',
+                     'api_wrong_tag', 'api_wrong_repo', 'api_wrong_filename', 'api_url_query',
                      'published_during_download', 'changed_assets', 'local_metadata', 'local_hash', 'local_sums']:
             with self.subTest(mode=mode):
                 result, calls = self.run_release(mode)

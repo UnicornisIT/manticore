@@ -195,7 +195,14 @@ jobs:
           $apiRelease = $raw | ConvertFrom-Json -AsHashtable
           if ($apiRelease.id -ne $releaseId -or $apiRelease.tag_name -cne $tag -or $apiRelease.draft -ne $true) { throw 'Release changed before publication' }
           $apiInstaller = @($apiRelease.assets | Where-Object { $_.name -ceq $installerName })
-          if ($apiInstaller.Count -ne 1 -or $apiInstaller[0].size -ne $localSize -or $apiInstaller[0].digest -cne "sha256:$localHash" -or $apiInstaller[0].browser_download_url -cne "https://github.com/$env:GH_REPO/releases/download/$tag/$installerName") { throw 'GitHub installer digest, size or URL is incompatible with the updater; leaving draft unpublished' }
+          if ($apiInstaller.Count -ne 1) { throw 'GitHub API must contain exactly one matching installer' }
+          if ($apiInstaller[0].size -ne $localSize) { throw "GitHub API installer size mismatch: expected $localSize, got $($apiInstaller[0].size)" }
+          if ($apiInstaller[0].digest -cne "sha256:$localHash") { throw "GitHub API installer digest mismatch: expected sha256:$localHash, got $($apiInstaller[0].digest)" }
+          # Draft assets may use GitHub's temporary untagged-* URL until publication.
+          # Still require the exact official repository and installer filename.
+          $draftUrlPattern = '^https://github\.com/' + [regex]::Escape($env:GH_REPO) + '/releases/download/(?:' + [regex]::Escape($tag) + '|untagged-[0-9a-f]+)/' + [regex]::Escape($installerName) + '$'
+          if ($apiInstaller[0].browser_download_url -cnotmatch $draftUrlPattern) { throw 'GitHub API draft installer URL has an unexpected host, repository, tag or filename' }
+          Write-Host 'GitHub API installer size, digest and draft URL: PASS'
           $release = Read-Draft $releaseId
           if (($release.assets | Sort-Object name | Select-Object id,name,size,digest | ConvertTo-Json -Depth 10 -Compress) -cne $assetSnapshot) { throw 'Release assets changed during download verification; rerun required' }
           Write-Host 'Draft verification: PASS'
