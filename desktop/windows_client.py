@@ -371,12 +371,13 @@ def update_channel() -> str:
     return "preview" if VERSION_PATTERN.fullmatch(current_version()).group(4) is not None else "stable"
 
 
-def fetch_update_manifest(server_url: str = "", *, allow_same_version_rebuild: bool = False) -> dict:
+def fetch_update_manifest(server_url: str = "", *, allow_same_version_rebuild: bool = False, channel: str = "") -> dict:
     # Legacy arguments are retained for old callers, never used as update sources.
     trust_policy = load_trust_policy()
-    release = (desktop_releases.fetch_preview_release() if update_channel() == "preview"
+    release = (desktop_releases.fetch_channel_release(channel) if channel else
+               desktop_releases.fetch_preview_release() if update_channel() == "preview"
                else desktop_releases.fetch_stable_release())
-    if version_key(release["version"]) <= version_key(current_version()):
+    if not release or version_key(release["version"]) <= version_key(current_version()):
         return {}
     return {**release, "signer_certificate_sha256": trust_policy["signer_certificate_sha256"]}
 
@@ -591,13 +592,14 @@ def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: 
 class DesktopUpdater:
     """Single serialized updater; renderer receives status, never executable paths."""
 
-    def __init__(self, close_windows):
+    def __init__(self, close_windows, channel=""):
         self._lock = threading.RLock()
+        self._channel = channel
         self._close_windows = close_windows
         self._manifest = None
         self._installer = None
         self._state = {"state": "idle" if getattr(sys, "frozen", False) else "disabled",
-                       "current_version": current_version(), "channel": update_channel(), "version": "", "notes": "",
+                       "current_version": current_version(), "channel": channel or update_channel(), "version": "", "notes": "",
                        "downloaded": 0, "total": 0, "percent": 0, "error": ""}
 
     def status(self):
@@ -623,8 +625,8 @@ class DesktopUpdater:
 
     def _check(self):
         try:
-            logging.info("[Updater] Checking %s GitHub releases; current=%s", update_channel(), current_version())
-            manifest = fetch_update_manifest()
+            logging.info("[Updater] Checking %s GitHub releases; current=%s", self._channel or update_channel(), current_version())
+            manifest = fetch_update_manifest(channel=self._channel) if self._channel else fetch_update_manifest()
             with self._lock:
                 self._manifest = manifest or None
                 self._set(state="available" if manifest else "current", version=manifest.get("version", ""), notes=manifest.get("notes", ""))
@@ -698,7 +700,10 @@ class DesktopApi:
         self.update_server_url = update_server_url
         self.target_url = target_url
         self.connection_error = ""
-        self._updater = DesktopUpdater(self._close_windows)
+        self._channel_updaters = {channel: DesktopUpdater(self._close_windows, channel)
+                                  for channel in ("stable", "preview")}
+        self._updater = self._channel_updaters[update_channel()]
+        self._update_action_lock = threading.RLock()
 
     @staticmethod
     def _close_windows() -> None:
@@ -725,14 +730,32 @@ class DesktopApi:
             "log_path": str(application_data_directory() / "logs" / "client.log"),
         }
 
-    def get_update_status(self) -> dict:
-        return self._updater.status()
+    def _selected_updater(self, channel):
+        if channel == "":
+            return self._updater
+        if not isinstance(channel, str) or channel not in self._channel_updaters:
+            raise ValueError("Неизвестный канал обновлений.")
+        return self._channel_updaters[channel]
 
-    def check_for_update(self) -> dict:
-        return self._updater.check()
+    def get_update_status(self, channel="") -> dict:
+        return self._selected_updater(channel).status()
 
-    def download_update(self) -> dict:
-        return self._updater.download()
+    def get_update_channels(self) -> dict:
+        return {channel: updater.status() for channel, updater in self._channel_updaters.items()}
+
+    def _update_action(self, channel, action):
+        with self._update_action_lock:
+            selected = self._selected_updater(channel)
+            if any(updater.status()["state"] == "installing"
+                   for updater in self._channel_updaters.values()):
+                return selected.status()
+            return getattr(selected, action)()
+
+    def check_for_update(self, channel="") -> dict:
+        return self._update_action(channel, "check")
+
+    def download_update(self, channel="") -> dict:
+        return self._update_action(channel, "download")
 
     def open_log(self) -> dict:
         log_path = application_data_directory() / "logs" / "client.log"
@@ -765,8 +788,8 @@ class DesktopApi:
             webview.windows[0].load_url(self.target_url)
         return {"ok": True}
 
-    def install_approved_update(self) -> dict:
-        return self._updater.install()
+    def install_approved_update(self, channel="") -> dict:
+        return self._update_action(channel, "install")
 
 
 def check_server_connection(url: str, timeout: float = 5.0) -> str:

@@ -211,8 +211,10 @@ def fetch_stable_release(timeout: float = 8.0) -> dict:
     return _fetch_release_api(f"https://api.github.com/repos/{repository}/releases/latest", repository, timeout, stable_client=True)
 
 
-def fetch_preview_release(timeout: float = 8.0) -> dict:
+def fetch_preview_release(timeout: float = 8.0, *, channel: str = "") -> dict:
     """Select the greatest published SemVer, including prereleases and stable."""
+    if channel not in {"", "stable", "preview"}:
+        raise DesktopReleaseError("Неизвестный канал обновлений.")
     repository = DEFAULT_GITHUB_REPOSITORY
     candidates = []
     for page in range(1, 11):
@@ -228,16 +230,28 @@ def fetch_preview_release(timeout: float = 8.0) -> dict:
                 key = version_key(item.get("tag_name", ""))
             except DesktopReleaseError:
                 continue
+            preliminary = bool(item.get("prerelease")) or key[3] == 0
+            if channel and preliminary != (channel == "preview"):
+                continue
             candidates.append((key, item))
         if len(payload) < 100:
             break
     else:
         raise DesktopReleaseError("Слишком много релизов GitHub для проверки предварительного канала.")
     if not candidates:
+        if channel:
+            return {}
         raise DesktopReleaseError("Публичные релизы с версией SemVer не найдены.")
     # A broken newest installer must surface as an error, not silently fall back.
     latest = max(candidates, key=lambda candidate: candidate[0])[1]
-    return _validated_release_payload(latest, repository, preview_client=True)
+    return _validated_release_payload(latest, repository, stable_client=channel == "stable", preview_client=channel != "stable")
+
+
+def fetch_channel_release(channel: str, timeout: float = 8.0) -> dict:
+    """Return only releases belonging to the explicitly selected UI channel."""
+    if channel not in {"stable", "preview"}:
+        raise DesktopReleaseError("Неизвестный канал обновлений.")
+    return fetch_preview_release(timeout, channel=channel)
 
 
 def fetch_latest_release(repository: str = DEFAULT_GITHUB_REPOSITORY, timeout: float = 8.0) -> dict:

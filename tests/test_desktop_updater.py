@@ -121,6 +121,59 @@ class PreviewReleaseTests(unittest.TestCase):
                 self.assertEqual(client.update_channel(), expected)
 
 
+class UpdateChannelTests(unittest.TestCase):
+    def test_channels_split_stable_and_preliminary_even_with_wrong_github_flag(self):
+        flagged = release('0.0.6'); flagged['prerelease'] = True
+        draft = release('9.0.0'); draft['draft'] = True
+        items = [release('0.0.5-alpha'), release('0.0.4'), flagged, draft]
+        with mock.patch.object(releases, '_fetch_release_json', return_value=items):
+            self.assertEqual(releases.fetch_channel_release('stable')['version'], '0.0.4')
+            self.assertEqual(releases.fetch_channel_release('preview')['version'], '0.0.6')
+
+    def test_missing_stable_release_is_not_an_error(self):
+        with mock.patch.object(releases, '_fetch_release_json', return_value=[release('0.0.5-alpha')]):
+            self.assertEqual(releases.fetch_channel_release('stable'), {})
+        with mock.patch.object(releases, '_fetch_release_json', return_value=[release('1.0.0')]):
+            self.assertEqual(releases.fetch_channel_release('preview'), {})
+
+    def test_explicit_channel_still_blocks_downgrade(self):
+        with mock.patch.object(client, 'current_version', return_value='0.0.5-alpha'), \
+             mock.patch.object(client, 'load_trust_policy', return_value={'signer_certificate_sha256': ''}), \
+             mock.patch.object(releases, 'fetch_channel_release') as fetch:
+            for version, expected in [('0.0.4', False), ('0.0.5-alpha', False), ('0.0.5', True)]:
+                fetch.return_value = {'version': version}
+                self.assertEqual(bool(client.fetch_update_manifest(channel='stable')), expected)
+                fetch.assert_called_with('stable')
+
+    def test_independent_status_and_channel_routing(self):
+        api = client.DesktopApi('')
+        stable, preview = (api._channel_updaters[name] for name in ('stable', 'preview'))
+        stable._set(state='current')
+        preview._set(state='available', version='0.0.6-alpha')
+        states = api.get_update_channels()
+        self.assertEqual(states['stable']['state'], 'current')
+        self.assertEqual(states['preview']['version'], '0.0.6-alpha')
+        states['preview']['version'] = 'tampered'
+        self.assertEqual(preview.status()['version'], '0.0.6-alpha')
+        with mock.patch.object(preview, 'download') as download, mock.patch.object(stable, 'download') as other:
+            api.download_update('preview')
+            download.assert_called_once()
+            other.assert_not_called()
+        for channel in ['nightly', '../stable', None, []]:
+            with self.subTest(channel=channel), self.assertRaises(ValueError):
+                api.check_for_update(channel)
+
+    def test_installing_one_channel_blocks_other_install_and_download(self):
+        api = client.DesktopApi('')
+        api._channel_updaters['stable']._set(state='installing')
+        preview = api._channel_updaters['preview']
+        with mock.patch.object(preview, 'install') as install, mock.patch.object(preview, 'download') as download:
+            api.install_approved_update('preview')
+            api.download_update('preview')
+            install.assert_not_called()
+            download.assert_not_called()
+
+
 class DesktopUpdaterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

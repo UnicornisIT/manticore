@@ -432,3 +432,10 @@ summary:hover .disclosure-chevron,summary:focus-visible .disclosure-chevron { bo
 .user-menu-links { position: absolute; right: 0; top: calc(100% + 12px); z-index: 80; display: grid; min-width: 210px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); box-shadow: var(--shadow-sm); }
 .user-menu-links a { display: block; padding: 10px 12px; color: var(--text-primary); text-decoration: none; border-radius: 6px; }
 .user-menu-links a:hover { background: var(--bg-hover); }
+
+/* Keep update channels side by side, stacking only on small screens. */
+@media (min-width: 761px) { .settings-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .settings-layout { grid-template-columns: 1fr; } }
+[data-update-card] .settings-card-heading { flex-wrap: wrap; }
+[data-update-card] .settings-status { overflow-wrap: anywhere; }
+[data-install-update][hidden], [data-update-progress][hidden] { display: none !important; }
