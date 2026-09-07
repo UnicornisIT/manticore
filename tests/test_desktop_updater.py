@@ -63,6 +63,64 @@ class StableReleaseTests(unittest.TestCase):
                 validate_tag(version, tag)
 
 
+class PreviewReleaseTests(unittest.TestCase):
+    def fetch(self, payload):
+        with mock.patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(payload).encode())):
+            return releases.fetch_preview_release()
+
+    def test_published_prerelease_and_unflagged_alpha_are_accepted(self):
+        for flagged in [True, False]:
+            payload = release('0.0.4-alpha'); payload['prerelease'] = flagged
+            self.assertEqual(self.fetch([payload])['version'], '0.0.4-alpha')
+
+    def test_selection_uses_semver_not_publication_order(self):
+        draft = release('9.0.0'); draft['draft'] = True
+        items = [release('1.0.0-beta.2'), draft, {'tag_name': 'nightly'},
+                 release('1.0.0-beta.11'), release('1.0.0-alpha')]
+        self.assertEqual(self.fetch(items)['version'], '1.0.0-beta.11')
+        self.assertEqual(self.fetch(items + [release('1.0.0')])['version'], '1.0.0')
+
+    def test_pagination(self):
+        pages = [io.BytesIO(json.dumps([release('1.0.0-alpha')] * 100).encode()),
+                 io.BytesIO(json.dumps([release('1.0.0-beta')]).encode())]
+        with mock.patch('urllib.request.urlopen', side_effect=pages) as fetch:
+            self.assertEqual(releases.fetch_preview_release()['version'], '1.0.0-beta')
+            self.assertTrue(fetch.call_args.args[0].full_url.endswith('page=2'))
+
+    def test_bad_latest_installer_is_error_without_fallback(self):
+        for field, value in [('digest', None), ('size', 0),
+                             ('browser_download_url', 'https://evil.test/file.exe'),
+                             ('browser_download_url', 'https://github.com/UnicornisIT/manticore/releases/download/v1.0.0/wrong.exe')]:
+            payload = release('1.0.0-beta'); payload['prerelease'] = True
+            payload['assets'][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.fetch([payload, release('1.0.0-alpha')])
+
+    def test_empty_and_malformed_lists(self):
+        for payload in [[], {}, [None], [{'draft': True, 'tag_name': 'v1.0.0'}]]:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.fetch(payload)
+
+    @mock.patch.object(client, 'current_version', return_value='0.0.3-alpha')
+    @mock.patch.object(client, 'load_trust_policy', return_value={'signer_certificate_sha256': ''})
+    @mock.patch.object(releases, 'fetch_stable_release')
+    @mock.patch.object(releases, 'fetch_preview_release')
+    def test_alpha_client_channel_and_no_downgrade(self, preview, stable, _policy, _version):
+        self.assertEqual(client.update_channel(), 'preview')
+        self.assertEqual(client.DesktopUpdater(mock.Mock()).status()['channel'], 'preview')
+        for version, expected in [('0.0.4-alpha', True), ('0.0.3-beta', True),
+                                  ('0.0.3', True), ('0.0.3-alpha', False), ('0.0.2-alpha', False)]:
+            preview.return_value = {'version': version}
+            self.assertEqual(bool(client.fetch_update_manifest()), expected)
+        stable.assert_not_called()
+
+    def test_channel_follows_installed_version(self):
+        for version, expected in [('1.0.0-alpha', 'preview'), ('1.0.0-beta.1', 'preview'),
+                                  ('1.0.0-rc.1', 'preview'), ('1.0.0', 'stable'), ('1.0.0+build.1', 'stable')]:
+            with mock.patch.object(client, 'current_version', return_value=version):
+                self.assertEqual(client.update_channel(), expected)
+
+
 class DesktopUpdaterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

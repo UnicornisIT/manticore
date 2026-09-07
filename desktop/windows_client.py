@@ -367,10 +367,15 @@ def version_key(value: str):
     return desktop_releases.version_key(value)
 
 
+def update_channel() -> str:
+    return "preview" if VERSION_PATTERN.fullmatch(current_version()).group(4) is not None else "stable"
+
+
 def fetch_update_manifest(server_url: str = "", *, allow_same_version_rebuild: bool = False) -> dict:
     # Legacy arguments are retained for old callers, never used as update sources.
     trust_policy = load_trust_policy()
-    release = desktop_releases.fetch_stable_release()
+    release = (desktop_releases.fetch_preview_release() if update_channel() == "preview"
+               else desktop_releases.fetch_stable_release())
     if version_key(release["version"]) <= version_key(current_version()):
         return {}
     return {**release, "signer_certificate_sha256": trust_policy["signer_certificate_sha256"]}
@@ -592,7 +597,7 @@ class DesktopUpdater:
         self._manifest = None
         self._installer = None
         self._state = {"state": "idle" if getattr(sys, "frozen", False) else "disabled",
-                       "current_version": current_version(), "version": "", "notes": "",
+                       "current_version": current_version(), "channel": update_channel(), "version": "", "notes": "",
                        "downloaded": 0, "total": 0, "percent": 0, "error": ""}
 
     def status(self):
@@ -618,7 +623,7 @@ class DesktopUpdater:
 
     def _check(self):
         try:
-            logging.info("[Updater] Checking stable GitHub release; current=%s", current_version())
+            logging.info("[Updater] Checking %s GitHub releases; current=%s", update_channel(), current_version())
             manifest = fetch_update_manifest()
             with self._lock:
                 self._manifest = manifest or None

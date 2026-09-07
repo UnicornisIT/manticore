@@ -92,10 +92,10 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
         raise
 
 
-def _validated_release_payload(payload: dict, repository: str, *, stable_client: bool = False) -> dict:
-    if payload.get("draft") or payload.get("prerelease"):
+def _validated_release_payload(payload: dict, repository: str, *, stable_client: bool = False, preview_client: bool = False) -> dict:
+    if payload.get("draft") or (payload.get("prerelease") and not preview_client):
         raise DesktopReleaseError("Черновик или prerelease нельзя публиковать для Windows-клиентов.")
-    if not stable_client and payload.get("immutable") is not True:
+    if not (stable_client or preview_client) and payload.get("immutable") is not True:
         raise DesktopReleaseError(
             "GitHub Release не помечен как Immutable. Включите immutable releases в настройках репозитория."
         )
@@ -143,7 +143,7 @@ def _validated_release_payload(payload: dict, repository: str, *, stable_client:
         raise DesktopReleaseError("Установщик должен скачиваться непосредственно с github.com по HTTPS.")
     if not urllib.parse.unquote(parsed_url.path).casefold().startswith(expected_prefix):
         raise DesktopReleaseError("Ссылка установщика не принадлежит настроенному GitHub-репозиторию.")
-    if stable_client and (parsed_url.port not in (None, 443) or urllib.parse.unquote(parsed_url.path) != f"/{repository}/releases/download/{tag_name}/{asset['name']}"):
+    if (stable_client or preview_client) and (parsed_url.port not in (None, 443) or urllib.parse.unquote(parsed_url.path) != f"/{repository}/releases/download/{tag_name}/{asset['name']}"):
         raise DesktopReleaseError("Ссылка установщика не соответствует тегу и имени файла релиза.")
 
     try:
@@ -172,8 +172,7 @@ def _validated_release_payload(payload: dict, repository: str, *, stable_client:
     }
 
 
-def _fetch_release_api(api_url: str, repository: str, timeout: float, *, stable_client: bool = False) -> dict:
-    repository = normalize_repository(repository)
+def _fetch_release_json(api_url: str, timeout: float):
     request = urllib.request.Request(
         api_url,
         headers={
@@ -189,12 +188,18 @@ def _fetch_release_api(api_url: str, repository: str, timeout: float, *, stable_
             raise DesktopReleaseError("Ответ GitHub API слишком большой.")
         payload = json.loads(raw_payload.decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        messages = {403: "GitHub ограничил запросы. Повторите проверку позже.", 429: "Превышен лимит GitHub API. Повторите позже.", 404: "Стабильный публичный GitHub Release не найден."}
+        messages = {403: "GitHub ограничил запросы. Повторите проверку позже.", 429: "Превышен лимит GitHub API. Повторите позже.", 404: "Публичный GitHub Release не найден."}
         raise DesktopReleaseError(messages.get(exc.code, f"GitHub временно недоступен (HTTP {exc.code}).")) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise DesktopReleaseError("GitHub вернул повреждённые сведения о релизе. Повторите проверку позже.") from exc
     except (OSError, urllib.error.URLError) as exc:
         raise DesktopReleaseError("Не удалось связаться с GitHub. Проверьте подключение к интернету и повторите попытку.") from exc
+    return payload
+
+
+def _fetch_release_api(api_url: str, repository: str, timeout: float, *, stable_client: bool = False) -> dict:
+    repository = normalize_repository(repository)
+    payload = _fetch_release_json(api_url, timeout)
     if not isinstance(payload, dict):
         raise DesktopReleaseError("GitHub API вернул некорректный ответ.")
     return _validated_release_payload(payload, repository, stable_client=stable_client)
@@ -204,6 +209,35 @@ def fetch_stable_release(timeout: float = 8.0) -> dict:
     """The desktop stable channel has exactly one, compile-time public source."""
     repository = DEFAULT_GITHUB_REPOSITORY
     return _fetch_release_api(f"https://api.github.com/repos/{repository}/releases/latest", repository, timeout, stable_client=True)
+
+
+def fetch_preview_release(timeout: float = 8.0) -> dict:
+    """Select the greatest published SemVer, including prereleases and stable."""
+    repository = DEFAULT_GITHUB_REPOSITORY
+    candidates = []
+    for page in range(1, 11):
+        payload = _fetch_release_json(
+            f"https://api.github.com/repos/{repository}/releases?per_page=100&page={page}", timeout
+        )
+        if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+            raise DesktopReleaseError("GitHub API вернул некорректный список релизов.")
+        for item in payload:
+            if item.get("draft"):
+                continue
+            try:
+                key = version_key(item.get("tag_name", ""))
+            except DesktopReleaseError:
+                continue
+            candidates.append((key, item))
+        if len(payload) < 100:
+            break
+    else:
+        raise DesktopReleaseError("Слишком много релизов GitHub для проверки предварительного канала.")
+    if not candidates:
+        raise DesktopReleaseError("Публичные релизы с версией SemVer не найдены.")
+    # A broken newest installer must surface as an error, not silently fall back.
+    latest = max(candidates, key=lambda candidate: candidate[0])[1]
+    return _validated_release_payload(latest, repository, preview_client=True)
 
 
 def fetch_latest_release(repository: str = DEFAULT_GITHUB_REPOSITORY, timeout: float = 8.0) -> dict:

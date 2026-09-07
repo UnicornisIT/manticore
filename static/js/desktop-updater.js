@@ -7,6 +7,7 @@
   const status = root?.querySelector('[data-update-status]');
   const badge = root?.querySelector('[data-update-badge]');
   const progress = root?.querySelector('[data-update-progress]');
+  const channel = root?.querySelector('[data-update-channel]') || badge?.closest('section')?.querySelector('.settings-card-heading p');
   // Remove handlers from older server templates: the bundled desktop UI owns these actions.
   function button(selector) {
     const old = root?.querySelector(selector);
@@ -17,6 +18,9 @@
   const labels = {idle:'Не проверено', disabled:'Desktop-сборка', checking:'Проверяем…', current:'Актуальная версия', available:'Доступно обновление', downloading:'Скачивание…', downloaded:'Готово к установке', installing:'Установка…', error:'Ошибка'};
   function render(value) {
     state = value;
+    if (channel) channel.textContent = value.channel === 'preview'
+      ? 'Предварительный канал: alpha, beta, rc и стабильные версии из официального GitHub Releases.'
+      : 'Стабильный канал: стабильные версии из официального GitHub Releases.';
     const busy = ['checking', 'downloading', 'installing'].includes(value.state);
     if (check) check.disabled = busy || ['disabled', 'downloaded'].includes(value.state);
     if (action) {

@@ -11,7 +11,7 @@ function fixture(initial) {
       addEventListener(name, handler) {this.events[name] = handler;},
       cloneNode() {return element(selector);}, replaceWith() {}};
   }
-  ['[data-check-update]', '[data-install-update]', '[data-update-status]', '[data-update-badge]', '[data-update-progress]'].forEach(element);
+  ['[data-check-update]', '[data-install-update]', '[data-update-status]', '[data-update-badge]', '[data-update-progress]', '[data-update-channel]'].forEach(element);
   const root = {querySelector: selector => nodes[selector]};
   const calls = [];
   let state = initial;
@@ -53,4 +53,12 @@ test('development disables updates and IPC rejection restores manual check', asy
   await f.nodes['[data-check-update]'].events.click({stopImmediatePropagation(){}}); await new Promise(setImmediate);
   assert.equal(f.nodes['[data-check-update]'].disabled, false);
   assert.match(f.nodes['[data-update-status]'].textContent, /Не удалось/);
+});
+
+test('updater shows the installed client channel', async () => {
+  for (const [channel, label] of [['preview', /Предварительный канал/], ['stable', /Стабильный канал/]]) {
+    const f = fixture({state:'idle', current_version:'0.0.3-alpha', channel});
+    await f.callbacks.shift()(); await new Promise(setImmediate);
+    assert.match(f.nodes['[data-update-channel]'].textContent, label);
+  }
 });
