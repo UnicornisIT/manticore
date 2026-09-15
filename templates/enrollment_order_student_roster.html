@@ -93,7 +93,7 @@
                 </thead>
                 <tbody>
                     {% for row in group.rows %}
-                    <tr data-roster-row data-fio="{{ row.fio }}" data-dogovor="{{ row.dogovor }}" data-login="{{ row.login }}" data-email="{{ row.email }}" data-group="{{ row.group_name }}" data-specialty="{{ row.specialty }}" data-status="{{ row.status }}" data-issues="{{ row.issues_text }}">
+                    <tr data-roster-row data-cohort2="{{ row.cohort2 }}" data-record-type="{{ row.record_type }}" data-fio="{{ row.fio }}" data-dogovor="{{ row.dogovor }}" data-login="{{ row.login }}" data-email="{{ row.email }}" data-group="{{ row.group_name }}" data-specialty="{{ row.specialty }}" data-status="{{ row.status }}" data-issues="{{ row.issues_text }}">
                         <td class="roster-col-login">{{ row.login or '-' }}</td>
                         <td class="roster-col-password">cron</td>
                         <td class="roster-contact roster-col-email">

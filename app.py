@@ -2293,19 +2293,20 @@ def like_pattern(value):
     return f"%{str(value or '').strip()}%"
 
 def global_search_records(query, campaign_year=None, limit=80):
-    query = str(query or '').strip()
+    query = normalize_search_text(query)
     if not query:
         return []
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     course_groups_enabled = are_course_groups_enabled()
-    pattern = like_pattern(query)
+    pattern = query
     results = []
     with sqlite3.connect(DB_PATH) as conn:
+        conn.create_function('NORMALIZE_SEARCH', 1, normalize_search_text)
         cur = conn.execute(
             '''
             SELECT id, fio, dogovor, login, email, campaign_year
             FROM abiturients
-            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ? OR email LIKE ?)
+            WHERE campaign_year=? AND (INSTR(NORMALIZE_SEARCH(fio), ?) > 0 OR INSTR(NORMALIZE_SEARCH(dogovor), ?) > 0 OR INSTR(NORMALIZE_SEARCH(login), ?) > 0 OR INSTR(NORMALIZE_SEARCH(email), ?) > 0)
             ORDER BY fio
             LIMIT ?
             ''',
@@ -2324,7 +2325,7 @@ def global_search_records(query, campaign_year=None, limit=80):
             '''
             SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor
             FROM students
-            WHERE username LIKE ? OR email LIKE ? OR firstname LIKE ? OR lastname LIKE ? OR cohort1 LIKE ? OR cohort2 LIKE ? OR source_dogovor LIKE ?
+            WHERE INSTR(NORMALIZE_SEARCH(username), ?) > 0 OR INSTR(NORMALIZE_SEARCH(email), ?) > 0 OR INSTR(NORMALIZE_SEARCH(firstname), ?) > 0 OR INSTR(NORMALIZE_SEARCH(lastname), ?) > 0 OR INSTR(NORMALIZE_SEARCH(cohort1), ?) > 0 OR INSTR(NORMALIZE_SEARCH(cohort2), ?) > 0 OR INSTR(NORMALIZE_SEARCH(source_dogovor), ?) > 0
             ORDER BY lastname, firstname
             LIMIT ?
             ''',
@@ -2348,7 +2349,7 @@ def global_search_records(query, campaign_year=None, limit=80):
             '''
             SELECT id, fio, dogovor, login
             FROM pending_duplicates
-            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ?)
+            WHERE campaign_year=? AND (INSTR(NORMALIZE_SEARCH(fio), ?) > 0 OR INSTR(NORMALIZE_SEARCH(dogovor), ?) > 0 OR INSTR(NORMALIZE_SEARCH(login), ?) > 0)
             ORDER BY fio
             LIMIT ?
             ''',
@@ -2367,7 +2368,7 @@ def global_search_records(query, campaign_year=None, limit=80):
             '''
             SELECT id, fio, dogovor, login
             FROM login_conflicts
-            WHERE campaign_year=? AND (fio LIKE ? OR dogovor LIKE ? OR login LIKE ?)
+            WHERE campaign_year=? AND (INSTR(NORMALIZE_SEARCH(fio), ?) > 0 OR INSTR(NORMALIZE_SEARCH(dogovor), ?) > 0 OR INSTR(NORMALIZE_SEARCH(login), ?) > 0)
             ORDER BY conflict_time DESC
             LIMIT ?
             ''',
@@ -5907,12 +5908,12 @@ def enrollment_order_roster_export_rows(roster):
 def filter_enrollment_order_roster_rows(rows, args):
     """Apply the server-side equivalent of PreviewTableState for trustworthy exports."""
     result = list(rows)
-    search = str(args.get('search') or '').strip().casefold()
+    search = normalize_search_text(args.get('search'))
     if search:
-        result = [row for row in result if search in ' '.join(str(row.get(key) or '') for key in (
+        result = [row for row in result if search in normalize_search_text(' '.join(str(row.get(key) or '') for key in (
             'fio', 'dogovor', 'login', 'email', 'group_name', 'cohort2', 'specialty',
             'status', 'record_type', 'issues_text',
-        )).casefold()]
+        )))]
     field_map = {
         'fio': 'fio', 'dogovor': 'dogovor', 'login': 'login', 'email': 'email',
         'group': 'group_name', 'cohort2': 'cohort2', 'specialty': 'specialty',
@@ -5927,8 +5928,8 @@ def filter_enrollment_order_roster_rows(rows, args):
         elif value == '__not_empty__':
             result = [row for row in result if str(row.get(row_name) or '').strip()]
         else:
-            needle = value.casefold()
-            result = [row for row in result if needle in str(row.get(row_name) or '').casefold()]
+            needle = normalize_search_text(value)
+            result = [row for row in result if needle in normalize_search_text(row.get(row_name))]
     groups = [value.casefold() for value in args.getlist('groups') if value]
     if groups:
         result = [row for row in result if str(row.get('group_name') or '').casefold() in groups]
@@ -6299,10 +6300,11 @@ def enrollment_candidate_status_view(status):
         return 'Нет в приказе', 'status-danger'
     return 'Ждет приказ', 'status-warning'
 
-def get_enrollment_candidate_specialties(campaign_year):
+def get_enrollment_candidate_specialties(campaign_year, *, refresh=True):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     with sqlite3.connect(DB_PATH) as conn:
-        refresh_enrollment_candidate_statuses(conn, campaign_year)
+        if refresh:
+            refresh_enrollment_candidate_statuses(conn, campaign_year)
         rows = conn.execute(
             '''
             SELECT specialty_key, specialty, COUNT(*)
@@ -6322,7 +6324,7 @@ def get_enrollment_candidate_specialties(campaign_year):
         for row in rows
     ]
 
-def get_enrollment_candidates(campaign_year, specialty_key=None):
+def get_enrollment_candidates(campaign_year, specialty_key=None, verification_status=None, *, refresh=True):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
     enrollment_order_required = is_enrollment_order_required()
     query = '''
@@ -6340,9 +6342,13 @@ def get_enrollment_candidates(campaign_year, specialty_key=None):
     if specialty_key:
         query += ' AND c.specialty_key=?'
         params.append(specialty_key)
+    if verification_status:
+        query += ' AND c.verification_status=?'
+        params.append(verification_status)
     query += ' ORDER BY c.specialty, c.fio'
     with sqlite3.connect(DB_PATH) as conn:
-        refresh_enrollment_candidate_statuses(conn, campaign_year)
+        if refresh:
+            refresh_enrollment_candidate_statuses(conn, campaign_year)
         cur = conn.execute(query, params)
         columns = [desc[0] for desc in cur.description]
         rows = [dict(zip(columns, row)) for row in cur.fetchall()]
@@ -7871,7 +7877,7 @@ def download_enrollment_order_student_roster_issue(upload_id, issue_code):
     issue = roster['issue_types'].get(issue_code)
     if not issue:
         return jsonify({'error': 'Неизвестный тип проблемы.'}), 404
-    rows = roster['issue_rows'][issue_code]
+    rows = filter_enrollment_order_roster_rows(roster['issue_rows'][issue_code], request.args)
     order_name = re.sub(r'[<>:"/\\|?*]+', '_', str(roster['upload'].get('order_numbers') or upload_id)).strip(' ._') or str(upload_id)
     output = enrollment_order_roster_xlsx(rows, 'Проблемная выборка')
     return send_file(output, as_attachment=True, download_name=f'{order_name}_{issue["filename"]}.xlsx', mimetype=EXCEL_MIMETYPE)
@@ -8405,7 +8411,7 @@ def student_enrollment_order_sort_key(student):
 
 def get_all_students(
     order_by='username', order_dir='asc', cohort=None, lastname=None,
-    firstname=None, username=None, enrollment_order=None
+    firstname=None, username=None, enrollment_order=None, campaign_year=None
 ):
     valid_columns = {
         'username', 'lastname', 'firstname', 'cohort1', 'cohort2', 'email',
@@ -8430,6 +8436,9 @@ def get_all_students(
         WHERE 1=1
     '''
     params = []
+    if campaign_year:
+        query += ' AND s.source_campaign_year=?'
+        params.append(normalize_campaign_year(campaign_year, get_active_campaign_year()))
     if cohort:
         query += " AND s.cohort1 = ?"
         params.append(cohort)
@@ -8441,20 +8450,20 @@ def get_all_students(
         if order_date is not None:
             query += " AND TRIM(COALESCE(enrollment.order_date, '')) = ?"
             params.append(order_date)
+    for field, value in (('lastname', lastname), ('firstname', firstname), ('username', username)):
+        normalized = normalize_search_text(value)
+        if normalized:
+            query += f' AND INSTR(NORMALIZE_SEARCH(s.{field}), ?) > 0'
+            params.append(normalized)
     if order_by != 'enrollment_order':
         query += f" ORDER BY s.{order_by} {order_dir.upper()}, s.username ASC"
     with sqlite3.connect(DB_PATH) as conn:
+        conn.create_function('NORMALIZE_SEARCH', 1, normalize_search_text)
         ensure_student_list_enrollment_movements(conn)
         cur = conn.execute(query, params)
         rows = cur.fetchall()
         columns = [desc[0] for desc in cur.description]
         students = [dict(zip(columns, row)) for row in rows]
-    students = [
-        row for row in students
-        if student_field_matches(row, 'lastname', lastname)
-        and student_field_matches(row, 'firstname', firstname)
-        and student_field_matches(row, 'username', username)
-    ]
     if order_by == 'enrollment_order':
         students.sort(
             key=student_enrollment_order_sort_key,
@@ -9890,7 +9899,8 @@ def students():
     order_by = request.args.get('order_by', 'username')
     order_dir = request.args.get('order_dir', 'asc')
     student_rows = get_all_students(
-        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order
+        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order,
+        campaign_year=request.args.get('campaign_year')
     )
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -9926,7 +9936,8 @@ def students_list():
     firstname = request.args.get('firstname')
     username = request.args.get('username')
     student_rows = get_all_students(
-        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order
+        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order,
+        campaign_year=request.args.get('campaign_year')
     )
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
@@ -9951,7 +9962,8 @@ def download_students():
     firstname = request.args.get('firstname')
     username = request.args.get('username')
     student_rows = get_all_students(
-        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order
+        order_by, order_dir, cohort, lastname, firstname, username, enrollment_order,
+        campaign_year=request.args.get('campaign_year')
     )
     log_action(
         'students_exported',
@@ -10236,8 +10248,13 @@ def delete_student():
 def enrollment_candidates_sync():
     campaign_year = get_active_campaign_year()
     group_year = normalize_group_year(request.form.get('group_year'), campaign_year)
+    target_args = {'group_year': group_year}
+    if request.form.get('verification_status') == 'verified':
+        target_args['verification_status'] = 'verified'
+    if request.form.get('specialty'):
+        target_args['specialty'] = normalize_specialty_key(request.form.get('specialty'))
     if not ensure_campaign_open(campaign_year):
-        return redirect(url_for('abiturients_to_students', group_year=group_year), code=303)
+        return redirect(url_for('abiturients_to_students', **target_args), code=303)
     summary = sync_enrollment_candidates_from_ready_abiturients(campaign_year)
     flash(
         (
@@ -10254,7 +10271,7 @@ def enrollment_candidates_sync():
         flash(f"Не удалось определить специальность по договору: {len(summary['skipped_without_specialty'])}", 'info')
     if summary['skipped_existing_students']:
         flash(f"Уже есть в студентах: {len(summary['skipped_existing_students'])}", 'info')
-    return redirect(url_for('abiturients_to_students', group_year=group_year), code=303)
+    return redirect(url_for('abiturients_to_students', **target_args), code=303)
 
 @app.route('/abiturients_to_students', methods=['GET', 'POST'])
 @login_required
@@ -10263,6 +10280,9 @@ def abiturients_to_students():
     campaign_year = get_active_campaign_year()
     group_year = normalize_group_year(request.values.get('group_year'), campaign_year)
     specialty_filter = normalize_specialty_key(request.values.get('specialty'))
+    verification_status = request.values.get('verification_status', '')
+    if verification_status != 'verified':
+        verification_status = ''
     enrollment_order_required = is_enrollment_order_required()
     group_years = get_group_years(group_year)
     with sqlite3.connect(DB_PATH) as conn:
@@ -10271,11 +10291,11 @@ def abiturients_to_students():
             'SELECT COUNT(*) FROM enrollment_orders WHERE campaign_year=?',
             (campaign_year,)
         ).fetchone()[0]
-    specialties = get_enrollment_candidate_specialties(campaign_year)
+    specialties = get_enrollment_candidate_specialties(campaign_year, refresh=request.method == 'POST')
     if specialty_filter and specialty_filter not in {item['key'] for item in specialties}:
         specialty_filter = ''
     suggested_groups = get_candidate_group_options(groups, specialty_filter) if specialty_filter else groups
-    candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+    candidates = get_enrollment_candidates(campaign_year, specialty_filter, verification_status, refresh=request.method == 'POST')
     selected_candidate_ids = [item for item in request.values.getlist('candidate_ids') if str(item).isdigit()]
     login_distribution_enabled = request.values.get('use_login_distribution') == '1'
     login_distribution_preview = None
@@ -10287,6 +10307,7 @@ def abiturients_to_students():
             'suggested_groups': suggested_groups,
             'specialties': specialties,
             'selected_specialty': specialty_filter,
+            'verification_status': verification_status,
             'order_total': order_total,
             'campaign_year': campaign_year,
             'group_year': group_year,
@@ -10300,7 +10321,9 @@ def abiturients_to_students():
         return render_template('abiturients_to_students.html', **context)
 
     def redirect_to_stage():
-        args = {'group_year': group_year}
+        args = {'group_year': group_year, 'campaign_year': campaign_year}
+        if verification_status:
+            args['verification_status'] = verification_status
         if specialty_filter:
             args['specialty'] = specialty_filter
         return redirect(url_for('abiturients_to_students', **args), code=303)
@@ -10328,7 +10351,7 @@ def abiturients_to_students():
                     campaign_year,
                     group_year
                 )
-            candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+            candidates = get_enrollment_candidates(campaign_year, specialty_filter, verification_status, refresh=request.method == 'POST')
             return render_stage(candidates=candidates, login_distribution_preview=login_distribution_preview)
 
         if distribution_action == 'confirm_login_groups':
@@ -10346,7 +10369,7 @@ def abiturients_to_students():
                 )
                 if not login_distribution_preview['summary']['can_confirm']:
                     flash('Распределение не подтверждено: сначала исправьте строки со статусом "Проверить".', 'error')
-                    candidates = get_enrollment_candidates(campaign_year, specialty_filter)
+                    candidates = get_enrollment_candidates(campaign_year, specialty_filter, verification_status, refresh=request.method == 'POST')
                     return render_stage(candidates=candidates, login_distribution_preview=login_distribution_preview)
 
                 backup_path = create_database_backup('before_login_group_distribution_migration')

@@ -56,7 +56,7 @@
     });
 
     function normalize(value) {
-        return String(value || '').toLocaleLowerCase('ru').replace(/ё/g, 'е').trim();
+        return window.LiveSearch.normalize(value);
     }
 
     function filterSections() {
@@ -74,7 +74,7 @@
         app.classList.toggle('is-searching', Boolean(query));
     }
 
-    searchInput.addEventListener('input', filterSections);
+    window.LiveSearch.bind(searchInput, filterSections);
     document.addEventListener('keydown', function (event) {
         // Ctrl+K belongs to the shared global palette, also on this page.
         if (event.key === 'Escape') {

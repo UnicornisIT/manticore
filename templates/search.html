@@ -6,12 +6,13 @@
 {% block content %}
 <h1>Глобальный поиск</h1>
 {% include "_campaign_switcher.html" %}
-<form action="{{ url_for('search') }}" method="get" class="search-form">
+<form data-live-search="#page-search-results" action="{{ url_for('search') }}" method="get" class="search-form">
     <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
-    <input type="text" name="q" value="{{ query }}" placeholder="ФИО, договор, логин, email, группа">
+    <input data-live-search-input type="text" name="q" value="{{ query }}" placeholder="ФИО, договор, логин, email, группа">
     <button type="submit" class="btn">Найти</button>
 </form>
 
+<div id="page-search-results">
 {% if query and results %}
 <table>
     <thead>
@@ -38,4 +39,5 @@
 {% else %}
 <p>Введите ФИО, договор, логин, email или группу.</p>
 {% endif %}
+</div>
 {% endblock %}

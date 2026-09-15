@@ -23,11 +23,12 @@
             <span><strong>Фильтры списка</strong><small>Поиск и отбор абитуриентов</small></span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
         </summary>
-        <form method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
+        <form data-live-search=".abiturients-table-wrap" method="get" action="{{ url_for('abiturients') }}" class="abiturients-filter">
+            <input type="hidden" name="campaign_year" value="{{ active_campaign_year }}">
             <input type="hidden" name="order_by" value="{{ order_by }}">
             <input type="hidden" name="order_dir" value="{{ order_dir }}">
             <div class="filter-fields">
-                <input type="text" name="q" aria-label="Поиск" placeholder="ФИО, логин, договор или почта" value="{{ request.args.get('q', '') }}">
+                <input data-live-search-input type="text" name="q" aria-label="Поиск" placeholder="ФИО, логин, договор или почта" value="{{ request.args.get('q', '') }}">
                 <select name="spec" aria-label="Специальность">
                     <option value="">Все специальности</option>
                     {% for s in specs %}<option value="{{ s }}" {% if request.args.get('spec') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
@@ -76,7 +77,7 @@
                     </summary>
                     <div class="export-menu-panel">
                         <a href="{{ url_for('download_abiturients') }}">Весь список</a>
-                        <a href="{{ url_for('download_abiturients', **request.args) }}">По текущим фильтрам</a>
+                        <a data-live-search-export href="{{ url_for('download_abiturients', **request.args) }}">По текущим фильтрам</a>
                     </div>
                 </details>
             </div>

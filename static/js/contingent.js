@@ -5,7 +5,7 @@
   const search = root.querySelector('[data-result-search]');
   const discrepancies = root.querySelector('[data-discrepancies]');
   const filters = new Map();
-  const normalize = value => String(value || '').trim().toLocaleLowerCase('ru');
+  const normalize = window.LiveSearch.normalize;
   function apply() {
     rows.forEach(row => {
       row.hidden = !(normalize(row.textContent).includes(normalize(search.value)) &&
@@ -28,7 +28,7 @@
     select.addEventListener('change', apply);
     label.append(select); root.querySelector('[data-result-filters]').append(label); filters.set(key, select);
   });
-  search.addEventListener('input', apply);
+  window.LiveSearch.bind(search, apply);
   discrepancies.addEventListener('change', apply);
   root.querySelectorAll('[data-status-filter]').forEach(button => button.addEventListener('click', () => {
     filters.get('status').value = button.dataset.statusFilter; apply();

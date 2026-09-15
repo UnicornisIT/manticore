@@ -10,13 +10,17 @@
     <a href="{{ url_for_with_query('students_list', order_by=column, order_dir=next_dir) }}">{{ label }}{% if order_by == column %} {{ '↑' if order_dir == 'asc' else '↓' }}{% endif %}</a>
 {%- endmacro %}
 <h1>Список студентов</h1>
-<form method="get" action="{{ url_for('students_list') }}" class="students-filter">
+<form data-live-search=".students-table-wrap" method="get" action="{{ url_for('students_list') }}" class="students-filter">
     <div class="students-filter-row">
+        {% if request.args.get('campaign_year') %}
+        <input type="hidden" name="campaign_year" value="{{ request.args.get('campaign_year') }}">
+        <span>Кампания: {{ request.args.get('campaign_year') }}</span>
+        {% endif %}
         <input type="hidden" name="order_by" value="{{ order_by }}">
         <input type="hidden" name="order_dir" value="{{ order_dir }}">
-        <input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
-        <input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
-        <input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
+        <input data-live-search-input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
+        <input data-live-search-input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
+        <input data-live-search-input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
         {% if cohorts %}
         <select name="cohort">
             <option value="">Все группы</option>
@@ -35,7 +39,7 @@
         {% endif %}
         <button type="submit" class="btn">Применить фильтры</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Очистить</a>
-        <a href="{{ url_for('download_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
+        <a data-live-search-export href="{{ url_for('download_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
     </div>
 </form>
 <div class="students-table-wrap">

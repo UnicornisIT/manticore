@@ -140,7 +140,7 @@
     form.addEventListener('submit', () => {
       form.classList.add('was-validated');
       const button = form.querySelector('button[type="submit"], input[type="submit"]');
-      if (!button || button.dataset.keepEnabled !== undefined) return;
+      if (!button || button.dataset.keepEnabled !== undefined || form.hasAttribute('data-live-search')) return;
       window.setTimeout(() => { button.setAttribute('aria-busy', 'true'); button.classList.add('is-busy'); }, 0);
     });
   });

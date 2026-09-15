@@ -11,6 +11,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendKeyboardTests(unittest.TestCase):
+    @unittest.skipUnless(NODE, 'Node.js is required for live search regressions')
+    def test_live_search(self):
+        result = subprocess.run(
+            [NODE, '--test', str(PROJECT_ROOT / 'tests/frontend/live_search.test.cjs')],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, encoding='utf-8', timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(NODE, 'Node.js is required for updater UI regressions')
     def test_desktop_updater(self):
         result = subprocess.run(

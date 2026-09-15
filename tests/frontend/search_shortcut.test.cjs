@@ -9,9 +9,10 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
 
-function fixture({ documentation = false, docsFirst = true } = {}) {
+function fixture({ documentation = false, docsFirst = true, deferred = false } = {}) {
     const timers = [];
     const requests = [];
+    const responses = [];
     const document = new EventTarget();
 
     class Element extends EventTarget {
@@ -105,7 +106,8 @@ function fixture({ documentation = false, docsFirst = true } = {}) {
 
     const window = {
         innerWidth: 1280, scrollY: 0, location: { origin: 'http://localhost' },
-        setTimeout: callback => timers.push(callback), addEventListener() {},
+        setTimeout: callback => { timers.push(callback); return callback; },
+        clearTimeout: callback => { const index = timers.indexOf(callback); if (index >= 0) timers.splice(index, 1); }, addEventListener() {},
         matchMedia: () => ({ matches: false }), AbortController,
     };
     const context = vm.createContext({
@@ -113,6 +115,7 @@ function fixture({ documentation = false, docsFirst = true } = {}) {
         IntersectionObserver: class { observe() {} },
         fetch: async (url, options) => {
             requests.push({ url, options });
+            if (deferred) return new Promise(resolve => responses.push(payload => resolve({ ok: true, json: async () => payload })));
             return { ok: true, json: async () => ({ query: input.value, results: [] }) };
         },
     });
@@ -120,6 +123,7 @@ function fixture({ documentation = false, docsFirst = true } = {}) {
         vm.runInContext(fs.readFileSync(path.join(root, relativePath), 'utf8'), context,
             { filename: relativePath });
     }
+    load('static/js/live-search.js');
     if (documentation && docsFirst) load('static/documentation.js');
     load('static/js/app.js');
     load('static/js/modern-ui.js');
@@ -133,7 +137,7 @@ function fixture({ documentation = false, docsFirst = true } = {}) {
         document.dispatchEvent(event);
         return event;
     }
-    return { document, form, toggle, opener, input, close, modal, requests,
+    return { document, form, toggle, opener, input, close, modal, requests, responses,
         docs, docsInput, docsMenu, docsSection, load, key,
         origin: tag => new Element(tag),
         click: target => target.dispatchEvent(new Event('click', { cancelable: true })),
@@ -201,7 +205,7 @@ test('repeated initialization and keydown cause no duplicate focus or fetch', as
     page.key({ code: 'Enter', key: 'Enter' });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(page.requests.length, 1);
-    assert.equal(new URL(page.requests[0].url).searchParams.get('q'), 'Иванов');
+    assert.equal(new URL(page.requests[0].url).searchParams.get('q'), 'иванов');
     assert.equal(page.input.focusCount, 1);
 });
 
@@ -244,9 +248,70 @@ for (const docsFirst of [true, false]) {
         assert.equal(page.requests.length, 0);
         page.docsInput.value = 'не существующий раздел';
         page.docsInput.dispatchEvent(new Event('input'));
+        page.flushTimers();
         assert.equal(page.docsSection.classList.contains('docs-search-hidden'), true);
         page.key({ key: 'Escape' });
         assert.equal(page.docsInput.value, '');
         assert.equal(page.docsSection.classList.contains('docs-search-hidden'), false);
     });
 }
+
+
+test('live search debounces one character and aborts immediately on new input', async () => {
+    const page = fixture();
+    page.input.value = 'П';
+    page.input.dispatchEvent(new Event('input'));
+    assert.equal(page.requests.length, 0);
+    page.flushTimers();
+    assert.equal(page.requests.length, 1);
+    assert.equal(new URL(page.requests[0].url).searchParams.get('q'), 'п');
+    page.input.value = 'Пе';
+    page.input.dispatchEvent(new Event('input'));
+    assert.equal(page.requests[0].options.signal.aborted, true);
+    page.input.value = 'Петр';
+    page.input.dispatchEvent(new Event('input'));
+    page.flushTimers();
+    assert.equal(page.requests.length, 2);
+    page.input.value = '   ';
+    page.input.dispatchEvent(new Event('input'));
+    assert.equal(page.requests[1].options.signal.aborted, true);
+    page.flushTimers();
+    assert.equal(page.requests.length, 2);
+});
+
+test('composition waits for completed input and Escape cancels debounce', () => {
+    const page = fixture();
+    page.input.dispatchEvent(new Event('compositionstart'));
+    page.input.value = 'И';
+    page.input.dispatchEvent(new Event('input'));
+    page.flushTimers();
+    assert.equal(page.requests.length, 0);
+    page.input.dispatchEvent(new Event('compositionend'));
+    page.flushTimers();
+    assert.equal(page.requests.length, 1);
+    page.input.value = 'Ив';
+    page.input.dispatchEvent(new Event('input'));
+    page.key({ key: 'Escape' });
+    page.flushTimers();
+    assert.equal(page.requests.length, 1);
+    assert.equal(page.modal.hidden, true);
+});
+
+
+test('late responses cannot overwrite newer results or cleared input', async () => {
+    const page = fixture({ deferred: true });
+    const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+    page.input.value = 'П'; page.input.dispatchEvent(new Event('input')); page.flushTimers();
+    page.input.value = 'Петр'; page.input.dispatchEvent(new Event('input')); page.flushTimers();
+    page.responses[1]({ query: 'Петр', results: [] }); await tick();
+    const meta = page.document.getElementById('global-search-meta');
+    const latest = meta.textContent;
+    page.responses[0]({ query: 'П', results: [] }); await tick();
+    assert.equal(meta.textContent, latest);
+    page.input.value = 'И'; page.input.dispatchEvent(new Event('input')); page.flushTimers();
+    page.input.value = ''; page.input.dispatchEvent(new Event('input')); page.flushTimers();
+    const empty = meta.textContent;
+    page.responses[2]({ query: 'И', results: [] }); await tick();
+    assert.equal(meta.textContent, empty);
+    assert.ok(!empty.includes('ничего не найдено'));
+});

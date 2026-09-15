@@ -11,16 +11,16 @@
 </div>
 
 <div class="metric-grid">
-    <div class="metric"><strong>{{ dashboard.abiturients_total }}</strong><span>Абитуриентов</span></div>
-    <div class="metric"><strong>{{ dashboard.ready }}</strong><span>Готовы к кандидатам</span></div>
-    <div class="metric"><strong>{{ dashboard.candidate_total }}</strong><span>Кандидатов к зачислению</span></div>
-    <div class="metric">
+    <a class="metric metric-link" href="{{ url_for('abiturients', campaign_year=dashboard.campaign_year) }}"><strong>{{ dashboard.abiturients_total }}</strong><span>Абитуриентов</span></a>
+    <a class="metric metric-link" href="{{ url_for('abiturients', campaign_year=dashboard.campaign_year, has_email='1', has_paid='1', withdrawn='0') }}"><strong>{{ dashboard.ready }}</strong><span>Готовы к кандидатам</span></a>
+    <a class="metric metric-link" href="{{ url_for('abiturients_to_students', campaign_year=dashboard.campaign_year) }}"><strong>{{ dashboard.candidate_total }}</strong><span>Кандидатов к зачислению</span></a>
+    <a class="metric metric-link" href="{{ url_for('abiturients_to_students', campaign_year=dashboard.campaign_year, verification_status='verified') if dashboard.enrollment_order_required else url_for('abiturients_to_students', campaign_year=dashboard.campaign_year) }}">
         <strong>{{ dashboard.ready_to_students }}</strong>
         <span>{% if dashboard.enrollment_order_required %}Сверены приказом{% else %}Готовы к переносу{% endif %}</span>
-    </div>
-    <div class="metric"><strong>{{ dashboard.order_total }}</strong><span>Строк в приказе</span></div>
-    <div class="metric"><strong>{{ dashboard.students_total }}</strong><span>Студентов</span></div>
-    <div class="metric"><strong>{{ dashboard.groups|length }}</strong><span>Групп</span></div>
+    </a>
+    <a class="metric metric-link" href="{{ url_for('file_work', section='orders', campaign_year=dashboard.campaign_year) }}"><strong>{{ dashboard.order_total }}</strong><span>Строк в приказе</span></a>
+    <a class="metric metric-link" href="{{ url_for('students_list', campaign_year=dashboard.campaign_year) }}"><strong>{{ dashboard.students_total }}</strong><span>Студентов</span></a>
+    <a class="metric metric-link" href="{{ url_for('add_group', group_year=dashboard.campaign_year) if session.get('role') == 'admin' else url_for('index', campaign_year=dashboard.campaign_year, _anchor='dashboard-groups') }}"><strong>{{ dashboard.groups|length }}</strong><span>Групп</span></a>
 </div>
 
 <section class="task-center">
@@ -42,7 +42,7 @@
     </div>
 </section>
 
-<section class="dashboard-section">
+<section class="dashboard-section" id="dashboard-groups" tabindex="-1">
     <h2>Группы</h2>
     {% if dashboard.groups %}
     <div class="dashboard-groups-scroll">

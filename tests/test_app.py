@@ -1447,6 +1447,141 @@ class ManticoreAppTests(unittest.TestCase):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM abiturients').fetchone()[0], 0)
 
+    def test_live_search_unicode_single_character_all_record_kinds(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            for table in ('abiturients', 'pending_duplicates', 'login_conflicts'):
+                conn.execute(f'INSERT INTO {table} (fio, dogovor, login, campaign_year) VALUES (?, ?, ?, ?)',
+                             ('Петров Петр Петрович', '26ЛД-9И-1', 'MixedLogin', '2026'))
+                conn.execute(f'INSERT INTO {table} (fio, dogovor, login, campaign_year) VALUES (?, ?, ?, ?)',
+                             ('Петров Чужая Кампания', 'other', 'Other', '2025'))
+            conn.execute('INSERT INTO students (username, firstname, lastname, email, cohort1) VALUES (?, ?, ?, ?, ?)',
+                         ('MixedLogin', 'Петр Петрович', 'Петров', 'Student.Test@Example.ru', '26ЛД-9И-1'))
+        for query in ('П', 'п', 'ПЕТ', 'пет', 'ПеТр', 'л', 'Л', 'лд', 'ЛД', '9и', '9И', 'mixed', 'MIXED', '26'):
+            with self.subTest(query=query):
+                results = manticore.global_search_records(query, campaign_year='2026')
+                self.assertEqual({r['kind'] for r in results}, {'abiturient', 'student', 'duplicate', 'conflict'})
+                self.assertFalse(any('Чужая' in r['title'] for r in results))
+        for query in ('student', 'STUDENT', 'example', 'EXAMPLE'):
+            self.assertEqual([r['kind'] for r in manticore.global_search_records(query, '2026')], ['student'])
+        self.assertEqual(manticore.global_search_records('   ', '2026'), [])
+        self.assertEqual(manticore.global_search_records('%', '2026'), [])
+        self.assertEqual(len(manticore.global_search_records('п', '2026', limit=2)), 2)
+        self.assertEqual(len(manticore.global_search_records('Петров   Петр', '2026')), 3)
+
+    def test_live_search_list_filters_unicode_and_whitespace(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute('INSERT INTO abiturients (fio, dogovor, login, campaign_year) VALUES (?, ?, ?, ?)',
+                         ('Иванов Иван Иванович', '26ЛД-9И-1', 'MixedLogin', '2026'))
+            conn.execute('INSERT INTO students (username, firstname, lastname, cohort1) VALUES (?, ?, ?, ?)',
+                         ('MixedLogin', 'Александр', 'Смирнов', '26ЛД-9И-1'))
+        for query in ('и', 'И', 'иван', 'ИВАН', 'ИвАн', 'Иванов   Иван', '  '):
+            self.assertEqual(len(manticore.get_all_abiturients(campaign_year='2026', q=query)), 1)
+        for field, queries in {'lastname': ('с', 'С', 'сми', 'СМИ'), 'firstname': ('а', 'А', 'алек', 'АЛЕК'),
+                               'username': ('m', 'M', 'mixed', 'MIXED', '  ')}.items():
+            for query in queries:
+                with self.subTest(field=field, query=query):
+                    self.assertEqual(len(manticore.get_all_students(**{field: query})), 1)
+        self.assertEqual(manticore.get_all_students(lastname='несуществующий'), [])
+        self.assertEqual(manticore.get_all_students(lastname='с', cohort='другая'), [])
+        client = manticore.app.test_client()
+        self.login_session(client)
+        for endpoint, params, expected in (
+            ('/abiturients/download', {'q': 'И', 'order_by': 'fio', 'order_dir': 'desc'}, 'MixedLogin'),
+            ('/students/download', {'lastname': 'С', 'firstname': 'А', 'cohort': '26ЛД-9И-1'}, 'MixedLogin'),
+        ):
+            response = client.get(endpoint, query_string=params)
+            self.assertEqual(response.status_code, 200)
+            exported = pd.read_excel(io.BytesIO(response.data))
+            self.assertIn(expected, exported.to_string())
+        response = client.get('/search_overlay', query_string={'q': 'и'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['results'])
+
+
+    def test_dashboard_metric_links_match_their_datasets(self):
+        from flask import template_rendered
+        from html import unescape
+        from urllib.parse import urlsplit, parse_qs
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        contexts = []
+        def capture(sender, template, context, **extra):
+            contexts.append(context)
+        def page(url):
+            contexts.clear()
+            with template_rendered.connected_to(capture, manticore.app):
+                response = client.get(url)
+            self.assertEqual(response.status_code, 200)
+            return response.get_data(as_text=True), contexts[-1]
+
+        for year in ('2025', '2026', '2027'):
+            with self.subTest(year=year):
+                reset_database()
+                rules = manticore.get_default_login_generation_rules()
+                rules['require_enrollment_order'] = True
+                manticore.save_login_generation_settings(rules, setup_completed=True, updated_by='test')
+                with sqlite3.connect(manticore.DB_PATH) as conn:
+                    for i in range(5):
+                        login = f'metric{i}' if i != 4 else 'DELmetric4'
+                        fio = f'Карточкин Имя{i}'
+                        source = conn.execute(
+                            'INSERT INTO abiturients (fio, dogovor, login, email, paid, campaign_year) VALUES (?, ?, ?, ?, ?, ?)',
+                            (fio, f'{year}-ФМ-{i:04d}-11', login, '' if i == 2 else f'{i}@example.ru', 0 if i == 3 else 1, year)).lastrowid
+                        if i < 2:
+                            conn.execute('INSERT INTO enrollment_candidates (abiturient_id, campaign_year, fio, dogovor, login, email, specialty, specialty_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                                         (source, year, fio, f'{year}-ФМ-{i:04d}-11', login, f'{i}@example.ru', 'ФМ', 'фм'))
+                    fio_key, specialty_key = manticore.make_enrollment_match_key('Карточкин Имя0', 'ФМ')
+                    conn.execute('INSERT INTO enrollment_orders (campaign_year, fio, fio_key, specialty_key) VALUES (?, ?, ?, ?)',
+                                 (year, 'Карточкин Имя0', fio_key, specialty_key))
+                    for i in range(7):
+                        conn.execute('INSERT INTO students (username, lastname, source_campaign_year) VALUES (?, ?, ?)',
+                                     (f'student{i}', 'Студентов', year if i < 3 else '2024'))
+                    conn.execute('INSERT OR REPLACE INTO groups (name, group_year, is_hidden) VALUES (?, ?, 0)', (f'{year}-metric', year))
+                    conn.execute('INSERT OR REPLACE INTO groups (name, group_year, is_hidden) VALUES (?, ?, 1)', (f'{year}-hidden-metric', year))
+                body, context = page('/?campaign_year=' + year)
+                dashboard = context['dashboard']
+                self.assertEqual([dashboard[key] for key in ('abiturients_total', 'ready', 'candidate_total', 'candidate_verified', 'students_total')], [5, 2, 2, 1, 3])
+                links = [unescape(url) for url in re.findall(r'class="metric metric-link" href="([^"]+)"', body)]
+                self.assertEqual(len(links), 7)
+                self.assertEqual([urlsplit(url).path for url in links], ['/abiturients', '/abiturients', '/abiturients_to_students', '/abiturients_to_students', '/file_work/orders', '/students_list', '/add_group'])
+                self.assertEqual(parse_qs(urlsplit(links[1]).query), {'campaign_year': [year], 'has_email': ['1'], 'has_paid': ['1'], 'withdrawn': ['0']})
+                # Verify the GET links do not refresh/delete/update candidates.
+                with mock.patch.object(manticore, 'refresh_enrollment_candidate_statuses', side_effect=AssertionError('GET must not refresh')):
+                    for index, expected in ((2, 2), (3, 1)):
+                        _, result = page(links[index])
+                        self.assertEqual(len(result['candidates']), expected)
+                    _, result = page(links[3] + '&specialty=фм&group_year=2024')
+                    self.assertEqual(len(result['candidates']), 1)
+                    self.assertEqual(result['group_year'], '2024')
+                    self.assertEqual(result['selected_specialty'], 'фм')
+                for index, key, expected in ((0, 'abiturients', 5), (1, 'abiturients', 2), (5, 'students', 3)):
+                    _, result = page(links[index])
+                    self.assertEqual(len(result[key]), expected)
+                _, result = page(links[6])
+                self.assertEqual(len(result['visible_groups']), len(dashboard['groups']))
+                self.assertEqual(result['group_year'], year)
+                self.assertEqual(urlsplit(links[4]).path, '/file_work/orders')
+                page(links[4])
+                _, result = page('/students_list')
+                self.assertEqual(len(result['students']), 7)
+                export = client.get('/students/download?campaign_year=' + year + '&lastname=С')
+                self.assertEqual(len(pd.read_excel(io.BytesIO(export.data))), 3)
+                rules['require_enrollment_order'] = False
+                manticore.save_login_generation_settings(rules, setup_completed=True, updated_by='test')
+                body, context = page('/?campaign_year=' + year)
+                links = [unescape(url) for url in re.findall(r'class="metric metric-link" href="([^"]+)"', body)]
+                self.assertNotIn('verification_status', links[3])
+                self.assertEqual(context['dashboard']['ready_to_students'], 2)
+                _, result = page(links[3])
+                self.assertEqual(len(result['candidates']), 2)
+                self.login_session(client, role='viewer')
+                body, _ = page('/?campaign_year=' + year)
+                groups_link = unescape(re.findall(r'class="metric metric-link" href="([^"]+)"', body)[6])
+                self.assertEqual(urlsplit(groups_link).fragment, 'dashboard-groups')
+                page(groups_link)
+                self.login_session(client)
+
     def test_dashboard_search_and_person_card_render(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             conn.execute(
@@ -1727,6 +1862,12 @@ class ManticoreAppTests(unittest.TestCase):
         issue_download = client.get(
             f'/enrollment_order_uploads/{upload_id}/student_roster/issues/missing_email/download'
         )
+        empty_issue_download = client.get(
+            f'/enrollment_order_uploads/{upload_id}/student_roster/issues/missing_email/download',
+            query_string={'search': 'НесуществующаяФамилия'},
+        )
+        self.assertEqual(empty_issue_download.status_code, 200)
+        self.assertTrue(pd.read_excel(io.BytesIO(empty_issue_download.data)).empty)
         issue_workbook = pd.ExcelFile(io.BytesIO(issue_download.data), engine='openpyxl')
         self.assertEqual(issue_workbook.sheet_names, ['Проблемная выборка'])
         issue_export = pd.read_excel(issue_workbook)

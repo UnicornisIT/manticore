@@ -202,6 +202,8 @@
         const endpoint = searchForm.dataset.searchOverlayUrl;
         const personUrlTemplate = searchForm.dataset.personUrlTemplate;
         let lastController = null;
+        let searchRevision = 0;
+        function invalidateSearch() { searchRevision++; if (lastController) lastController.abort(); }
         let selectedResultIndex = -1;
         let restoreFocus = null;
 
@@ -256,6 +258,9 @@
             if (modal.hidden) {
                 return;
             }
+            scheduledSearch.cancel();
+            sourceScheduledSearch?.cancel();
+            invalidateSearch();
             modal.hidden = true;
             document.body.classList.remove('global-search-lock');
             toggle.setAttribute('aria-expanded', 'false');
@@ -293,14 +298,18 @@
         }
 
         async function runSearch() {
-            const query = input.value.trim();
+            scheduledSearch.cancel();
+            invalidateSearch();
+            const revision = searchRevision;
+            const query = window.LiveSearch.normalize(input.value);
             sourceInput.value = query;
             openSearch();
             if (!query) {
+                meta.textContent = 'Введите ФИО, договор, логин, email или группу.';
+                resultsBox.replaceChildren();
+                selectedResultIndex = -1;
                 return;
             }
-            meta.textContent = 'Ищу...';
-            resultsBox.replaceChildren();
 
             if (lastController) {
                 lastController.abort();
@@ -318,9 +327,10 @@
                 if (!response.ok) {
                     throw new Error('Search request failed');
                 }
-                renderResults(await response.json());
+                const payload = await response.json();
+                if (revision === searchRevision) renderResults(payload);
             } catch (error) {
-                if (error.name === 'AbortError') {
+                if (revision !== searchRevision || error.name === 'AbortError') {
                     return;
                 }
                 meta.textContent = '';
@@ -330,6 +340,11 @@
                 resultsBox.replaceChildren(failure);
             }
         }
+
+        const scheduledSearch = window.LiveSearch.bind(input, runSearch, invalidateSearch);
+        const sourceScheduledSearch = sourceInput !== input
+            ? window.LiveSearch.bind(sourceInput, () => { input.value = sourceInput.value; runSearch(); }, invalidateSearch)
+            : null;
 
         toggle.addEventListener('click', function(event) {
             event.preventDefault();
@@ -369,6 +384,7 @@
         });
 
         input.addEventListener('keydown', function(event) {
+            if (event.isComposing) return;
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 const count = resultsBox.querySelectorAll('.global-search-result').length;
                 if (count) {

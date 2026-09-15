@@ -12,7 +12,7 @@
   const baseExportUrl = exportLink.href;
   const state = { sort: '', direction: 'asc' };
 
-  const normalize = value => String(value || '').trim().toLocaleLowerCase('ru');
+  const normalize = window.LiveSearch.normalize;
   const selectedGroups = () => Array.from(group.selectedOptions, option => option.value);
   const params = () => {
     const value = new URLSearchParams();
@@ -32,7 +32,7 @@
     root.querySelectorAll('.roster-group').forEach(section => {
       let sectionCount = 0;
       section.querySelectorAll('[data-roster-row]').forEach(row => {
-        const matchesSearch = !needle || normalize(Object.values(row.dataset).join(' ')).includes(needle);
+        const matchesSearch = !needle || normalize(['fio', 'dogovor', 'login', 'email', 'group', 'cohort2', 'specialty', 'status', 'recordType', 'issues'].map(key => row.dataset[key] || '').join(' ')).includes(needle);
         const matchesEmail = !email.value || (email.value === '__empty__' ? !row.dataset.email.trim() : !!row.dataset.email.trim());
         const matchesGroup = !groups.length || groups.includes(normalize(row.dataset.group));
         const matchesStatus = !statusNeedle || normalize(row.dataset.status).includes(statusNeedle);
@@ -55,7 +55,8 @@
     chips.replaceChildren(...values.map(text => { const item = document.createElement('span'); item.className = 'status-badge status-info'; item.textContent = text; return item; }));
   }
 
-  [search, email, group, status].forEach(control => control.addEventListener(control.tagName === 'SELECT' ? 'change' : 'input', apply));
+  [search, status].forEach(control => window.LiveSearch.bind(control, apply));
+  [email, group].forEach(control => control.addEventListener('change', apply));
   document.getElementById('roster-reset').addEventListener('click', () => {
     search.value = ''; email.value = ''; status.value = '';
     Array.from(group.options).forEach(option => { option.selected = false; });
@@ -97,9 +98,16 @@
   const modalBody = document.getElementById('issue-table-body');
   const issueSearch = document.getElementById('issue-search');
   let issueRows = []; let opener = null;
+  let issueController; let issueRevision = 0;
   function renderIssueRows() {
+    const download = document.getElementById('issue-download');
+    if (download.getAttribute('href')) {
+      const url = new URL(download.href);
+      url.searchParams.set('search', issueSearch.value);
+      download.href = url.href;
+    }
     const needle = normalize(issueSearch.value);
-    modalBody.replaceChildren(...issueRows.filter(row => !needle || normalize(Object.values(row).join(' ')).includes(needle)).map(row => {
+    modalBody.replaceChildren(...issueRows.filter(row => !needle || normalize(['fio', 'dogovor', 'login', 'email', 'group_name', 'cohort2', 'specialty', 'status', 'record_type', 'issues_text'].map(key => row[key] || '').join(' ')).includes(needle)).map(row => {
       const tr = document.createElement('tr');
       ['fio', 'dogovor', 'login', 'email', 'group_name', 'specialty', 'status', 'issues_text'].forEach(key => {
         const td = document.createElement('td');
@@ -111,9 +119,9 @@
       return tr;
     }));
   }
-  function closeModal() { modal.hidden = true; document.body.classList.remove('modal-lock'); opener?.focus(); }
+  function closeModal() { issueRevision++; issueController?.abort(); modal.hidden = true; document.body.classList.remove('modal-lock'); opener?.focus(); }
   document.querySelectorAll('[data-issue-close]').forEach(button => button.addEventListener('click', closeModal));
-  issueSearch.addEventListener('input', renderIssueRows);
+  window.LiveSearch.bind(issueSearch, renderIssueRows);
   document.addEventListener('keydown', event => {
     if (modal.hidden) return;
     if (event.key === 'Escape') { closeModal(); return; }
@@ -126,18 +134,22 @@
     }
   });
   document.querySelectorAll('[data-issue-url]').forEach(button => button.addEventListener('click', async () => {
+    issueController?.abort(); issueController = new AbortController();
+    const revision = ++issueRevision; issueRows = [];
     opener = button; modal.hidden = false; document.body.classList.add('modal-lock'); issueSearch.value = '';
     document.getElementById('issue-title').textContent = 'Загрузка…'; modalBody.replaceChildren();
     try {
-      const response = await fetch(button.dataset.issueUrl, { headers: { Accept: 'application/json' } });
+      const response = await fetch(button.dataset.issueUrl, { signal: issueController.signal, headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error('Не удалось загрузить выборку');
-      const payload = await response.json(); issueRows = payload.rows;
+      const payload = await response.json();
+      if (revision !== issueRevision) return;
+      issueRows = payload.rows;
       document.getElementById('issue-title').textContent = payload.label;
       document.getElementById('issue-meta').textContent = `${payload.count} абитуриентов`;
       document.getElementById('issue-description').textContent = payload.description;
       document.getElementById('issue-download').href = payload.download_url;
       renderIssueRows(); issueSearch.focus();
-    } catch (error) { document.getElementById('issue-title').textContent = 'Ошибка'; document.getElementById('issue-description').textContent = error.message; }
+    } catch (error) { if (revision !== issueRevision || error.name === 'AbortError') return; document.getElementById('issue-title').textContent = 'Ошибка'; document.getElementById('issue-description').textContent = error.message; }
   }));
   apply();
 })();
