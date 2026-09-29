@@ -21,10 +21,20 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import desktop_releases
+from db_safety import (
+    CURRENT_SCHEMA_VERSION,
+    DatabaseIntegrityError,
+    DatabaseSchemaTooNewError,
+    ensure_free_space,
+    read_schema_version,
+    sqlite_backup,
+    timestamp_token,
+)
 
 
 APP_NAME = "Manticore"
@@ -38,6 +48,15 @@ UNINSTALL_REGISTRY_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{
 WINTRUST_SUCCESS = 0x00000000
 WINTRUST_UNTRUSTED_ROOT = 0x800B0109
 _INSTANCE_MUTEX = None
+SOURCE_PREFERENCES = {"primary", "fallback", "ask"}
+SOURCE_OK = "SOURCE_OK"
+SOURCE_MISSING = "SOURCE_MISSING"
+SOURCE_NETWORK_UNAVAILABLE = "SOURCE_NETWORK_UNAVAILABLE"
+SOURCE_PERMISSION_DENIED = "SOURCE_PERMISSION_DENIED"
+SOURCE_LOCKED = "SOURCE_LOCKED"
+SOURCE_CORRUPT = "SOURCE_CORRUPT"
+SOURCE_SCHEMA_TOO_NEW = "SOURCE_SCHEMA_TOO_NEW"
+SOURCE_UNKNOWN_ERROR = "SOURCE_UNKNOWN_ERROR"
 
 
 def bundle_root() -> Path:
@@ -134,18 +153,269 @@ def acquire_single_instance() -> bool:
 
 
 def load_config() -> dict:
+    path = config_path()
     try:
-        payload = json.loads(config_path().read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        return payload if isinstance(payload, dict) else {}
+    except FileNotFoundError:
         return {}
-    return payload if isinstance(payload, dict) else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.error("Desktop config is unreadable: %s", exc)
+        try:
+            diagnostic = path.with_name(f"{path.name}.corrupt-{timestamp_token()}")
+            shutil.copy2(path, diagnostic)
+            logging.error("Unreadable desktop config preserved at %s", diagnostic)
+        except OSError:
+            logging.exception("Could not preserve unreadable desktop config")
+        backup = path.with_suffix(path.suffix + ".bak")
+        try:
+            backup_bytes = backup.read_bytes()
+            payload = json.loads(backup_bytes.decode("utf-8-sig"))
+            if isinstance(payload, dict):
+                restore_tmp = path.with_name(f".{path.name}.recovery-{os.getpid()}.tmp")
+                with restore_tmp.open("wb") as stream:
+                    stream.write(backup_bytes)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(restore_tmp, path)
+                logging.warning("Desktop config restored from %s", backup)
+                return payload
+        except (OSError, json.JSONDecodeError):
+            pass
+        return {}
 
 
 def save_config(config: dict) -> None:
     path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary_path, path)
+    encoded = json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
+    with temporary_path.open("wb") as stream:
+        stream.write(encoded)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if path.is_file():
+        backup = path.with_suffix(path.suffix + ".bak")
+        backup_tmp = backup.with_name(f".{backup.name}.{os.getpid()}.tmp")
+        try:
+            with path.open("rb") as source, backup_tmp.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
+            os.replace(backup_tmp, backup)
+        finally:
+            try:
+                backup_tmp.unlink()
+            except OSError:
+                pass
+    try:
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            temporary_path.unlink()
+        except OSError:
+            pass
+
+
+def source_identifier(source: dict) -> str:
+    source_type = source.get("type")
+    value = source.get("url") if source_type == "server" else source.get("path")
+    return f"{source_type}:{str(value or '').strip().casefold()}"
+
+
+def fallback_database_path(primary_source: dict) -> str:
+    digest = hashlib.sha256(source_identifier(primary_source).encode("utf-8")).hexdigest()[:20]
+    return str(application_data_directory() / "fallback" / digest / "fallback.db")
+
+
+def is_safe_fallback_path(value: str) -> bool:
+    try:
+        root = (application_data_directory() / "fallback").resolve()
+        candidate = Path(str(value or "")).resolve()
+        return os.path.commonpath([str(root), str(candidate)]) == str(root)
+    except (OSError, ValueError):
+        return False
+
+
+def migrate_config(config: dict) -> dict:
+    """Upgrade the flat legacy config without ever discarding its primary source."""
+    migrated = dict(config or {})
+    primary = migrated.get("primary_source")
+    if not isinstance(primary, dict) or primary.get("type") not in {"server", "sqlite"}:
+        if migrated.get("mode") == "remote" and migrated.get("server_url"):
+            primary = {"type": "server", "url": str(migrated["server_url"]).strip().rstrip("/")}
+        elif migrated.get("mode") == "local" and migrated.get("database_path"):
+            primary = {"type": "sqlite", "path": str(migrated["database_path"])}
+        else:
+            return migrated
+    migrated["primary_source"] = primary
+    fallback_sources = migrated.get("fallback_sources")
+    if not isinstance(fallback_sources, dict):
+        fallback_sources = {}
+    key = source_identifier(primary)
+    mapped = fallback_sources.get(key)
+    if not mapped or not is_safe_fallback_path(mapped):
+        if mapped:
+            logging.error("Unsafe fallback path ignored for primary source %s", key)
+        fallback_sources[key] = fallback_database_path(primary)
+    migrated["fallback_sources"] = fallback_sources
+    if not isinstance(migrated.get("fallback_sessions"), dict):
+        migrated["fallback_sessions"] = {}
+    if migrated.get("active_source") not in {"primary", "fallback"}:
+        migrated["active_source"] = "primary"
+    if migrated.get("preferred_source") not in SOURCE_PREFERENCES:
+        migrated["preferred_source"] = "ask"
+    # Keep legacy mirrors for older installed clients and rollback compatibility.
+    migrated["mode"] = "remote" if primary["type"] == "server" else "local"
+    migrated["server_url"] = primary.get("url", "")
+    migrated["database_path"] = primary.get("path", "")
+    return migrated
+
+
+def get_fallback_path(config: dict) -> str:
+    primary = config["primary_source"]
+    path = config["fallback_sources"][source_identifier(primary)]
+    if not is_safe_fallback_path(path):
+        raise ValueError("Некорректный путь fallback-базы.")
+    return path
+
+
+def fallback_state(database_path: str) -> dict:
+    path = Path(database_path)
+    default = {"state": "clean", "dirty": False, "session_id": "", "changed_at": "", "changes": 0}
+    if not path.is_file():
+        return default
+    try:
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2.0)
+        try:
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fallback_state'"
+            ).fetchone():
+                return default
+            row = connection.execute(
+                "SELECT state, session_id, changed_at FROM fallback_state WHERE id=1"
+            ).fetchone()
+            count = connection.execute("SELECT COUNT(*) FROM fallback_change_log").fetchone()[0]
+        finally:
+            connection.close()
+        if not row:
+            return default
+        return {
+            "state": row[0], "dirty": row[0] in {"dirty", "archived_with_unsynced_changes"},
+            "session_id": row[1] or "", "changed_at": row[2] or "", "changes": int(count),
+        }
+    except sqlite3.Error as exc:
+        logging.warning("Could not inspect fallback state for %s: %s", database_path, exc)
+        return {**default, "state": "unknown", "dirty": True}
+
+
+def archive_dirty_fallback(config: dict) -> dict:
+    fallback_path = Path(get_fallback_path(config)).resolve()
+    state = fallback_state(str(fallback_path))
+    if not state["dirty"] or state["state"] == "archived_with_unsynced_changes":
+        return {"ok": True, "backup": "", "state": state["state"]}
+    primary_key = hashlib.sha256(source_identifier(config["primary_source"]).encode("utf-8")).hexdigest()[:20]
+    session_id = re.sub(r"[^a-zA-Z0-9-]", "", state["session_id"] or "unknown")[:64]
+    archive_directory = application_data_directory() / "fallback-backups" / primary_key
+    archive_path = archive_directory / f"fallback-{timestamp_token()}-{session_id}.db"
+    sqlite_backup(fallback_path, archive_path)
+    connection = sqlite3.connect(str(fallback_path), timeout=5.0, isolation_level=None)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE fallback_state SET state='archived_with_unsynced_changes', archived_at=datetime('now', 'localtime') WHERE id=1"
+        )
+        connection.execute("COMMIT")
+    except Exception:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        connection.close()
+    logging.warning("Dirty fallback archived before switching to primary: %s", archive_path)
+    return {"ok": True, "backup": str(archive_path), "state": "archived_with_unsynced_changes"}
+
+
+def ensure_fallback_session(config: dict) -> str:
+    sessions = config.get("fallback_sessions")
+    if not isinstance(sessions, dict):
+        sessions = {}
+    key = source_identifier(config["primary_source"])
+    state = fallback_state(get_fallback_path(config))
+    if not sessions.get(key) or state["state"] == "archived_with_unsynced_changes":
+        sessions[key] = str(uuid.uuid4())
+    config["fallback_sessions"] = sessions
+    return sessions[key]
+
+
+def _source_result(code: str, message: str = "", *, available: bool = False) -> dict:
+    return {"code": code, "message": message, "available": available}
+
+
+def inspect_sqlite_source(database_path: str, timeout: float = 2.0) -> dict:
+    path = Path(str(database_path or ""))
+    if not path.is_file():
+        code = SOURCE_NETWORK_UNAVAILABLE if str(database_path).startswith(("\\\\", "//")) else SOURCE_MISSING
+        message = "Сетевой ресурс недоступен." if code == SOURCE_NETWORK_UNAVAILABLE else "Файл базы данных не найден."
+        return _source_result(code, message)
+    try:
+        uri_path = urllib.parse.quote(path.resolve().as_posix(), safe="/:@")
+        connection = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=timeout)
+        try:
+            connection.execute("PRAGMA query_only=ON")
+            result = connection.execute("PRAGMA quick_check(1)").fetchone()
+            if not result or str(result[0]).casefold() != "ok":
+                return _source_result(SOURCE_CORRUPT, "База данных требует проверки. Изменения структуры не выполнялись.")
+            version = read_schema_version(path)
+            if version > CURRENT_SCHEMA_VERSION:
+                return _source_result(
+                    SOURCE_SCHEMA_TOO_NEW,
+                    "Эта база данных была обновлена более новой версией Manticore. Откройте её новой версией программы.",
+                )
+            connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+        finally:
+            connection.close()
+        return _source_result(SOURCE_OK, available=True)
+    except PermissionError as exc:
+        logging.warning("Primary SQLite permission denied for %s: %s", database_path, exc)
+        return _source_result(SOURCE_PERMISSION_DENIED, "Нет прав для чтения базы данных.")
+    except sqlite3.OperationalError as exc:
+        logging.warning("Primary SQLite operational error for %s: %s", database_path, exc)
+        error_text = str(exc).casefold()
+        if "malformed" in error_text or "not a database" in error_text:
+            return _source_result(SOURCE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
+        if "locked" in error_text or "busy" in error_text:
+            return _source_result(
+                SOURCE_LOCKED,
+                "База данных временно занята другим процессом. Повторите операцию позднее.",
+                available=True,
+            )
+        return _source_result(SOURCE_UNKNOWN_ERROR, "Не удалось открыть базу данных.")
+    except sqlite3.DatabaseError as exc:
+        logging.warning("Primary SQLite corruption detected for %s: %s", database_path, exc)
+        return _source_result(SOURCE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
+    except OSError as exc:
+        logging.warning("Primary SQLite connection failed for %s: %s", database_path, exc)
+        return _source_result(SOURCE_UNKNOWN_ERROR, "Не удалось открыть базу данных. Проверьте доступ и сеть.")
+
+
+def check_sqlite_connection(database_path: str, timeout: float = 2.0) -> str:
+    result = inspect_sqlite_source(database_path, timeout)
+    return "" if result["available"] else result["message"]
+
+
+def inspect_source(source: dict, timeout: float = 3.0) -> dict:
+    if source.get("type") == "server":
+        error = check_server_connection(str(source.get("url") or ""), timeout=timeout)
+        return _source_result(SOURCE_NETWORK_UNAVAILABLE, error) if error else _source_result(SOURCE_OK, available=True)
+    return inspect_sqlite_source(str(source.get("path") or ""), timeout=timeout)
+
+
+def check_source_connection(source: dict, timeout: float = 3.0) -> str:
+    result = inspect_source(source, timeout)
+    return "" if result["available"] else result["message"]
 
 
 def is_loopback_host(hostname: str | None) -> bool:
@@ -257,6 +527,7 @@ class SetupApi:
                     "server_url": server_url,
                     "update_server_url": server_url,
                     "database_path": str(payload.get("database_path") or "").strip(),
+                    "primary_source": {"type": "server", "url": server_url},
                 }
             elif mode == "local":
                 configured = {
@@ -264,10 +535,14 @@ class SetupApi:
                     "server_url": "",
                     "database_path": normalize_database_path(payload.get("database_path", "")),
                     "update_server_url": normalize_server_url(payload.get("update_server_url", ""), optional=True),
+                    "primary_source": {"type": "sqlite", "path": normalize_database_path(payload.get("database_path", "")), "create_if_missing": True},
                 }
             else:
                 raise ValueError("Выберите режим работы.")
             configured["local_secret_key"] = self.existing.get("local_secret_key") or secrets.token_urlsafe(48)
+            configured["fallback_sources"] = self.existing.get("fallback_sources", {})
+            configured.update({"active_source": "primary", "preferred_source": "ask"})
+            configured = migrate_config(configured)
             save_config(configured)
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -361,6 +636,170 @@ def prompt_initial_admin_password() -> str | None:
         return None
     finally:
         result_path.unlink(missing_ok=True)
+
+
+class SourceDialogApi:
+    def __init__(self, state: dict, result_path: str):
+        self.state = state
+        self.result_path = Path(result_path)
+
+    def get_state(self) -> dict:
+        return self.state
+
+    def choose(self, action: str, remember: bool = False) -> dict:
+        if action not in {"retry", "fallback", "primary", "database", "server", "settings", "cancel"}:
+            return {"ok": False}
+        self.result_path.write_text(
+            json.dumps({"action": action, "remember": bool(remember)}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        import webview
+        if webview.windows:
+            webview.windows[0].destroy()
+        return {"ok": True}
+
+
+def run_source_dialog_child(state_path: str, result_path: str) -> int:
+    import webview
+
+    try:
+        state = json.loads(Path(state_path).read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return 2
+    api = SourceDialogApi(state, result_path)
+    webview.create_window(
+        "Manticore — источник данных",
+        str(bundle_root() / "desktop" / "ui" / "source_dialog.html"),
+        width=680,
+        height=560,
+        min_size=(600, 500),
+        resizable=True,
+        text_select=True,
+        js_api=api,
+    )
+    webview.start(
+        private_mode=False,
+        storage_path=str(application_data_directory() / "source-dialog-webview"),
+        icon=str(bundle_root() / WINDOW_ICON_PATH),
+    )
+    return 0
+
+
+def show_source_dialog(state: dict) -> dict:
+    descriptor, state_name = tempfile.mkstemp(prefix="manticore-source-state-", suffix=".json")
+    os.close(descriptor)
+    descriptor, result_name = tempfile.mkstemp(prefix="manticore-source-result-", suffix=".json")
+    os.close(descriptor)
+    state_path, result_path = Path(state_name), Path(result_name)
+    try:
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        result_path.unlink(missing_ok=True)
+        completed = subprocess.run(
+            desktop_client_command("--source-dialog-child", str(state_path), str(result_path)),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode == 0 and result_path.is_file():
+            return json.loads(result_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        logging.exception("Source selection dialog failed")
+    finally:
+        state_path.unlink(missing_ok=True)
+        result_path.unlink(missing_ok=True)
+    return {"action": "cancel", "remember": False}
+
+
+def source_dialog_state(config: dict, error: str = "", *, recovered: bool = False) -> dict:
+    primary = config["primary_source"]
+    primary_value = primary.get("url") if primary["type"] == "server" else primary.get("path")
+    fallback_path = get_fallback_path(config)
+    local_state = fallback_state(fallback_path)
+    return {
+        "recovered": recovered,
+        "source_type": primary["type"],
+        "primary": primary_value,
+        "fallback": fallback_path,
+        "fallback_exists": Path(fallback_path).is_file(),
+        "fallback_state": local_state["state"],
+        "fallback_dirty": local_state["dirty"],
+        "fallback_changes": local_state["changes"],
+        "error": error,
+    }
+
+
+def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
+    """Resolve startup source interactively while retaining the primary definition."""
+    config = migrate_config(config)
+    while True:
+        primary = config["primary_source"]
+        primary_error = check_source_connection(primary)
+        fallback_path = get_fallback_path(config)
+        fallback_exists = Path(fallback_path).is_file()
+        fallback_error = check_sqlite_connection(fallback_path) if fallback_exists else ""
+        active = config.get("active_source", "primary")
+        preferred = config.get("preferred_source", "ask")
+
+        if active == "primary" and not primary_error:
+            return primary, config
+        if active == "primary" and primary.get("type") == "sqlite" and primary.get("create_if_missing"):
+            return primary, config
+        if active == "fallback" and fallback_exists and not fallback_error:
+            if primary_error or preferred == "fallback":
+                ensure_fallback_session(config)
+                save_config(config)
+                return {"type": "sqlite", "path": fallback_path, "fallback": True}, config
+            if preferred == "primary":
+                if not fallback_state(fallback_path)["dirty"]:
+                    config["active_source"] = "primary"
+                    save_config(config)
+                    return primary, config
+            choice = show_source_dialog(source_dialog_state(config, recovered=True))
+        elif primary_error and preferred == "fallback" and fallback_exists:
+            config["active_source"] = "fallback"
+            ensure_fallback_session(config)
+            save_config(config)
+            return {"type": "sqlite", "path": fallback_path, "fallback": True}, config
+        elif active == "fallback" and fallback_error:
+            logging.warning("Fallback source unavailable: %s", fallback_error)
+            if not primary_error:
+                choice = show_source_dialog(source_dialog_state(config, fallback_error, recovered=True))
+            else:
+                choice = show_source_dialog(source_dialog_state(config, fallback_error))
+        else:
+            logging.warning("Primary source unavailable: type=%s; error=%s", primary.get("type"), primary_error)
+            choice = show_source_dialog(source_dialog_state(config, primary_error))
+
+        action = choice.get("action")
+        remember = bool(choice.get("remember"))
+        if action == "retry":
+            continue
+        if action == "primary" and not primary_error:
+            archive_dirty_fallback(config)
+            config["active_source"] = "primary"
+            config["preferred_source"] = "primary" if remember else "ask"
+            save_config(config)
+            return primary, config
+        if action == "fallback":
+            if fallback_exists and fallback_error:
+                continue
+            path = Path(fallback_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                ensure_free_space(path.parent, 16 * 1024 * 1024)
+            config["active_source"] = "fallback"
+            config["preferred_source"] = "fallback" if remember else "ask"
+            ensure_fallback_session(config)
+            save_config(config)
+            if not path.exists():
+                logging.info("Creating fallback database for primary source %s at %s", source_identifier(primary), path)
+            return {"type": "sqlite", "path": str(path), "fallback": True}, config
+        if action in {"database", "server", "settings"}:
+            configured = show_configuration_dialog(config)
+            if configured is None:
+                continue
+            config = migrate_config(configured)
+            save_config(config)
+            continue
+        return None, config
 
 
 def version_key(value: str):
@@ -702,7 +1141,7 @@ class DesktopUpdater:
 class DesktopApi:
     """Operations that are safe to expose to pages opened in the desktop shell."""
 
-    def __init__(self, update_server_url: str, target_url: str = ""):
+    def __init__(self, update_server_url: str, target_url: str = "", source_config: dict | None = None):
         self.update_server_url = update_server_url
         self.target_url = target_url
         self.connection_error = ""
@@ -710,6 +1149,8 @@ class DesktopApi:
                                   for channel in ("stable", "preview")}
         self._updater = self._channel_updaters[update_channel()]
         self._update_action_lock = threading.RLock()
+        self.source_config = migrate_config(source_config or load_config())
+        self.source_switch_requested = False
 
     @staticmethod
     def _close_windows() -> None:
@@ -725,7 +1166,12 @@ class DesktopApi:
         return current_version()
 
     def get_client_info(self) -> dict:
-        config = load_config()
+        config = migrate_config(load_config())
+        primary = config.get("primary_source", {})
+        primary_value = primary.get("url") if primary.get("type") == "server" else primary.get("path")
+        fallback_path = get_fallback_path(config) if primary else ""
+        primary_check = inspect_source(primary) if primary else _source_result(SOURCE_UNKNOWN_ERROR, "Источник не настроен.")
+        local_state = fallback_state(fallback_path) if fallback_path else {"state": "clean", "dirty": False, "changes": 0}
         return {
             "desktop": True,
             "version": current_version(),
@@ -734,7 +1180,82 @@ class DesktopApi:
             "database_path": config.get("database_path", ""),
             "update_server_url": config.get("update_server_url", ""),
             "log_path": str(application_data_directory() / "logs" / "client.log"),
+            "primary_source": primary_value or "",
+            "active_source": config.get("active_source", "primary"),
+            "fallback_source": fallback_path,
+            "preferred_source": config.get("preferred_source", "ask"),
+            "primary_available": primary_check["available"],
+            "primary_status": "Доступна" if primary_check["code"] == SOURCE_OK else primary_check["message"],
+            "primary_status_code": primary_check["code"],
+            "fallback_state": local_state["state"],
+            "fallback_dirty": local_state["dirty"],
+            "fallback_changes": local_state["changes"],
         }
+
+    def check_primary_source(self) -> dict:
+        config = migrate_config(load_config())
+        result = inspect_source(config["primary_source"])
+        return {**result, "error": result["message"], "active_source": config.get("active_source", "primary")}
+
+    def switch_source(self, target: str, remember: bool = False, confirm_unsynced: bool = False) -> dict:
+        if target not in {"primary", "fallback"}:
+            return {"ok": False, "error": "Неизвестный источник."}
+        config = migrate_config(load_config())
+        if target == "primary":
+            error = check_source_connection(config["primary_source"])
+            if error:
+                return {"ok": False, "error": error}
+            local_state = fallback_state(get_fallback_path(config))
+            if config.get("active_source") == "fallback" and local_state["dirty"]:
+                if not confirm_unsynced:
+                    return {
+                        "ok": False,
+                        "requires_confirmation": True,
+                        "error": "В локальной базе имеются несинхронизированные изменения.",
+                    }
+                try:
+                    archived = archive_dirty_fallback(config)
+                except Exception as exc:
+                    logging.exception("Could not archive dirty fallback")
+                    return {"ok": False, "error": f"Не удалось создать резервную копию локальной базы: {exc}"}
+        else:
+            Path(get_fallback_path(config)).parent.mkdir(parents=True, exist_ok=True)
+            ensure_fallback_session(config)
+        config["active_source"] = target
+        config["preferred_source"] = target if remember else "ask"
+        save_config(config)
+        logging.info("Desktop source switched to %s; remember=%s", target, remember)
+        self.source_switch_requested = True
+        self._close_windows()
+        return {"ok": True, "restart_required": True}
+
+    def get_fallback_changes(self, limit: int = 200) -> dict:
+        config = migrate_config(load_config())
+        path = Path(get_fallback_path(config))
+        if not path.is_file():
+            return {"ok": True, "state": "clean", "rows": []}
+        try:
+            connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2.0)
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT created_at, action, entity_type, entity_id, record_uuid, label
+                    FROM fallback_change_log ORDER BY id DESC LIMIT ?
+                    """,
+                    (max(1, min(int(limit or 200), 1000)),),
+                ).fetchall()
+            finally:
+                connection.close()
+            return {"ok": True, "state": fallback_state(str(path))["state"], "rows": [dict(row) for row in rows]}
+        except sqlite3.Error as exc:
+            return {"ok": False, "error": str(exc), "rows": []}
+
+    def reset_source_preference(self) -> dict:
+        config = migrate_config(load_config())
+        config["preferred_source"] = "ask"
+        save_config(config)
+        return {"ok": True}
 
     def _selected_updater(self, channel):
         if channel == "":
@@ -802,12 +1323,23 @@ def check_server_connection(url: str, timeout: float = 5.0) -> str:
     parsed = urllib.parse.urlsplit(url)
     if is_loopback_host(parsed.hostname):
         return ""
-    request = urllib.request.Request(url, headers={"User-Agent": f"Manticore-Desktop/{current_version()}"})
+    health_url = url.rstrip("/") + "/healthz"
+    request = urllib.request.Request(health_url, headers={"User-Agent": f"Manticore-Desktop/{current_version()}"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout):
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if getattr(response, "status", 200) >= 500:
+                return "Сервер отвечает ошибкой. Повторите подключение позднее."
             return ""
-    except urllib.error.HTTPError:
-        return ""  # An HTTP response proves the server and TLS connection are reachable.
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": f"Manticore-Desktop/{current_version()}"}), timeout=timeout) as response:
+                    return "" if getattr(response, "status", 200) < 500 else "Сервер отвечает ошибкой."
+            except Exception as fallback_exc:
+                logging.warning("Remote server compatibility check failed for %s: %s", url, fallback_exc)
+                return "Сервер не прошёл проверку доступности."
+        logging.warning("Remote server health check returned HTTP %s for %s", exc.code, url)
+        return "Сервер не прошёл проверку доступности."
     except urllib.error.URLError as exc:
         logging.warning("Remote server connection failed for %s: %s", url, exc)
         reason = str(getattr(exc, "reason", exc))
@@ -818,7 +1350,8 @@ def check_server_connection(url: str, timeout: float = 5.0) -> str:
 
 
 class LocalServer:
-    def __init__(self, database_path: str, admin_password: str | None, secret_key: str):
+    def __init__(self, database_path: str, admin_password: str | None, secret_key: str,
+                 *, fallback_session_id: str = "", primary_source_id: str = ""):
         database = Path(database_path).resolve()
         os.environ["UPLOAD_FOLDER"] = str(database.parent)
         os.environ["DB_FILENAME"] = database.name
@@ -827,6 +1360,12 @@ class LocalServer:
         os.environ["APP_DEBUG"] = "false"
         os.environ["SESSION_COOKIE_SECURE"] = "false"
         os.environ["APP_UPDATE_ENABLED"] = "false"
+        if fallback_session_id:
+            os.environ["MANTICORE_FALLBACK_SESSION_ID"] = fallback_session_id
+            os.environ["MANTICORE_PRIMARY_SOURCE_ID"] = primary_source_id
+        else:
+            os.environ.pop("MANTICORE_FALLBACK_SESSION_ID", None)
+            os.environ.pop("MANTICORE_PRIMARY_SOURCE_ID", None)
         if admin_password:
             os.environ["ADMIN_DEFAULT_PASSWORD"] = admin_password
 
@@ -846,7 +1385,8 @@ class LocalServer:
         self._thread.join(timeout=5)
 
 
-def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_update: bool = False) -> None:
+def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_update: bool = False,
+                        source_config: dict | None = None) -> bool:
     import webview
 
     # pywebview disables downloads by default. On Windows, enabling this delegates
@@ -859,7 +1399,7 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
 
     storage_path = application_data_directory() / "webview"
     storage_path.mkdir(parents=True, exist_ok=True)
-    api = DesktopApi(update_server_url or url, url)
+    api = DesktopApi(update_server_url or url, url, source_config)
     startup_page = bundle_root() / "desktop" / "ui" / "startup.html"
     error_page = bundle_root() / "desktop" / "ui" / "connection_error.html"
     window = webview.create_window(
@@ -883,7 +1423,8 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
             bundled_page = current in {window._resolve_url(str(startup_page)), window._resolve_url(str(error_page))}
             if bundled_page or (page.scheme, page.netloc) == (target.scheme, target.netloc):
                 script = (bundle_root() / "static" / "js" / "desktop-updater.js").read_text(encoding="utf-8")
-                window.evaluate_js(script)
+                source_script = (bundle_root() / "static" / "js" / "desktop-source.js").read_text(encoding="utf-8")
+                window.evaluate_js(script + "\n" + source_script)
         except Exception:
             logging.exception("[Updater] Could not initialize bundled update UI")
 
@@ -907,6 +1448,7 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
         storage_path=str(storage_path),
         icon=str(bundle_root() / WINDOW_ICON_PATH),
     )
+    return api.source_switch_requested
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -915,41 +1457,88 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--skip-update", action="store_true", help="skip the update check for this launch")
     parser.add_argument("--configuration-child", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--admin-password-child", metavar="RESULT_PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--source-dialog-child", nargs=2, metavar=("STATE_PATH", "RESULT_PATH"), help=argparse.SUPPRESS)
+    parser.add_argument("--wait-pid", type=int, help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
-def run_configured_client(config: dict, args: argparse.Namespace) -> int:
-    if config["mode"] == "remote":
+def wait_for_process_exit(process_id: int) -> None:
+    if not process_id or process_id == os.getpid():
+        return
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, process_id)
+        if handle:
+            ctypes.windll.kernel32.WaitForSingleObject(handle, 15000)
+            ctypes.windll.kernel32.CloseHandle(handle)
+        return
+    deadline = time.time() + 15
+    while time.time() < deadline:
         try:
-            target_url = normalize_server_url(config.get("server_url", ""))
-        except ValueError:
-            configured = show_configuration_dialog(config)
-            if configured is None:
-                return 1
-            configured["local_secret_key"] = config.get("local_secret_key") or secrets.token_urlsafe(48)
-            config = configured
-            save_config(config)
-            return run_configured_client(config, args)
-        open_desktop_window(target_url, target_url, skip_update=args.skip_update)
+            os.kill(process_id, 0)
+        except OSError:
+            break
+        time.sleep(0.1)
+
+
+def relaunch_after_source_switch(args: argparse.Namespace) -> None:
+    arguments = ["--wait-pid", str(os.getpid())]
+    if args.skip_update:
+        arguments.append("--skip-update")
+    subprocess.Popen(
+        desktop_client_command(*arguments),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        close_fds=True,
+    )
+
+
+def run_configured_client(config: dict, args: argparse.Namespace) -> int:
+    source, config = resolve_active_source(config)
+    if source is None:
+        return 0
+    config["local_secret_key"] = config.get("local_secret_key") or secrets.token_urlsafe(48)
+    save_config(config)
+    if source["type"] == "server":
+        target_url = normalize_server_url(source.get("url", ""))
+        switched = open_desktop_window(target_url, target_url, skip_update=args.skip_update, source_config=config)
+        if switched:
+            relaunch_after_source_switch(args)
         return 0
 
-    database_path = normalize_database_path(config.get("database_path") or default_database_path())
+    database_path = normalize_database_path(source.get("path") or default_database_path())
     admin_password = None
     if not database_has_admin(database_path):
         admin_password = prompt_initial_admin_password()
         if not admin_password:
             return 1
     secret_key = config.get("local_secret_key") or secrets.token_urlsafe(48)
-    config.update({"database_path": database_path, "local_secret_key": secret_key})
+    config.update({"local_secret_key": secret_key})
     save_config(config)
 
-    local_server = LocalServer(database_path, admin_password, secret_key)
+    is_fallback = bool(source.get("fallback"))
+    fallback_session_id = ensure_fallback_session(config) if is_fallback else ""
+    if is_fallback:
+        save_config(config)
+    local_server = LocalServer(
+        database_path,
+        admin_password,
+        secret_key,
+        fallback_session_id=fallback_session_id,
+        primary_source_id=source_identifier(config["primary_source"]) if is_fallback else "",
+    )
     local_server.start()
     try:
         update_server = config.get("update_server_url") or local_server.url
-        open_desktop_window(local_server.url, update_server, skip_update=args.skip_update)
+        switched = open_desktop_window(local_server.url, update_server, skip_update=args.skip_update, source_config=config)
     finally:
         local_server.stop()
+    if source is config.get("primary_source") or (
+        source.get("type") == "sqlite" and source.get("path") == config.get("primary_source", {}).get("path")
+    ):
+        config["primary_source"].pop("create_if_missing", None)
+        save_config(config)
+    if switched:
+        relaunch_after_source_switch(args)
     return 0
 
 
@@ -957,6 +1546,10 @@ def main() -> int:
     configure_logging()
     cleanup_old_installers()
     args = parse_arguments()
+    if args.source_dialog_child:
+        return run_source_dialog_child(*args.source_dialog_child)
+    if args.wait_pid:
+        wait_for_process_exit(args.wait_pid)
     if args.configuration_child:
         return run_setup_child("configuration")
     if args.admin_password_child:
@@ -976,13 +1569,15 @@ def main() -> int:
             result_path.unlink()
         except (OSError, ValueError):
             logging.exception("[Updater] Could not read installation result")
-    config = load_config()
+    config = migrate_config(load_config())
     if args.configure or config.get("mode") not in {"remote", "local"}:
         configured = show_configuration_dialog(config)
         if configured is None:
             return 0
         configured["local_secret_key"] = config.get("local_secret_key") or secrets.token_urlsafe(48)
-        config = configured
+        config = migrate_config(configured)
+        save_config(config)
+    elif config:
         save_config(config)
     return run_configured_client(config, args)
 

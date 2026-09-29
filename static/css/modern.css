@@ -29,13 +29,9 @@ body.app-authenticated > .container > .main-nav {
 .main-nav > li:first-child { margin-bottom: 15px; }
 .main-nav .nav-brand {
   display: flex; align-items: center; height: 40px; padding: 0 10px; color: #fff !important;
-  font-size: 18px; font-weight: 700; letter-spacing: -.3px; text-transform: capitalize;
 }
 .main-nav .nav-brand.active{border:0!important}
-.main-nav .nav-brand::before {
-  content: "M"; display: grid; place-items: center; width: 28px; height: 28px; margin-right: 10px;
-  border-radius: 8px; background: linear-gradient(145deg,#5578f1,#315be8); color: #fff; font-size: 14px;
-}
+.main-nav .nav-brand-logo { display: block; width: 142px; max-width: 100%; height: auto; }
 .main-nav .nav-dropdown { width: 100%; color: var(--sidebar-text); }
 .main-nav .nav-dropdown-summary,
 .main-nav > li > a:not(.nav-brand),

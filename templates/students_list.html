@@ -37,6 +37,11 @@
             {% endfor %}
         </select>
         {% endif %}
+        <fieldset class="students-date-filter">
+            <legend>Дата перевода из абитуриентов</legend>
+            <label>С <input type="date" name="migrated_from" value="{{ request.args.get('migrated_from', '') }}"></label>
+            <label>По <input type="date" name="migrated_to" value="{{ request.args.get('migrated_to', '') }}"></label>
+        </fieldset>
         <button type="submit" class="btn">Применить фильтры</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Очистить</a>
         <a data-live-search-export href="{{ url_for('download_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>

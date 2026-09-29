@@ -11,6 +11,7 @@ hidden_imports = [
     "docx",
     "openpyxl",
     "pypdf",
+    "dns.resolver",
     "xlrd",
 ]
 
@@ -21,6 +22,7 @@ a = Analysis(
     datas=[
         (str(project_root / "templates"), "templates"),
         (str(project_root / "static"), "static"),
+        (str(project_root / "data"), "data"),
         (str(project_root / "VERSION"), "."),
         (str(project_root / "desktop" / "manticore.ico"), "desktop"),
         (str(project_root / "desktop" / "ui"), "desktop/ui"),

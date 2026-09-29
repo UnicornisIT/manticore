@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Изменения локальной базы{% endblock %}
+{% block content %}
+<section class="content-section">
+  <div class="section-heading">
+    <div><p class="eyebrow">Windows Desktop</p><h1>Изменения локальной базы</h1></div>
+    <a class="btn" href="{{ url_for('export_desktop_fallback_changes') }}">Экспортировать изменения</a>
+  </div>
+  <p class="hint">Это журнал изменений fallback-базы. Автоматическое объединение с основной базой не выполняется.</p>
+  <div class="table-container"><table><thead><tr><th>Дата</th><th>Действие</th><th>Сущность</th><th>Идентификатор</th><th>UUID</th><th>Запись</th></tr></thead><tbody>
+  {% for item in changes %}<tr><td>{{ item.created_at }}</td><td>{{ item.action }}</td><td>{{ item.entity_type }}</td><td>{{ item.entity_id }}</td><td>{{ item.record_uuid or '—' }}</td><td>{{ item.label or '—' }}</td></tr>{% else %}<tr><td colspan="6">Локальных изменений нет.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

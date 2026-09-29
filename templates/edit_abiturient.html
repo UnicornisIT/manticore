@@ -57,6 +57,10 @@
     <div class="edit-abiturient-field">
         <label for="email">Email:</label>
         <input type="email" name="email" id="email" value="{{ abiturient[5] or '' }}">
+        {% if email_warning %}
+        <div class="callout warning" role="alert"><strong>Возможно, в адресе ошибка.</strong><br>{{ email_warning.message }}{% if email_warning.suggested_email %}<br>Возможно: <strong>{{ email_warning.suggested_email }}</strong>{% endif %}</div>
+        <label><input type="checkbox" name="email_warning_confirm" value="1" required> Оставить адрес как есть</label>
+        {% endif %}
     </div>
     <div class="edit-abiturient-paid">
         <input type="checkbox" id="paid" name="paid" value="1" {% if abiturient[8] == 1 %}checked{% endif %}>

@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "last_verified": "2026-09-29",
+  "providers": [
+    {
+      "provider": "Google Gmail",
+      "canonical_domains": ["gmail.com"],
+      "additional_domains": ["googlemail.com"],
+      "legacy_domains": [],
+      "known_invalid_domains": {"gmail.ru": "gmail.com", "gmal.com": "gmail.com", "gmial.com": "gmail.com", "gmaill.com": "gmail.com"},
+      "source_urls": ["https://support.google.com/accounts/answer/76194"]
+    },
+    {
+      "provider": "Apple iCloud Mail",
+      "canonical_domains": ["icloud.com"],
+      "additional_domains": [],
+      "legacy_domains": ["me.com", "mac.com"],
+      "known_invalid_domains": {"iclod.com": "icloud.com", "icluod.com": "icloud.com", "icloud.ru": "icloud.com"},
+      "source_urls": ["https://support.apple.com/en-us/118230"]
+    },
+    {
+      "provider": "Mail",
+      "canonical_domains": ["mail.ru"],
+      "additional_domains": ["inbox.ru", "list.ru", "bk.ru", "internet.ru", "xmail.ru"],
+      "legacy_domains": [],
+      "known_invalid_domains": {"mai.ru": "mail.ru", "maill.ru": "mail.ru"},
+      "source_urls": ["https://help.mail.ru/mail/account/moving/"]
+    },
+    {
+      "provider": "Yandex Mail",
+      "canonical_domains": ["yandex.ru"],
+      "additional_domains": ["ya.ru", "yandex.com", "yandex.by", "yandex.kz"],
+      "legacy_domains": ["yandex.com.tr"],
+      "known_invalid_domains": {"yadnex.ru": "yandex.ru", "yanex.ru": "yandex.ru", "yandexx.ru": "yandex.ru"},
+      "source_urls": ["https://www.yandex.com/support/yandex-360/customers/mail/en/web/preferences/about-sender/additional-addresses"]
+    },
+    {
+      "provider": "Microsoft Mail",
+      "canonical_domains": ["outlook.com"],
+      "additional_domains": [],
+      "legacy_domains": ["hotmail.com", "live.com", "msn.com", "hotmail.co.uk", "hotmail.fr", "live.co.uk"],
+      "known_invalid_domains": {"outlok.com": "outlook.com", "outllook.com": "outlook.com", "hotmal.com": "hotmail.com"},
+      "source_urls": ["https://support.microsoft.com/en-us/outlook/get-help-with-outlook-com"]
+    },
+    {
+      "provider": "Proton Mail",
+      "canonical_domains": ["proton.me"],
+      "additional_domains": ["protonmail.com", "pm.me"],
+      "legacy_domains": ["protonmail.ch"],
+      "known_invalid_domains": {"protonn.me": "proton.me", "proton.ru": "proton.me"},
+      "source_urls": ["https://proton.me/support/addresses-and-aliases"]
+    },
+    {
+      "provider": "Tuta Mail",
+      "canonical_domains": ["tuta.com"],
+      "additional_domains": ["tutanota.com", "tutanota.de", "tutamail.com", "tuta.io", "keemail.me"],
+      "legacy_domains": [],
+      "known_invalid_domains": {"tutanotta.com": "tutanota.com"},
+      "source_urls": ["https://tuta.com/support/general"]
+    },
+    {
+      "provider": "Yahoo Mail",
+      "canonical_domains": ["yahoo.com"],
+      "additional_domains": ["myyahoo.com"],
+      "legacy_domains": ["yahoo.co.uk", "yahoo.fr", "yahoo.de", "yahoo.es", "yahoo.it", "yahoo.ca", "yahoo.com.au", "yahoo.co.jp"],
+      "known_invalid_domains": {"yaho.com": "yahoo.com", "yahooo.com": "yahoo.com"},
+      "source_urls": ["https://en-global.help.yahoo.com/kb/new-yahoo-mail/identify-domain-extension-yahoo-mail-sln36743.html"]
+    },
+    {
+      "provider": "AOL Mail",
+      "canonical_domains": ["aol.com"],
+      "additional_domains": [],
+      "legacy_domains": ["aim.com"],
+      "known_invalid_domains": {"aoll.com": "aol.com"},
+      "source_urls": ["https://help.aol.com/products/aol-mail"]
+    },
+    {
+      "provider": "Rambler Mail",
+      "canonical_domains": ["rambler.ru"],
+      "additional_domains": [],
+      "legacy_domains": ["lenta.ru", "autorambler.ru", "myrambler.ru", "ro.ru"],
+      "known_invalid_domains": {"rambler.com": "rambler.ru"},
+      "source_urls": ["https://help.rambler.ru/mail/"]
+    },
+    {
+      "provider": "GMX",
+      "canonical_domains": ["gmx.com", "gmx.net", "gmx.de"],
+      "additional_domains": ["gmx.at", "gmx.ch"],
+      "legacy_domains": [],
+      "known_invalid_domains": {"gmx.con": "gmx.com"},
+      "source_urls": ["https://support.gmx.com/"]
+    },
+    {
+      "provider": "WEB.DE",
+      "canonical_domains": ["web.de"],
+      "additional_domains": [],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://hilfe.web.de/"]
+    },
+    {
+      "provider": "Fastmail",
+      "canonical_domains": ["fastmail.com"],
+      "additional_domains": ["fastmail.fm", "fastmail.net", "fastmail.org", "fastmail.co.uk", "fastmail.de", "fastmail.fr", "fastmail.us", "myfastmail.com", "eml.cc", "f-m.fm"],
+      "legacy_domains": [],
+      "known_invalid_domains": {"fastmai.com": "fastmail.com"},
+      "source_urls": ["https://www.fastmail.help/hc/en-us/articles/6239365719055-What-domains-can-I-use-with-Fastmail"]
+    },
+    {
+      "provider": "Zoho Mail",
+      "canonical_domains": ["zohomail.com"],
+      "additional_domains": ["zohomail.eu", "zohomail.in", "zohomail.com.cn"],
+      "legacy_domains": ["zoho.com", "zoho.eu", "zoho.in", "zoho.com.cn"],
+      "known_invalid_domains": {},
+      "source_urls": ["https://help.zoho.com/portal/en/kb/accounts/faqs-troubleshooting/troubleshooting/sign-up/articles/the-domain-name-domain-cannot-be-used-to-sign-up-please-use-a-different-email-address"]
+    },
+    {
+      "provider": "QQ Mail",
+      "canonical_domains": ["qq.com"],
+      "additional_domains": ["foxmail.com"],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://en.mail.qq.com/"]
+    },
+    {
+      "provider": "NetEase Mail",
+      "canonical_domains": ["163.com", "126.com"],
+      "additional_domains": ["yeah.net"],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://mail.163.com/"]
+    },
+    {
+      "provider": "Naver Mail",
+      "canonical_domains": ["naver.com"],
+      "additional_domains": [],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://mail.naver.com/"]
+    },
+    {
+      "provider": "Kakao Mail",
+      "canonical_domains": ["kakao.com"],
+      "additional_domains": [],
+      "legacy_domains": ["daum.net", "hanmail.net"],
+      "known_invalid_domains": {},
+      "source_urls": ["https://mail.kakao.com/"]
+    },
+    {
+      "provider": "Seznam Email",
+      "canonical_domains": ["seznam.cz"],
+      "additional_domains": ["email.cz", "post.cz"],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://o-seznam.cz/odpovedna-firma/produkty-a-sluzby/email-cz/"]
+    },
+    {
+      "provider": "Mailbox.org",
+      "canonical_domains": ["mailbox.org"],
+      "additional_domains": [],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://kb.mailbox.org/en/private/e-mail-article/what-email-addresses-can-i-use/"]
+    },
+    {
+      "provider": "Posteo",
+      "canonical_domains": ["posteo.de"],
+      "additional_domains": ["posteo.net", "posteo.org"],
+      "legacy_domains": [],
+      "known_invalid_domains": {},
+      "source_urls": ["https://posteo.de/en/help"]
+    }
+  ]
+}

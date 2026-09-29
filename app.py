@@ -17,6 +17,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import sqlite3
 import io
 import hmac
+import uuid
 from string import Formatter
 from functools import wraps
 from datetime import date, datetime, timezone
@@ -25,6 +26,14 @@ from time import time
 import update_app
 import desktop_releases
 from app_metadata import APP_METADATA
+from email_validation import ensure_dns_cache_table, validate_email
+from db_safety import (
+    DatabaseIntegrityError,
+    DatabaseSchemaTooNewError,
+    migrate_database,
+    restore_sqlite_backup,
+    sqlite_backup,
+)
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -115,6 +124,8 @@ PENDING_EMAIL_SOURCE_IMPORT_PREFIX = 'pending_email_source_'
 STUDENT_TRANSFER_ORDER_DIR = 'student_transfer_orders'
 ENROLLMENT_FIO_SUGGESTION_THRESHOLD = 0.86
 DB_BACKUP_PREFIX = 'baze_backup_'
+FALLBACK_SESSION_ID = os.environ.get('MANTICORE_FALLBACK_SESSION_ID', '').strip()
+FALLBACK_PRIMARY_ID = os.environ.get('MANTICORE_PRIMARY_SOURCE_ID', '').strip()
 ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
 ABITURIENT_RESULT_COLUMNS = [
     'campaign_year', 'ФИО', 'Договор', 'login', 'Фамилия',
@@ -288,8 +299,21 @@ _dogovor_year_re = re.compile(r'20\d{2}')
 _email_re = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 def is_valid_email(value):
-    value = str(value or '').strip()
-    return not value or bool(_email_re.fullmatch(value))
+    return validate_email(value, database_path=DB_PATH).valid
+
+def email_validation_issue(value):
+    result = validate_email(value, database_path=DB_PATH)
+    return result if result.severity in {'warning', 'error'} else None
+
+def email_issue_text(result):
+    text = (
+        f'Почта выглядит некорректно: {result.email}. {result.message}'
+        if result.code == 'invalid_syntax'
+        else result.message
+    )
+    if result.suggested_email:
+        text += f' Возможно: {result.suggested_email}.'
+    return text
 
 def clean_campaign_year(value, fallback):
     value = str(value or '').strip()
@@ -1311,12 +1335,176 @@ def ensure_students_origin_columns(conn):
         'source_campaign_year': 'TEXT',
         'source_dogovor': 'TEXT',
         'source_fio': 'TEXT',
+        'migrated_to_student_at': 'TEXT',
     }
     for column, column_type in student_columns.items():
         if column not in columns:
             conn.execute(f'ALTER TABLE students ADD COLUMN {column} {column_type}')
             columns.append(column)
     backfill_students_cohort2(conn)
+    conn.execute('''
+        CREATE INDEX IF NOT EXISTS idx_students_migrated_to_student_at
+        ON students (migrated_to_student_at)
+    ''')
+
+def ensure_record_uuids(conn):
+    """Add non-breaking global identifiers while preserving integer primary keys."""
+    for table in ('students', 'abiturients'):
+        columns = get_table_columns(conn, table)
+        if not columns:
+            continue
+        if 'record_uuid' not in columns:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN record_uuid TEXT')
+        missing = conn.execute(
+            f"SELECT id FROM {table} WHERE record_uuid IS NULL OR TRIM(record_uuid)=''"
+        ).fetchall()
+        for (row_id,) in missing:
+            conn.execute(
+                f'UPDATE {table} SET record_uuid=? WHERE id=?',
+                (str(uuid.uuid4()), row_id),
+            )
+        conn.execute(
+            f'CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_record_uuid ON {table} (record_uuid)'
+        )
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table}_record_uuid_insert
+            AFTER INSERT ON {table}
+            WHEN NEW.record_uuid IS NULL OR TRIM(NEW.record_uuid)=''
+            BEGIN
+                UPDATE {table}
+                SET record_uuid=(
+                    lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+                    substr(lower(hex(randomblob(2))), 2) || '-' ||
+                    substr('89ab', abs(random()) % 4 + 1, 1) ||
+                    substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))
+                )
+                WHERE id=NEW.id;
+            END
+        ''')
+
+def create_fallback_tracking(conn):
+    if not FALLBACK_SESSION_ID:
+        return
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS fallback_state (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            primary_source_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'clean',
+            started_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            changed_at TEXT,
+            archived_at TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS fallback_change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT,
+            record_uuid TEXT,
+            label TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    ''')
+    conn.execute('''
+        INSERT INTO fallback_state (id, primary_source_id, session_id, state)
+        VALUES (1, ?, ?, 'clean')
+        ON CONFLICT(id) DO UPDATE SET
+            primary_source_id=excluded.primary_source_id,
+            session_id=CASE
+                WHEN fallback_state.state='archived_with_unsynced_changes' THEN excluded.session_id
+                ELSE fallback_state.session_id
+            END,
+            state=CASE
+                WHEN fallback_state.state='archived_with_unsynced_changes' THEN 'clean'
+                ELSE fallback_state.state
+            END,
+            started_at=CASE
+                WHEN fallback_state.state='archived_with_unsynced_changes' THEN datetime('now', 'localtime')
+                ELSE fallback_state.started_at
+            END,
+            archived_at=CASE
+                WHEN fallback_state.state='archived_with_unsynced_changes' THEN NULL
+                ELSE fallback_state.archived_at
+            END
+    ''', (FALLBACK_PRIMARY_ID, FALLBACK_SESSION_ID))
+
+    specs = {
+        'students': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NEW.record_uuid", 'old_uuid': "OLD.record_uuid",
+            'label': "TRIM(COALESCE(NEW.lastname,'') || ' ' || COALESCE(NEW.firstname,''))",
+            'old_label': "TRIM(COALESCE(OLD.lastname,'') || ' ' || COALESCE(OLD.firstname,''))",
+            'update_when': "OLD.username IS NOT NEW.username OR OLD.email IS NOT NEW.email OR OLD.firstname IS NOT NEW.firstname OR OLD.lastname IS NOT NEW.lastname OR OLD.cohort1 IS NOT NEW.cohort1 OR OLD.cohort2 IS NOT NEW.cohort2",
+        },
+        'abiturients': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NEW.record_uuid", 'old_uuid': "OLD.record_uuid",
+            'label': "COALESCE(NEW.fio, NEW.login, '')", 'old_label': "COALESCE(OLD.fio, OLD.login, '')",
+            'update_when': "OLD.fio IS NOT NEW.fio OR OLD.dogovor IS NOT NEW.dogovor OR OLD.login IS NOT NEW.login OR OLD.email IS NOT NEW.email OR OLD.paid IS NOT NEW.paid OR OLD.comment IS NOT NEW.comment",
+        },
+        'enrollment_candidates': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.fio, NEW.login, '')", 'old_label': "COALESCE(OLD.fio, OLD.login, '')",
+            'update_when': "OLD.fio IS NOT NEW.fio OR OLD.dogovor IS NOT NEW.dogovor OR OLD.login IS NOT NEW.login OR OLD.email IS NOT NEW.email OR OLD.verification_status IS NOT NEW.verification_status OR OLD.order_group_name IS NOT NEW.order_group_name",
+        },
+        'enrollment_orders': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.fio, NEW.order_number, '')", 'old_label': "COALESCE(OLD.fio, OLD.order_number, '')",
+            'update_when': "OLD.fio IS NOT NEW.fio OR OLD.group_name IS NOT NEW.group_name OR OLD.order_number IS NOT NEW.order_number OR OLD.order_date IS NOT NEW.order_date",
+        },
+        'groups': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.name, '')", 'old_label': "COALESCE(OLD.name, '')",
+            'update_when': "OLD.name IS NOT NEW.name OR OLD.group_year IS NOT NEW.group_year OR OLD.is_hidden IS NOT NEW.is_hidden",
+        },
+        'student_group_transfers': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.username, '')", 'old_label': "COALESCE(OLD.username, '')",
+            'update_when': "OLD.username IS NOT NEW.username OR OLD.new_cohort1 IS NOT NEW.new_cohort1 OR OLD.order_number IS NOT NEW.order_number OR OLD.order_date IS NOT NEW.order_date",
+        },
+        'pending_duplicates': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.fio, NEW.login, '')", 'old_label': "COALESCE(OLD.fio, OLD.login, '')",
+            'update_when': "OLD.fio IS NOT NEW.fio OR OLD.dogovor IS NOT NEW.dogovor OR OLD.login IS NOT NEW.login",
+        },
+        'login_conflicts': {
+            'id': "CAST(NEW.id AS TEXT)", 'old_id': "CAST(OLD.id AS TEXT)",
+            'uuid': "NULL", 'old_uuid': "NULL",
+            'label': "COALESCE(NEW.fio, NEW.login, '')", 'old_label': "COALESCE(OLD.fio, OLD.login, '')",
+            'update_when': "OLD.fio IS NOT NEW.fio OR OLD.dogovor IS NOT NEW.dogovor OR OLD.login IS NOT NEW.login",
+        },
+    }
+    for table, spec in specs.items():
+        if not table_exists(conn, table):
+            continue
+        for operation, reference in (('insert', 'NEW'), ('update', 'NEW'), ('delete', 'OLD')):
+            entity_id = spec['old_id'] if reference == 'OLD' else spec['id']
+            record_uuid = spec['old_uuid'] if reference == 'OLD' else spec['uuid']
+            label = spec['old_label'] if reference == 'OLD' else spec['label']
+            when_clause = f"WHEN {spec['update_when']}" if operation == 'update' else ''
+            conn.execute(f'DROP TRIGGER IF EXISTS trg_fallback_{table}_{operation}')
+            conn.execute(f'''
+                CREATE TRIGGER trg_fallback_{table}_{operation}
+                AFTER {operation.upper()} ON {table}
+                {when_clause}
+                BEGIN
+                    UPDATE fallback_state
+                    SET state='dirty', changed_at=datetime('now', 'localtime')
+                    WHERE id=1;
+                    INSERT INTO fallback_change_log
+                        (session_id, action, entity_type, entity_id, record_uuid, label)
+                    SELECT session_id, '{operation}', '{table}', {entity_id}, {record_uuid}, {label}
+                    FROM fallback_state WHERE id=1;
+                END
+            ''')
 
 def backfill_students_cohort2(conn):
     columns = get_table_columns(conn, 'students')
@@ -1507,8 +1695,7 @@ def create_database_backup(reason='manual'):
     safe_reason = sanitize_backup_reason(reason)
     backup_name = f'{DB_BACKUP_PREFIX}{safe_reason}_{timestamp}.db'
     backup_path = os.path.join(app.config['UPLOAD_FOLDER'], backup_name)
-    shutil.copy2(DB_PATH, backup_path)
-    return backup_path
+    return str(sqlite_backup(DB_PATH, backup_path))
 
 def list_database_backups():
     upload_folder = app.config['UPLOAD_FOLDER']
@@ -1977,10 +2164,24 @@ def collect_duplicate_groups(rows, key_index):
     return [items for items in grouped.values() if len(items) > 1]
 
 def get_invalid_abiturient_email_rows(rows):
-    return [row for row in rows if row[4] and not is_valid_email(row[4])]
+    return [(row, issue) for row in rows if row[4] and (issue := email_validation_issue(row[4]))]
 
 def get_invalid_student_email_rows(rows):
-    return [row for row in rows if row[1] and not is_valid_email(row[1])]
+    return [(row, issue) for row in rows if row[1] and (issue := email_validation_issue(row[1]))]
+
+def abiturient_email_issue_sample(item):
+    row, issue = item
+    sample = abiturient_sample(row)
+    provider = f'Сервис: {issue.provider}. ' if issue.provider else ''
+    sample['detail'] = f"{row[4]} · {provider}{email_issue_text(issue)} · Уверенность: {issue.confidence or 'подтверждено'}"
+    return sample
+
+def student_email_issue_sample(item):
+    row, issue = item
+    sample = student_sample(row)
+    provider = f'Сервис: {issue.provider}. ' if issue.provider else ''
+    sample['detail'] = f"{row[1]} · {provider}{email_issue_text(issue)} · Уверенность: {issue.confidence or 'подтверждено'}"
+    return sample
 
 def get_data_quality_report(campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
@@ -2089,7 +2290,7 @@ def get_data_quality_report(campaign_year=None):
         make_data_check('students-without-group', 'Без академической группы', len(students_without_group), 'Студент есть в базе, но не привязан к группе.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_group[:sample_limit]]),
         make_data_check('students-without-dogovor', 'Без договора при поступлении', len(students_without_dogovor), 'Без договора сложнее проверить, от какого абитуриента появился студент.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_dogovor[:sample_limit]]),
         make_data_check('students-without-campaign', 'Без кампании поступления', len(students_without_campaign), 'У студента не указан год кампании, поэтому он выпадает из отчетов по кампании.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_without_campaign[:sample_limit]]),
-        make_data_check('students-invalid-email', 'Некорректная почта', len(students_invalid_email), 'Почта студента заполнена, но похожа на ошибочную.', url_for('students_list'), 'Открыть студентов', [student_sample(row) for row in students_invalid_email[:sample_limit]]),
+        make_data_check('students-invalid-email', 'Некорректная почта', len(students_invalid_email), 'Найдены синтаксические ошибки, несуществующие домены или вероятные опечатки. Адреса не исправляются автоматически.', url_for('students_list'), 'Открыть студентов', [student_email_issue_sample(item) for item in students_invalid_email[:sample_limit]]),
     ]
     if course_groups_enabled:
         student_checks.append(
@@ -2160,7 +2361,7 @@ def get_data_quality_report(campaign_year=None):
             'checks': [
                 make_data_check('abiturients-without-email', 'Без почты', len(ab_without_email), 'Не получится восстановить доступ и выполнить миграцию без почты.', url_for('abiturients', has_email='0', withdrawn='0'), 'Открыть список', [abiturient_sample(row) for row in ab_without_email[:sample_limit]]),
                 make_data_check('abiturients-unpaid', 'Не оплачены', len(ab_unpaid), 'Эти записи не готовы к миграции, пока оплата не отмечена.', url_for('abiturients', has_paid='0', withdrawn='0'), 'Открыть список', [abiturient_sample(row) for row in ab_unpaid[:sample_limit]]),
-                make_data_check('abiturients-invalid-email', 'Некорректная почта', len(ab_invalid_email), 'Почта заполнена, но похожа на ошибочную.', url_for('abiturients', withdrawn='0'), 'Открыть абитуриентов', [abiturient_sample(row) for row in ab_invalid_email[:sample_limit]]),
+                make_data_check('abiturients-invalid-email', 'Некорректная почта', len(ab_invalid_email), 'Найдены синтаксические ошибки, несуществующие домены или вероятные опечатки. Адреса не исправляются автоматически.', url_for('abiturients', withdrawn='0'), 'Открыть абитуриентов', [abiturient_email_issue_sample(item) for item in ab_invalid_email[:sample_limit]]),
                 make_data_check('abiturients-without-dogovor', 'Без договора', len(ab_without_dogovor), 'Без договора сложно отличать тёзок и проверять повторы.', url_for('abiturients', withdrawn='0'), 'Открыть абитуриентов', [abiturient_sample(row) for row in ab_without_dogovor[:sample_limit]]),
                 make_data_check('abiturients-duplicate-dogovor', 'Повторяющиеся договоры', sum(len(group) for group in ab_duplicate_dogovors), 'Один договор найден в нескольких записях абитуриентов.', url_for('abiturients', withdrawn='0'), 'Открыть абитуриентов', duplicate_group_samples(ab_duplicate_dogovors)),
                 make_data_check('abiturients-same-fio', 'Одинаковое ФИО', sum(len(group) for group in ab_same_fio), 'Это могут быть дубли или тёзки. Лучше сверить договоры.', url_for('abiturients', withdrawn='0'), 'Открыть абитуриентов', duplicate_group_samples(ab_same_fio, title_index=1, detail_index=1)),
@@ -2936,11 +3137,14 @@ def build_email_source_update_plan(file_path, campaign_year=None):
             issues.append(upload_report_item(row_number, 'ФИО', message))
             set_email_source_preview_status(preview, 'skip', 'Пропустить', 'status-danger', message)
             continue
-        if not is_valid_email(email):
-            message = f'Почта выглядит некорректно: {email}. Изменения не внесены.'
+        email_check = validate_email(email, database_path=DB_PATH)
+        if email_check.severity == 'error':
+            message = f'{email_issue_text(email_check)} Изменения не внесены.'
             issues.append(upload_report_item(row_number, 'Почта', message))
             set_email_source_preview_status(preview, 'skip', 'Пропустить', 'status-danger', message)
             continue
+        if email_check.severity == 'warning':
+            issues.append(upload_report_item(row_number, 'Почта', email_issue_text(email_check)))
 
         valid_rows.append({
             'row': row_number,
@@ -3217,13 +3421,20 @@ def process_abiturients_updates(file_path, campaign_year=None):
                 continue
 
             email = clean_upload_text(find_row_value_casefold(row, {'Email', 'email', 'Почта', 'почта'}))
-            if email and not is_valid_email(email):
+            email_check = validate_email(email, database_path=DB_PATH) if email else None
+            if email_check and email_check.severity == 'error':
                 errors.append({
                     'row': row_number,
                     'field': 'Email',
-                    'message': f'Почта выглядит некорректно: {email}',
+                    'message': email_issue_text(email_check),
                 })
                 email = ''
+            elif email_check and email_check.severity == 'warning':
+                errors.append({
+                    'row': row_number,
+                    'field': 'Email',
+                    'message': f'{email_issue_text(email_check)} Адрес будет сохранён только после подтверждения импорта.',
+                })
             paid_raw = find_row_value_casefold(row, {'paid', 'Оплата', 'оплата', 'Оплачен', 'оплачен'})
             paid_text = clean_upload_text(paid_raw)
             paid_value = parse_paid_value(paid_raw)
@@ -3386,7 +3597,7 @@ def migrate_user_passwords(conn):
             )
 
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
+    def migration(conn):
         create_abiturients_table(conn)
         create_enrollment_orders_table(conn)
         create_enrollment_candidates_table(conn)
@@ -3474,6 +3685,7 @@ def init_db():
         ensure_campaign_column(conn, 'pending_duplicates')
         ensure_campaign_column(conn, 'login_conflicts')
         ensure_students_origin_columns(conn)
+        ensure_record_uuids(conn)
         ensure_students_duplicates_columns(conn)
         create_enrollment_orders_table(conn)
         create_enrollment_candidates_table(conn)
@@ -3481,10 +3693,24 @@ def init_db():
         create_student_group_transfers_table(conn)
         create_campaign_settings_table(conn)
         create_login_generation_settings_table(conn)
+        ensure_dns_cache_table(conn)
+        create_fallback_tracking(conn)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_abiturients_campaign_year ON abiturients (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_pending_duplicates_campaign_year ON pending_duplicates (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_conflicts_campaign_year ON login_conflicts (campaign_year)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_login_attempts_key_time ON login_attempts (ip_address, username, attempted_at)')
+
+    backup_path = migrate_database(DB_PATH, migration)
+    # Session metadata and triggers are runtime state, not a schema migration.
+    # Re-arm them when an archived fallback starts a new independent session.
+    if FALLBACK_SESSION_ID:
+        connection = sqlite3.connect(DB_PATH)
+        try:
+            create_fallback_tracking(connection)
+            connection.commit()
+        finally:
+            connection.close()
+    return backup_path
 
 init_db()
 
@@ -4366,15 +4592,23 @@ def build_students_import_plan(file_path):
             ))
             continue
 
-        if not is_valid_email(row['email']):
+        email_check = validate_email(row['email'], database_path=DB_PATH)
+        if email_check.severity == 'error':
             actions.append('skip')
             statuses.append('Некорректная почта')
             errors.append(upload_report_item(
                 row_number,
                 'Email',
-                f"Почта выглядит некорректно: {row['email']}. Строка будет пропущена."
+                f"{email_issue_text(email_check)} Строка будет пропущена."
             ))
             continue
+        if email_check.severity == 'warning':
+            cohort2_warning = email_issue_text(email_check)
+            errors.append(upload_report_item(
+                row_number,
+                'Email',
+                f'{cohort2_warning} Адрес не будет исправлен автоматически.'
+            ))
 
         expected_cohort2 = (derive_cohort2(row['cohort1']) or '') if course_groups_enabled else ''
         uploaded_cohort2 = normalize_cohort2(row.get('cohort2'))
@@ -7552,6 +7786,56 @@ def desktop_settings():
     return redirect(url_for('management'))
 
 
+def get_local_fallback_changes(limit=1000):
+    if not FALLBACK_SESSION_ID:
+        return []
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        if not table_exists(conn, 'fallback_change_log'):
+            return []
+        rows = conn.execute(
+            '''
+            SELECT created_at, action, entity_type, entity_id, record_uuid, label
+            FROM fallback_change_log
+            ORDER BY id DESC LIMIT ?
+            ''',
+            (max(1, min(int(limit or 1000), 10000)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.route('/desktop/fallback-changes')
+@admin_required
+def desktop_fallback_changes():
+    if not FALLBACK_SESSION_ID:
+        flash('Журнал локальных изменений доступен только при работе через fallback-базу.', 'error')
+        return redirect(url_for('management'))
+    return render_template('fallback_changes.html', changes=get_local_fallback_changes())
+
+
+@app.route('/desktop/fallback-changes/export')
+@admin_required
+def export_desktop_fallback_changes():
+    if not FALLBACK_SESSION_ID:
+        return redirect(url_for('management'))
+    rows = get_local_fallback_changes(limit=10000)
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=['created_at', 'action', 'entity_type', 'entity_id', 'record_uuid', 'label'],
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    payload = io.BytesIO(output.getvalue().encode('utf-8-sig'))
+    payload.seek(0)
+    return send_file(
+        payload,
+        as_attachment=True,
+        download_name=f'fallback_changes_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+        mimetype='text/csv',
+    )
+
+
 @app.route('/management')
 @login_required
 def management():
@@ -7583,6 +7867,15 @@ def data_checks():
     campaign_year = get_active_campaign_year()
     report = get_data_quality_report(campaign_year)
     return render_template('data_checks.html', report=report)
+
+@app.route('/healthz')
+def healthz():
+    try:
+        with sqlite3.connect(DB_PATH, timeout=1) as conn:
+            conn.execute('SELECT 1').fetchone()
+        return jsonify({'status': 'ok'}), 200
+    except sqlite3.Error:
+        return jsonify({'status': 'unavailable'}), 503
 
 @app.route('/person/<kind>/<path:record_id>')
 @login_required
@@ -8411,7 +8704,8 @@ def student_enrollment_order_sort_key(student):
 
 def get_all_students(
     order_by='username', order_dir='asc', cohort=None, lastname=None,
-    firstname=None, username=None, enrollment_order=None, campaign_year=None
+    firstname=None, username=None, enrollment_order=None, campaign_year=None,
+    migrated_from=None, migrated_to=None
 ):
     valid_columns = {
         'username', 'lastname', 'firstname', 'cohort1', 'cohort2', 'email',
@@ -8424,7 +8718,8 @@ def get_all_students(
     query = '''
         SELECT s.username, s.password, s.email, s.firstname, s.lastname, s.cohort1, s.cohort2,
                TRIM(COALESCE(enrollment.order_number, '')) AS enrollment_order_number,
-               TRIM(COALESCE(enrollment.order_date, '')) AS enrollment_order_date
+               TRIM(COALESCE(enrollment.order_date, '')) AS enrollment_order_date,
+               s.migrated_to_student_at
         FROM students s
         LEFT JOIN student_group_transfers enrollment
           ON enrollment.id=(
@@ -8455,6 +8750,22 @@ def get_all_students(
         if normalized:
             query += f' AND INSTR(NORMALIZE_SEARCH(s.{field}), ?) > 0'
             params.append(normalized)
+    if migrated_from:
+        try:
+            start_date = date.fromisoformat(str(migrated_from))
+        except ValueError:
+            start_date = None
+        if start_date:
+            query += ' AND s.migrated_to_student_at >= ?'
+            params.append(start_date.isoformat())
+    if migrated_to:
+        try:
+            end_date = date.fromisoformat(str(migrated_to))
+        except ValueError:
+            end_date = None
+        if end_date:
+            query += " AND s.migrated_to_student_at < date(?, '+1 day')"
+            params.append(end_date.isoformat())
     if order_by != 'enrollment_order':
         query += f" ORDER BY s.{order_by} {order_dir.upper()}, s.username ASC"
     with sqlite3.connect(DB_PATH) as conn:
@@ -9196,6 +9507,19 @@ def edit_abiturient(login):
             flash('ФИО не может быть пустым')
             return render_template('edit_abiturient.html', **edit_context)
         email = request.form.get('email', '').strip()
+        email_check = validate_email(email, database_path=DB_PATH)
+        if email_check.severity == 'error':
+            flash(email_issue_text(email_check), 'error')
+            updated = list(abiturient)
+            updated[5] = email
+            edit_context['abiturient'] = updated
+            return render_template('edit_abiturient.html', email_warning=None, **edit_context)
+        if email_check.severity == 'warning' and request.form.get('email_warning_confirm') != '1':
+            flash('Проверьте домен почты. Адрес не изменён.', 'warning')
+            updated = list(abiturient)
+            updated[5] = email
+            edit_context['abiturient'] = updated
+            return render_template('edit_abiturient.html', email_warning=email_check, **edit_context)
         paid = 1 if request.form.get('paid') == '1' else 0
         new_login = request.form.get('login', '').strip()
         comment = request.form.get('comment', '').strip()
@@ -9244,7 +9568,7 @@ def edit_abiturient(login):
             )
         return redirect(url_for('abiturients', campaign_year=campaign_year, **list_query))
 
-    return render_template('edit_abiturient.html', **edit_context)
+    return render_template('edit_abiturient.html', email_warning=None, **edit_context)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -9560,7 +9884,7 @@ def restore_backup():
     try:
         backup_path = get_backup_path(backup_name)
         rollback_path = create_database_backup('before_restore')
-        shutil.copy2(backup_path, DB_PATH)
+        restore_sqlite_backup(backup_path, DB_PATH)
         init_db()
         log_action(
             'database_restore',
@@ -9937,7 +10261,9 @@ def students_list():
     username = request.args.get('username')
     student_rows = get_all_students(
         order_by, order_dir, cohort, lastname, firstname, username, enrollment_order,
-        campaign_year=request.args.get('campaign_year')
+        campaign_year=request.args.get('campaign_year'),
+        migrated_from=request.args.get('migrated_from'),
+        migrated_to=request.args.get('migrated_to')
     )
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
@@ -9963,7 +10289,9 @@ def download_students():
     username = request.args.get('username')
     student_rows = get_all_students(
         order_by, order_dir, cohort, lastname, firstname, username, enrollment_order,
-        campaign_year=request.args.get('campaign_year')
+        campaign_year=request.args.get('campaign_year'),
+        migrated_from=request.args.get('migrated_from'),
+        migrated_to=request.args.get('migrated_to')
     )
     log_action(
         'students_exported',
@@ -9971,9 +10299,12 @@ def download_students():
         '',
         f"rows={len(student_rows)}; enrollment_order={enrollment_order or 'all'}"
     )
-    export_students = student_rows
+    export_students = [
+        {key: value for key, value in student.items() if key != 'migrated_to_student_at'}
+        for student in student_rows
+    ]
     if session.get('role') != 'admin':
-        export_students = [dict(student, password='******') for student in student_rows]
+        export_students = [dict(student, password='******') for student in export_students]
     if not are_course_groups_enabled():
         export_students = [
             {key: value for key, value in student.items() if key != 'cohort2'}
@@ -10005,11 +10336,24 @@ def edit_student(username):
         flash('Студент не найден')
         return redirect(url_for('students_list'))
     if request.method == 'POST':
-        backup_path = create_database_backup('before_edit_student')
         password = request.form.get('password', '').strip()
         email = request.form.get('email', '').strip()
         firstname = request.form.get('firstname', '').strip()
         lastname = request.form.get('lastname', '').strip()
+        email_check = validate_email(email, database_path=DB_PATH)
+        if email_check.severity == 'error':
+            flash(email_issue_text(email_check), 'error')
+            student = (username, password, email, firstname, lastname, student[5], student[6])
+            return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
+                                   transfer_group_year=transfer_group_year,
+                                   transfer_orders=get_student_transfer_orders(username), email_warning=None)
+        if email_check.severity == 'warning' and request.form.get('email_warning_confirm') != '1':
+            flash('Проверьте домен почты. Адрес не изменён.', 'warning')
+            student = (username, password, email, firstname, lastname, student[5], student[6])
+            return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
+                                   transfer_group_year=transfer_group_year,
+                                   transfer_orders=get_student_transfer_orders(username), email_warning=email_check)
+        backup_path = create_database_backup('before_edit_student')
         cohort1 = student[5]
         cohort2 = student[6]
         with sqlite3.connect(DB_PATH) as conn:
@@ -10030,6 +10374,7 @@ def edit_student(username):
         transfer_groups=transfer_groups,
         transfer_group_year=transfer_group_year,
         transfer_orders=get_student_transfer_orders(username),
+        email_warning=None,
     )
 
 class StudentTransferError(Exception):
@@ -10385,8 +10730,8 @@ def abiturients_to_students():
                     conn.execute(
                         '''
                         INSERT INTO students
-                            (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio, migrated_to_student_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                         ''',
                         (
                             plan_row['login'], 'cron', plan_row['email'],
@@ -10553,8 +10898,8 @@ def abiturients_to_students():
                 conn.execute(
                     '''
                     INSERT INTO students
-                        (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio, migrated_to_student_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                     ''',
                     (
                         candidate['username'], 'cron', candidate['email'],

@@ -29,7 +29,11 @@
         {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints + ([request.endpoint] if reconciliation_page else []) %}
         {% set file_work_nav_section = request.view_args.get('section') if request.view_args else None %}
         <ul class="main-nav">
-            <li><a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="manticore, главная страница">manticore</a></li>
+            <li>
+                <a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="Manticore, главная страница">
+                    <img src="{{ url_for('static', filename='images/manticore-logo-dark.png') }}" alt="" class="nav-brand-logo">
+                </a>
+            </li>
             <li><a href="{{ url_for('index') }}" class="sidebar-link{% if request.endpoint == 'index' %} active{% endif %}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"></path></svg><span>Главная</span></a></li>
             <li>
                 <details class="nav-dropdown">

@@ -19,6 +19,10 @@
     <div class="student-edit-field">
         <label for="email">Email:</label>
         <input type="email" id="email" name="email" value="{{ student[2] }}" class="form-control">
+        {% if email_warning %}
+        <div class="callout warning" role="alert"><strong>Возможно, в адресе ошибка.</strong><br>{{ email_warning.message }}{% if email_warning.suggested_email %}<br>Возможно: <strong>{{ email_warning.suggested_email }}</strong>{% endif %}</div>
+        <label><input type="checkbox" name="email_warning_confirm" value="1" required> Оставить адрес как есть</label>
+        {% endif %}
     </div>
     <div class="student-edit-field">
         <label for="firstname">Имя:</label>

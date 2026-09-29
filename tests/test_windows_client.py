@@ -1,5 +1,7 @@
 import base64
 import json
+import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,191 @@ from desktop import windows_client
 
 
 class WindowsClientTests(unittest.TestCase):
+    def test_config_atomic_backup_and_corrupt_recovery(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            windows_client.save_config({'generation': 1})
+            windows_client.save_config({'generation': 2})
+            path = Path(directory) / windows_client.CONFIG_FILENAME
+            backup = path.with_suffix(path.suffix + '.bak')
+            self.assertEqual(json.loads(backup.read_text(encoding='utf-8'))['generation'], 1)
+            path.write_text('{broken json', encoding='utf-8')
+            recovered = windows_client.load_config()
+            self.assertEqual(recovered['generation'], 1)
+            self.assertTrue(list(Path(directory).glob('desktop-config.json.corrupt-*')))
+
+    def test_interrupted_config_replace_keeps_previous_json(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            windows_client.save_config({'generation': 1})
+            path = Path(directory) / windows_client.CONFIG_FILENAME
+            real_replace = os.replace
+
+            def fail_main_replace(source, destination):
+                if Path(destination) == path:
+                    raise OSError('simulated interrupted replace')
+                return real_replace(source, destination)
+
+            with mock.patch('desktop.windows_client.os.replace', side_effect=fail_main_replace):
+                with self.assertRaises(OSError):
+                    windows_client.save_config({'generation': 2})
+            self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['generation'], 1)
+
+    def test_fallback_path_cannot_escape_application_directory(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            config = windows_client.migrate_config({
+                'primary_source': {'type': 'sqlite', 'path': '..\\server\\base.db'},
+                'fallback_sources': {'sqlite:..\\server\\base.db': str(Path(directory).parent / 'escape.db')},
+            })
+            fallback = Path(windows_client.get_fallback_path(config)).resolve()
+            self.assertEqual(os.path.commonpath([str(Path(directory).resolve()), str(fallback)]), str(Path(directory).resolve()))
+
+    def test_sqlite_source_states_locked_corrupt_and_too_new(self):
+        with tempfile.TemporaryDirectory() as directory:
+            locked = Path(directory) / 'locked.db'
+            writer = sqlite3.connect(locked, timeout=0.1, isolation_level=None)
+            writer.execute('CREATE TABLE sample (id INTEGER)')
+            writer.execute('BEGIN EXCLUSIVE')
+            try:
+                result = windows_client.inspect_sqlite_source(str(locked), timeout=0.1)
+                self.assertEqual(result['code'], windows_client.SOURCE_LOCKED)
+                self.assertTrue(result['available'])
+            finally:
+                writer.execute('ROLLBACK')
+                writer.close()
+
+            corrupt = Path(directory) / 'corrupt.db'
+            corrupt.write_bytes(b'not sqlite' * 50)
+            self.assertEqual(
+                windows_client.inspect_sqlite_source(str(corrupt))['code'],
+                windows_client.SOURCE_CORRUPT,
+            )
+
+            newer = Path(directory) / 'newer.db'
+            connection = sqlite3.connect(newer)
+            connection.execute('CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY, version INTEGER, updated_at TEXT)')
+            connection.execute('INSERT INTO schema_metadata VALUES (1, ?, NULL)', (windows_client.CURRENT_SCHEMA_VERSION + 1,))
+            connection.commit()
+            connection.close()
+            self.assertEqual(
+                windows_client.inspect_sqlite_source(str(newer))['code'],
+                windows_client.SOURCE_SCHEMA_TOO_NEW,
+            )
+
+    def test_dirty_fallback_is_backed_up_and_archived(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
+            fallback = Path(windows_client.get_fallback_path(config))
+            fallback.parent.mkdir(parents=True)
+            connection = sqlite3.connect(fallback)
+            connection.execute('CREATE TABLE fallback_state (id INTEGER PRIMARY KEY, primary_source_id TEXT, session_id TEXT, state TEXT, started_at TEXT, changed_at TEXT, archived_at TEXT)')
+            connection.execute('CREATE TABLE fallback_change_log (id INTEGER PRIMARY KEY, session_id TEXT)')
+            connection.execute("INSERT INTO fallback_state VALUES (1, 'primary', 'session-1', 'dirty', '', '', NULL)")
+            connection.execute('CREATE TABLE business_data (value TEXT)')
+            connection.execute("INSERT INTO business_data VALUES ('локальные данные')")
+            connection.commit()
+            connection.close()
+            result = windows_client.archive_dirty_fallback(config)
+            self.assertTrue(Path(result['backup']).is_file())
+            connection = sqlite3.connect(fallback)
+            self.assertEqual(connection.execute('SELECT state FROM fallback_state').fetchone()[0], 'archived_with_unsynced_changes')
+            self.assertEqual(connection.execute('SELECT value FROM business_data').fetchone()[0], 'локальные данные')
+            connection.close()
+    def test_legacy_local_config_migrates_without_losing_primary(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            primary = str(Path(directory) / 'network' / 'main.db')
+            migrated = windows_client.migrate_config({'mode': 'local', 'database_path': primary})
+            self.assertEqual(migrated['primary_source'], {'type': 'sqlite', 'path': primary})
+            self.assertEqual(migrated['active_source'], 'primary')
+            self.assertEqual(migrated['preferred_source'], 'ask')
+            self.assertNotEqual(windows_client.get_fallback_path(migrated), primary)
+
+    def test_fallback_is_stable_per_primary_and_does_not_overwrite_it(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            first = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://one.example'})
+            again = windows_client.migrate_config(first)
+            second = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://two.example'})
+            self.assertEqual(windows_client.get_fallback_path(first), windows_client.get_fallback_path(again))
+            self.assertNotEqual(windows_client.get_fallback_path(first), windows_client.get_fallback_path(second))
+            self.assertEqual(first['primary_source']['url'], 'https://one.example')
+
+    def test_unavailable_primary_can_select_fallback_and_keep_primary(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
+             mock.patch.object(windows_client, 'check_source_connection', return_value='Недоступна'), \
+             mock.patch.object(windows_client, 'show_source_dialog', return_value={'action': 'fallback', 'remember': True}), \
+             mock.patch.object(windows_client, 'save_config') as save:
+            config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
+            source, resolved = windows_client.resolve_active_source(config)
+            self.assertTrue(source['fallback'])
+            self.assertEqual(resolved['primary_source']['url'], 'https://primary.example')
+            self.assertEqual(resolved['preferred_source'], 'fallback')
+            save.assert_called()
+
+    def test_existing_primary_sqlite_is_selected(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            database = Path(directory) / 'primary.db'
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute('CREATE TABLE sample (id INTEGER)')
+                connection.commit()
+            finally:
+                connection.close()
+            config = windows_client.migrate_config({'mode': 'local', 'database_path': str(database)})
+            source, _ = windows_client.resolve_active_source(config)
+            self.assertEqual(source['path'], str(database))
+            self.assertFalse(source.get('fallback', False))
+
+    def test_recovered_primary_prompts_without_automatic_switch(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
+             mock.patch.object(windows_client, 'check_source_connection', return_value=''), \
+             mock.patch.object(windows_client, 'show_source_dialog', return_value={'action': 'primary', 'remember': True}) as dialog, \
+             mock.patch.object(windows_client, 'save_config'):
+            config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
+            fallback = Path(windows_client.get_fallback_path(config))
+            fallback.parent.mkdir(parents=True)
+            connection = sqlite3.connect(fallback)
+            connection.execute('CREATE TABLE kept (value TEXT)')
+            connection.execute("INSERT INTO kept VALUES ('independently')")
+            connection.commit()
+            connection.close()
+            config['active_source'] = 'fallback'
+            source, resolved = windows_client.resolve_active_source(config)
+            self.assertEqual(source['url'], 'https://primary.example')
+            self.assertEqual(resolved['preferred_source'], 'primary')
+            connection = sqlite3.connect(fallback)
+            self.assertEqual(connection.execute('SELECT value FROM kept').fetchone()[0], 'independently')
+            connection.close()
+            self.assertTrue(dialog.call_args.args[0]['recovered'])
+
+    def test_fallback_preference_never_discards_primary(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ), mock.patch.object(windows_client, 'check_source_connection', return_value=''):
+            config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
+            fallback = Path(windows_client.get_fallback_path(config))
+            fallback.parent.mkdir(parents=True)
+            connection = sqlite3.connect(fallback)
+            connection.execute('CREATE TABLE fallback_data (id INTEGER)')
+            connection.commit()
+            connection.close()
+            config.update(active_source='fallback', preferred_source='fallback')
+            source, resolved = windows_client.resolve_active_source(config)
+            self.assertTrue(source['fallback'])
+            self.assertEqual(resolved['primary_source']['url'], 'https://primary.example')
     def test_remote_server_requires_https(self):
         self.assertEqual(
             windows_client.normalize_server_url("https://example.test/manticore/"),

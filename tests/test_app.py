@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from urllib.parse import unquote
 from unittest import mock
 
@@ -22,6 +23,7 @@ os.environ['DB_FILENAME'] = 'test.db'
 os.environ['DEFAULT_CAMPAIGN_YEAR'] = '2026'
 os.environ['LEGACY_CAMPAIGN_YEAR'] = '2025'
 os.environ['APP_DEBUG'] = 'false'
+os.environ['EMAIL_DNS_DISABLE'] = '1'
 
 sys.path.insert(0, PROJECT_ROOT)
 import app as manticore
@@ -1075,6 +1077,88 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(exported['username'].tolist(), ['student_late'])
         self.assertEqual(exported.loc[0, 'enrollment_order_number'], '10-у')
         self.assertEqual(exported.loc[0, 'enrollment_order_date'], '2026-08-20')
+
+    def test_students_filter_and_export_by_migration_date(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            rows = [
+                ('before', '2026-08-31 23:59:59'),
+                ('start', '2026-09-01 00:00:00'),
+                ('end', '2026-09-30 23:59:59.999'),
+                ('after', '2026-10-01 00:00:00'),
+                ('direct_import', None),
+            ]
+            for username, migrated_at in rows:
+                conn.execute(
+                    '''INSERT INTO students
+                       (username, password, email, firstname, lastname, cohort1, migrated_to_student_at)
+                       VALUES (?, 'secret', ?, 'Имя', 'Фамилия', '26ФМ-11-1', ?)''',
+                    (username, f'{username}@example.test', migrated_at),
+                )
+        selected = manticore.get_all_students(migrated_from='2026-09-01', migrated_to='2026-09-30')
+        self.assertEqual({row['username'] for row in selected}, {'start', 'end'})
+        self.assertEqual({row['username'] for row in manticore.get_all_students(migrated_from='2026-10-01')}, {'after'})
+        self.assertEqual({row['username'] for row in manticore.get_all_students(migrated_to='2026-08-31')}, {'before'})
+
+        client = manticore.app.test_client()
+        self.login_session(client)
+        response = client.get('/students/download?migrated_from=2026-09-01&migrated_to=2026-09-30')
+        exported = pd.read_excel(io.BytesIO(response.data))
+        self.assertEqual(set(exported['username']), {'start', 'end'})
+        self.assertNotIn('migrated_to_student_at', exported.columns)
+        self.assertIn('lastname', exported.columns)
+        self.assertEqual(set(exported['lastname']), {'Фамилия'})
+
+    def test_students_migration_adds_nullable_column_without_backfill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old_database = os.path.join(directory, 'old.db')
+            conn = sqlite3.connect(old_database)
+            try:
+                conn.execute('CREATE TABLE students (id INTEGER PRIMARY KEY, username TEXT, cohort1 TEXT)')
+                conn.execute("INSERT INTO students (username, cohort1) VALUES ('old', '26ФМ-11-1')")
+                manticore.ensure_students_origin_columns(conn)
+                columns = manticore.get_table_columns(conn, 'students')
+                migrated_at = conn.execute(
+                    "SELECT migrated_to_student_at FROM students WHERE username='old'"
+                ).fetchone()[0]
+                conn.commit()
+            finally:
+                conn.close()
+            self.assertIn('migrated_to_student_at', columns)
+            self.assertIsNone(migrated_at)
+
+    def test_direct_student_import_keeps_migration_date_null(self):
+        file_path = os.path.join(TEST_UPLOAD_DIR, 'direct-student.xlsx')
+        pd.DataFrame([{
+            'username': 'direct_student', 'password': 'secret', 'email': 'direct@gmail.com',
+            'firstname': 'Иван', 'lastname': 'Иванов', 'cohort1': '26ФМ-11-1',
+        }]).to_excel(file_path, index=False)
+        summary = manticore.apply_students_import(file_path)
+        self.assertEqual(summary['inserted_count'], 1)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            migrated_at = conn.execute(
+                "SELECT migrated_to_student_at FROM students WHERE username='direct_student'"
+            ).fetchone()[0]
+        self.assertIsNone(migrated_at)
+
+    def test_data_checks_reports_provider_typo_but_accepts_legacy_email(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                """INSERT INTO students
+                   (username, email, firstname, lastname, cohort1, source_campaign_year)
+                   VALUES ('bad_provider', 'ivan@gmail.ru', 'Иван', 'Ошибкин', '26ФМ-11-1', '2026')"""
+            )
+            conn.execute(
+                """INSERT INTO students
+                   (username, email, firstname, lastname, cohort1, source_campaign_year)
+                   VALUES ('legacy_provider', 'user@me.com', 'Анна', 'Верная', '26ФМ-11-1', '2026')"""
+            )
+        with manticore.app.test_request_context('/data_checks?campaign_year=2026'):
+            report = manticore.get_data_quality_report('2026')
+        students_section = next(section for section in report['sections'] if section['title'] == 'Студенты')
+        email_check = next(check for check in students_section['checks'] if check['id'] == 'students-invalid-email')
+        self.assertEqual(email_check['count'], 1)
+        self.assertIn('ivan@gmail.com', email_check['samples'][0]['detail'])
+        self.assertNotIn('user@me.com', email_check['samples'][0]['detail'])
 
     def test_students_list_backfills_enrollment_order_for_existing_student(self):
         fio = 'Архивов Алексей Алексеевич'
@@ -2687,7 +2771,8 @@ class ManticoreAppTests(unittest.TestCase):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             student = conn.execute(
                 '''
-                SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor, source_fio
+                SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor, source_fio,
+                       migrated_to_student_at
                 FROM students
                 WHERE username=?
                 ''',
@@ -2707,12 +2792,13 @@ class ManticoreAppTests(unittest.TestCase):
             ).fetchone()
 
         self.assertEqual(
-            student,
+            student[:8],
             (
                 '26611050', 'ivanov@example.test', 'Иван Иванович', 'Иванов',
                 '26ФМ-11-1', 'ФМ-11', '2026-ФМ-0500-11', 'Иванов Иван Иванович'
             )
         )
+        self.assertIsNotNone(student[8])
         self.assertEqual(abiturient_count, 0)
         self.assertEqual(candidate_count, 0)
         self.assertIsNotNone(movement)
@@ -3155,11 +3241,18 @@ class ManticoreAppTests(unittest.TestCase):
                     row[0]: row[1:]
                     for row in conn.execute('SELECT username, password, cohort1, cohort2 FROM students ORDER BY username')
                 }
+                schema_version = conn.execute('SELECT version FROM schema_metadata WHERE id=1').fetchone()[0]
+                record_uuid = conn.execute(
+                    "SELECT record_uuid FROM students WHERE username='student_old'"
+                ).fetchone()[0]
                 conn.execute('UPDATE students SET cohort2=? WHERE username=?', ('ЛД-9', 'student_old'))
 
             self.assertIn('cohort2', columns)
             self.assertEqual(rows['student_old'], ('cron', '26СД-9-1', 'СД-9'))
             self.assertEqual(rows['student_unknown'], ('cron', '26ЛабД-11-1', None))
+            self.assertEqual(schema_version, 2)
+            self.assertRegex(record_uuid, r'^[0-9a-f-]{36}$')
+            self.assertTrue(list(Path(TEST_UPLOAD_DIR).glob('old_students_schema.backup-before-migration-*.db')))
 
             manticore.init_db()
             with sqlite3.connect(manticore.DB_PATH) as conn:
@@ -4599,6 +4692,57 @@ class ManticoreAppTests(unittest.TestCase):
             abiturient_count = conn.execute('SELECT COUNT(*) FROM abiturients WHERE login=?', ('student011',)).fetchone()[0]
         self.assertEqual(student_count, 1)
         self.assertEqual(abiturient_count, 0)
+
+    def test_fallback_tracking_marks_writes_but_not_reads(self):
+        original_path = manticore.DB_PATH
+        original_session = manticore.FALLBACK_SESSION_ID
+        original_primary = manticore.FALLBACK_PRIMARY_ID
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                manticore.DB_PATH = os.path.join(directory, 'fallback.db')
+                manticore.FALLBACK_SESSION_ID = 'session-test'
+                manticore.FALLBACK_PRIMARY_ID = 'sqlite:test-primary'
+                manticore.init_db()
+                conn = sqlite3.connect(manticore.DB_PATH)
+                try:
+                    self.assertEqual(conn.execute('SELECT state FROM fallback_state').fetchone()[0], 'clean')
+                    conn.execute('SELECT COUNT(*) FROM students').fetchone()
+                    self.assertEqual(conn.execute('SELECT state FROM fallback_state').fetchone()[0], 'clean')
+                    conn.execute(
+                        "INSERT INTO students (username, firstname, lastname) VALUES ('fallback-user', 'Иван', 'Иванов')"
+                    )
+                    self.assertEqual(conn.execute('SELECT state FROM fallback_state').fetchone()[0], 'dirty')
+                    change = conn.execute(
+                        "SELECT action, entity_type, label FROM fallback_change_log ORDER BY id DESC LIMIT 1"
+                    ).fetchone()
+                    self.assertEqual(change, ('insert', 'students', 'Иванов Иван'))
+                    record_uuid = conn.execute(
+                        "SELECT record_uuid FROM students WHERE username='fallback-user'"
+                    ).fetchone()[0]
+                    self.assertRegex(record_uuid, r'^[0-9a-f-]{36}$')
+                    conn.commit()
+                finally:
+                    conn.close()
+                archived = sqlite3.connect(manticore.DB_PATH)
+                try:
+                    archived.execute("UPDATE fallback_state SET state='archived_with_unsynced_changes'")
+                    archived.commit()
+                finally:
+                    archived.close()
+                manticore.FALLBACK_SESSION_ID = 'session-next'
+                manticore.init_db()
+                reopened = sqlite3.connect(manticore.DB_PATH)
+                try:
+                    state = reopened.execute(
+                        'SELECT state, session_id FROM fallback_state WHERE id=1'
+                    ).fetchone()
+                finally:
+                    reopened.close()
+                self.assertEqual(state, ('clean', 'session-next'))
+            finally:
+                manticore.DB_PATH = original_path
+                manticore.FALLBACK_SESSION_ID = original_session
+                manticore.FALLBACK_PRIMARY_ID = original_primary
 
 
 if __name__ == '__main__':

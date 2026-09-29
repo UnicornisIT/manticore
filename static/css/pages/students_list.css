@@ -101,3 +101,4 @@
         margin-top: 6px;
         font-family: Consolas, monospace;
     }
+.students-date-filter{display:flex;align-items:center;gap:10px;margin:0;padding:7px 10px;border:1px solid var(--border-color,#d9dee8);border-radius:8px}.students-date-filter legend{padding:0 5px;font-size:12px;color:var(--text-muted,#667085)}.students-date-filter label{display:flex;align-items:center;gap:5px;margin:0;font-size:12px}.students-date-filter input{min-height:34px;padding:5px 7px;border:1px solid var(--border-color,#d9dee8);border-radius:6px;background:var(--surface,#fff);color:inherit}
