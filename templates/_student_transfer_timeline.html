@@ -10,7 +10,10 @@
                 {{ order.timeline_date_text }}
             </span>
             <span class="student-movement-title">{{ order.to_group_text }}</span>
-            <span class="student-movement-subtitle">{{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}</span>
+            <span class="student-movement-subtitle">
+                {{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}
+                {% if order.campaign_changed %} · кампания {{ order.from_campaign_text }} → {{ order.to_campaign_text }}{% endif %}
+            </span>
         </button>
         {% endfor %}
     </div>
@@ -42,6 +45,18 @@
                 <dt>В группу:</dt>
                 <dd>{{ order.to_group_text }}</dd>
             </div>
+            {% if order.from_campaign_text != '-' %}
+            <div>
+                <dt>Из приёмной кампании:</dt>
+                <dd>{{ order.from_campaign_text }}</dd>
+            </div>
+            {% endif %}
+            {% if order.to_campaign_text != '-' %}
+            <div>
+                <dt>В приёмную кампанию:</dt>
+                <dd>{{ order.to_campaign_text }}</dd>
+            </div>
+            {% endif %}
             {% if course_groups_enabled %}
             <div>
                 <dt>Глобальная группа курса:</dt>

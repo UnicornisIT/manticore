@@ -48,6 +48,19 @@ class FrontendKeyboardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipUnless(NODE, 'Node.js is required for datepicker regressions')
+    def test_students_migration_datepicker(self):
+        result = subprocess.run(
+            [NODE, '--test', str(PROJECT_ROOT / 'tests/frontend/students_migration_datepicker.test.cjs')],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

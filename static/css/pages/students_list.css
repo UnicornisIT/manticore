@@ -101,4 +101,181 @@
         margin-top: 6px;
         font-family: Consolas, monospace;
     }
-.students-date-filter{display:flex;align-items:center;gap:10px;margin:0;padding:7px 10px;border:1px solid var(--border-color,#d9dee8);border-radius:8px}.students-date-filter legend{padding:0 5px;font-size:12px;color:var(--text-muted,#667085)}.students-date-filter label{display:flex;align-items:center;gap:5px;margin:0;font-size:12px}.students-date-filter input{min-height:34px;padding:5px 7px;border:1px solid var(--border-color,#d9dee8);border-radius:6px;background:var(--surface,#fff);color:inherit}
+.students-date-filter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+}
+.students-date-filter legend {
+    padding: 0 5px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.students-date-filter label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    font-size: 12px;
+}
+.migration-datepicker {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+.students-filter-row .migration-datepicker-input {
+    min-width: 0;
+    width: 136px;
+    height: 34px;
+    padding: 5px 32px 5px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+.migration-datepicker-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+.migration-datepicker-toggle {
+    position: absolute;
+    right: 1px;
+    width: 31px;
+    height: 31px;
+    padding: 7px;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.migration-datepicker-toggle:hover {
+    color: var(--accent);
+}
+.migration-datepicker-toggle svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.migration-calendar {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    width: 286px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-md);
+}
+.migration-calendar[hidden] {
+    display: none;
+}
+.migration-calendar-header {
+    display: grid;
+    grid-template-columns: 34px 1fr 34px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.migration-calendar-header strong {
+    text-align: center;
+    text-transform: capitalize;
+    font-size: 14px;
+}
+.migration-calendar-nav {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+.migration-calendar-nav:hover,
+.migration-calendar-nav:focus-visible {
+    background: var(--bg-hover);
+    color: var(--accent);
+    outline: none;
+}
+.migration-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+.migration-calendar-weekday {
+    height: 24px;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 24px;
+}
+.migration-calendar-day {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 5px 2px 8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.migration-calendar-day:hover,
+.migration-calendar-day:focus-visible {
+    background: var(--bg-hover);
+    outline: none;
+}
+.migration-calendar-day:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--accent);
+}
+.migration-calendar-day--outside {
+    color: var(--text-muted);
+    opacity: .7;
+}
+.migration-calendar-day--in-range {
+    background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+}
+.migration-calendar-day--today {
+    box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+.migration-calendar-day--selected,
+.migration-calendar-day--selected:hover,
+.migration-calendar-day--selected:focus-visible {
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--accent);
+    font-weight: 700;
+}
+.migration-calendar-day-number {
+    line-height: 17px;
+}
+.calendar-event-dot {
+    position: absolute;
+    bottom: 5px;
+    left: 50%;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    transform: translateX(-50%);
+}

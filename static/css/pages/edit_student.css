@@ -56,6 +56,34 @@
         display: grid;
         gap: 14px;
     }
+    .student-transfer-current {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    .student-transfer-current > div {
+        display: grid;
+        gap: 4px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--bg-surface);
+    }
+    .student-transfer-current span,
+    .student-transfer-group-status {
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+    .student-transfer-current strong {
+        color: var(--accent);
+    }
+    .student-transfer-group-status {
+        min-height: 18px;
+    }
+    .student-transfer-group-status.is-error {
+        color: var(--danger);
+    }
     .student-transfer-field {
         display: grid;
         gap: 6px;
@@ -104,6 +132,9 @@
             padding: 20px 16px;
         }
         .student-edit-actions {
+            grid-template-columns: 1fr;
+        }
+        .student-transfer-current {
             grid-template-columns: 1fr;
         }
     }

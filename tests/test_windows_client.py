@@ -48,8 +48,8 @@ class WindowsClientTests(unittest.TestCase):
             windows_client, 'application_data_directory', return_value=Path(directory)
         ):
             config = windows_client.migrate_config({
-                'primary_source': {'type': 'sqlite', 'path': '..\\server\\base.db'},
-                'fallback_sources': {'sqlite:..\\server\\base.db': str(Path(directory).parent / 'escape.db')},
+                'primary_source': {'type': 'sqlite', 'path': r'C:\\server\\base.db'},
+                'fallback_sources': {'sqlite:c:\\server\\base.db': str(Path(directory).parent / 'escape.db')},
             })
             fallback = Path(windows_client.get_fallback_path(config)).resolve()
             self.assertEqual(os.path.commonpath([str(Path(directory).resolve()), str(fallback)]), str(Path(directory).resolve()))
@@ -63,7 +63,7 @@ class WindowsClientTests(unittest.TestCase):
             try:
                 result = windows_client.inspect_sqlite_source(str(locked), timeout=0.1)
                 self.assertEqual(result['code'], windows_client.SOURCE_LOCKED)
-                self.assertTrue(result['available'])
+                self.assertFalse(result['available'])
             finally:
                 writer.execute('ROLLBACK')
                 writer.close()
@@ -113,7 +113,8 @@ class WindowsClientTests(unittest.TestCase):
         ):
             primary = str(Path(directory) / 'network' / 'main.db')
             migrated = windows_client.migrate_config({'mode': 'local', 'database_path': primary})
-            self.assertEqual(migrated['primary_source'], {'type': 'sqlite', 'path': primary})
+            self.assertEqual(migrated['database_source'], {'path': primary})
+            self.assertNotIn('primary_source', migrated)
             self.assertEqual(migrated['active_source'], 'primary')
             self.assertEqual(migrated['preferred_source'], 'ask')
             self.assertNotEqual(windows_client.get_fallback_path(migrated), primary)
@@ -127,7 +128,7 @@ class WindowsClientTests(unittest.TestCase):
             second = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://two.example'})
             self.assertEqual(windows_client.get_fallback_path(first), windows_client.get_fallback_path(again))
             self.assertNotEqual(windows_client.get_fallback_path(first), windows_client.get_fallback_path(second))
-            self.assertEqual(first['primary_source']['url'], 'https://one.example')
+            self.assertEqual(first['server_source']['url'], 'https://one.example')
 
     def test_unavailable_primary_can_select_fallback_and_keep_primary(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -136,9 +137,12 @@ class WindowsClientTests(unittest.TestCase):
              mock.patch.object(windows_client, 'show_source_dialog', return_value={'action': 'fallback', 'remember': True}), \
              mock.patch.object(windows_client, 'save_config') as save:
             config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
+            fallback = Path(windows_client.get_fallback_path(config))
+            fallback.parent.mkdir(parents=True)
+            sqlite3.connect(fallback).close()
             source, resolved = windows_client.resolve_active_source(config)
             self.assertTrue(source['fallback'])
-            self.assertEqual(resolved['primary_source']['url'], 'https://primary.example')
+            self.assertEqual(resolved['server_source']['url'], 'https://primary.example')
             self.assertEqual(resolved['preferred_source'], 'fallback')
             save.assert_called()
 
@@ -195,7 +199,7 @@ class WindowsClientTests(unittest.TestCase):
             config.update(active_source='fallback', preferred_source='fallback')
             source, resolved = windows_client.resolve_active_source(config)
             self.assertTrue(source['fallback'])
-            self.assertEqual(resolved['primary_source']['url'], 'https://primary.example')
+            self.assertEqual(resolved['server_source']['url'], 'https://primary.example')
     def test_remote_server_requires_https(self):
         self.assertEqual(
             windows_client.normalize_server_url("https://example.test/manticore/"),
@@ -211,6 +215,121 @@ class WindowsClientTests(unittest.TestCase):
             self.assertTrue(database.endswith("current.db"))
             with self.assertRaises(ValueError):
                 windows_client.normalize_database_path(str(Path(directory) / "current.xlsx"))
+
+    def test_source_classifier_keeps_windows_paths_out_of_webview_urls(self):
+        unc = r'\\192.168.30.10\Обмен\Manticore\db.sqlite'
+        self.assertEqual(windows_client.classify_source_value(unc), 'filesystem_path')
+        self.assertEqual(windows_client.classify_source_value(r'C:\Manticore\db.sqlite'), 'filesystem_path')
+        self.assertEqual(windows_client.classify_source_value(r'Z:\Manticore\db.sqlite'), 'filesystem_path')
+        self.assertEqual(windows_client.classify_source_value('http://192.168.30.10:5000'), 'server_url')
+        with self.assertRaises(windows_client.AmbiguousSourceError):
+            windows_client.classify_source_value('192.168.30.10')
+        with self.assertRaises(windows_client.AmbiguousSourceError):
+            windows_client.normalize_server_url('192.168.30.10')
+
+    def test_legacy_unc_database_path_migrates_to_database_source(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            unc = r'\\192.168.30.10\Обмен\Manticore\db.sqlite'
+            migrated = windows_client.migrate_config({
+                'mode': 'remote',
+                'database_path': unc,
+                'server_url': '192.168.30.10',
+            })
+            self.assertEqual(migrated['database_source'], {'path': unc})
+            self.assertNotIn('server_source', migrated)
+            self.assertEqual(migrated['server_url'], '')
+            self.assertNotIn('webview_url', migrated)
+
+    def test_source_error_codes_distinguish_network_permissions_and_missing_file(self):
+        network_error = OSError('network unavailable')
+        network_error.winerror = 53
+        self.assertEqual(
+            windows_client._missing_sqlite_result(
+                Path(r'\\192.168.30.10\Обмен\missing.db'),
+                r'\\192.168.30.10\Обмен\missing.db',
+                network_error,
+            )['code'],
+            windows_client.SOURCE_NETWORK_UNAVAILABLE,
+        )
+        self.assertEqual(
+            windows_client._missing_sqlite_result(Path(r'C:\missing.db'), r'C:\missing.db', PermissionError())['code'],
+            windows_client.SOURCE_PERMISSION_DENIED,
+        )
+        self.assertEqual(
+            windows_client.inspect_sqlite_source(r'C:\definitely-missing-manticore.db')['code'],
+            windows_client.SOURCE_FILE_NOT_FOUND,
+        )
+
+    def test_unc_sqlite_launches_flask_and_passes_only_loopback_url_to_webview(self):
+        unc = r'\\192.168.30.10\Обмен\Manticore\db.sqlite'
+
+        class FakeLocalServer:
+            url = 'http://127.0.0.1:43123'
+
+            def __init__(self, database_path, *_args, **_kwargs):
+                self.database_path = database_path
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                self.stopped = True
+
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
+             mock.patch.object(windows_client, 'inspect_source', return_value={
+                 'code': windows_client.SOURCE_OK, 'message': '', 'available': True,
+             }), \
+             mock.patch.object(windows_client, 'database_has_admin', return_value=True), \
+             mock.patch.object(windows_client, 'LocalServer', FakeLocalServer), \
+             mock.patch.object(windows_client, 'save_config'), \
+             mock.patch.object(windows_client, 'open_desktop_window', return_value=False) as open_window:
+            config = windows_client.migrate_config({'mode': 'local', 'database_path': unc})
+            result = windows_client.run_configured_client(config, mock.Mock(skip_update=True))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(open_window.call_args.args[0], FakeLocalServer.url)
+        self.assertEqual(open_window.call_args.kwargs['source_config']['webview_url'], FakeLocalServer.url)
+        self.assertNotEqual(open_window.call_args.args[0], unc)
+
+    def test_fallback_is_prepared_only_from_an_available_sqlite_source(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory)
+        ):
+            primary = Path(directory) / 'primary.db'
+            connection = sqlite3.connect(primary)
+            try:
+                connection.execute('CREATE TABLE sample (value TEXT)')
+                connection.execute("INSERT INTO sample VALUES ('copied')")
+                connection.commit()
+            finally:
+                connection.close()
+            config = windows_client.migrate_config({'mode': 'local', 'database_path': str(primary)})
+            fallback = windows_client.prepare_fallback_database(config)
+            connection = sqlite3.connect(fallback)
+            try:
+                self.assertEqual(connection.execute('SELECT value FROM sample').fetchone()[0], 'copied')
+            finally:
+                connection.close()
+
+            Path(fallback).unlink()
+            with mock.patch.object(windows_client, 'inspect_source', return_value={
+                'code': windows_client.SOURCE_NETWORK_UNAVAILABLE,
+                'message': 'Сеть недоступна',
+                'available': False,
+            }):
+                with self.assertRaises(OSError):
+                    windows_client.prepare_fallback_database(config)
+            self.assertFalse(Path(fallback).exists())
+
+    def test_desktop_window_rejects_a_filesystem_path_as_webview_url(self):
+        webview = mock.MagicMock()
+        with mock.patch.dict('sys.modules', {'webview': webview}):
+            with self.assertRaises(windows_client.AmbiguousSourceError):
+                windows_client.open_desktop_window(r'\\192.168.30.10\share\db.sqlite')
+        webview.create_window.assert_not_called()
 
     def test_version_comparison_key(self):
         self.assertGreater(windows_client.version_key("2.0.0"), windows_client.version_key("1.9.9"))

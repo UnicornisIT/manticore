@@ -163,6 +163,21 @@ body > .container > .main-nav {
     white-space: nowrap;
 }
 .docs-search-status { min-height: 16px; margin: 5px 2px 0; color: #64748b; font-size: 11px; }
+.docs-session-link {
+    display: flex;
+    min-height: 36px;
+    margin-top: 8px;
+    align-items: center;
+    justify-content: center;
+    color: var(--docs-blue);
+    border: 1px solid var(--docs-line);
+    border-radius: 9px;
+    background: var(--docs-surface);
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 750;
+}
+.docs-session-link:hover { color: var(--docs-blue-dark); background: var(--docs-blue-soft); }
 
 .docs-nav { margin-top: 19px; }
 .docs-nav-group + .docs-nav-group { margin-top: 20px; }
@@ -222,6 +237,8 @@ body > .container > .main-nav {
 
 .docs-content { min-width: 0; background: #fff; }
 .docs-mobile-bar { display: none; }
+.docs-mobile-session-link { color: var(--docs-blue); text-decoration: none; font-size: 10px; font-weight: 750; }
+.docs-mobile-session-link:hover { color: var(--docs-blue-dark); text-decoration: underline; }
 .docs-article { width: min(100%, 1080px); margin: 0 auto; padding: 0 58px 40px; }
 
 .docs-section { scroll-margin-top: 22px; }

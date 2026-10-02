@@ -18,13 +18,7 @@
         display: block;
         width: min(230px, 100%);
         height: auto;
-        margin: 0 auto 18px;
-    }
-    .login-card h2 {
-        margin: 0 0 24px;
-        text-align: center;
-        color: var(--accent);
-        font-size: 28px;
+        margin: 0 auto 12px;
     }
     .login-field {
         margin-bottom: 18px;

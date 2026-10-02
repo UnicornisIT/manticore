@@ -50,8 +50,31 @@
 <div class="student-transfer-panel">
     <section class="student-transfer-card">
         <h3>Перевод по приказу</h3>
-        <form method="post" action="{{ url_for('transfer_student_group', username=student[0]) }}" enctype="multipart/form-data" class="student-transfer-form" data-source="{{ student[5] }}">
+        <div class="student-transfer-current">
+            <div><span>Текущая приёмная кампания:</span><strong>{{ transfer_group_year }}</strong></div>
+            <div><span>Текущая группа:</span><strong>{{ student[5] or 'Без группы' }}</strong></div>
+        </div>
+        <form
+            method="post"
+            action="{{ url_for('transfer_student_group', username=student[0]) }}"
+            enctype="multipart/form-data"
+            class="student-transfer-form"
+            data-source="{{ student[5] }}"
+            data-source-campaign="{{ transfer_group_year }}"
+            data-groups-url="{{ url_for('student_transfer_campaign_groups') }}"
+            data-student="{{ student[0] }}"
+        >
             {% include "_csrf_field.html" %}
+            <div class="student-transfer-field">
+                <label for="target_campaign_year">Приёмная кампания назначения:</label>
+                <select name="target_campaign_year" id="target_campaign_year" required>
+                    {% for campaign in transfer_campaigns %}
+                    <option value="{{ campaign.campaign_year }}" {% if campaign.is_current %}selected{% endif %}>
+                        Приёмная кампания {{ campaign.campaign_year }}{% if campaign.is_current %} — текущая{% elif campaign.is_archived %} — архивная{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
             <div class="student-transfer-field">
                 <label for="new_cohort1">Новая академическая группа:</label>
                 <select name="new_cohort1" id="new_cohort1" required>
@@ -62,6 +85,7 @@
                     </option>
                     {% endfor %}
                 </select>
+                <div class="student-transfer-group-status" data-group-status aria-live="polite"></div>
             </div>
             {% if course_groups_enabled %}
             <div id="transfer_cohort2_preview" class="student-transfer-preview" aria-live="polite"></div>
@@ -91,31 +115,5 @@
     </section>
 </div>
 </div>
-{% if course_groups_enabled %}
-<script>
-const transferGroupSelect = document.getElementById('new_cohort1');
-const transferPreview = document.getElementById('transfer_cohort2_preview');
-function updateTransferPreview() {
-    if (!transferGroupSelect || !transferPreview) {
-        return;
-    }
-    const option = transferGroupSelect.options[transferGroupSelect.selectedIndex];
-    const cohort2 = option ? option.dataset.cohort2 || '' : '';
-    transferPreview.replaceChildren();
-    if (cohort2) {
-        transferPreview.append('Глобальная группа курса: ');
-        const strong = document.createElement('strong');
-        strong.textContent = cohort2;
-        transferPreview.append(strong);
-    } else {
-        transferPreview.textContent = 'Выберите группу, чтобы увидеть глобальную группу курса.';
-    }
-}
-if (transferGroupSelect) {
-    transferGroupSelect.addEventListener('change', updateTransferPreview);
-    updateTransferPreview();
-}
-</script>
-{% endif %}
 <script src="{{ url_for('static', filename='js/student-transfer.js') }}" defer></script>
 {% endblock %}

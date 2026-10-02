@@ -50,13 +50,34 @@ WINTRUST_UNTRUSTED_ROOT = 0x800B0109
 _INSTANCE_MUTEX = None
 SOURCE_PREFERENCES = {"primary", "fallback", "ask"}
 SOURCE_OK = "SOURCE_OK"
-SOURCE_MISSING = "SOURCE_MISSING"
 SOURCE_NETWORK_UNAVAILABLE = "SOURCE_NETWORK_UNAVAILABLE"
 SOURCE_PERMISSION_DENIED = "SOURCE_PERMISSION_DENIED"
+SOURCE_FILE_NOT_FOUND = "SOURCE_FILE_NOT_FOUND"
+SOURCE_DATABASE_CORRUPT = "SOURCE_DATABASE_CORRUPT"
 SOURCE_LOCKED = "SOURCE_LOCKED"
-SOURCE_CORRUPT = "SOURCE_CORRUPT"
 SOURCE_SCHEMA_TOO_NEW = "SOURCE_SCHEMA_TOO_NEW"
 SOURCE_UNKNOWN_ERROR = "SOURCE_UNKNOWN_ERROR"
+# Compatibility aliases for integrations built against the first fallback release.
+SOURCE_MISSING = SOURCE_FILE_NOT_FOUND
+SOURCE_CORRUPT = SOURCE_DATABASE_CORRUPT
+
+
+class AmbiguousSourceError(ValueError):
+    """A source value needs an explicit filesystem/server choice."""
+
+
+def classify_source_value(value: str) -> str:
+    """Classify input without ever treating a Windows path as a URI."""
+    value = str(value or "").strip().strip('"')
+    lowered = value.casefold()
+    if value.startswith(("\\\\", "//")) or re.match(r"^[a-zA-Z]:[\\/]", value):
+        return "filesystem_path"
+    if lowered.startswith(("http://", "https://")):
+        return "server_url"
+    raise AmbiguousSourceError(
+        "Источник неоднозначен. Укажите, является ли значение сетевым путём к SQLite "
+        "или полным серверным URL с http:// либо https://."
+    )
 
 
 def bundle_root() -> Path:
@@ -223,6 +244,17 @@ def source_identifier(source: dict) -> str:
     return f"{source_type}:{str(value or '').strip().casefold()}"
 
 
+def configured_source(config: dict) -> dict:
+    """Return the active primary definition from strictly separated fields."""
+    database_source = config.get("database_source")
+    if config.get("mode") == "local" and isinstance(database_source, dict) and database_source.get("path"):
+        return {"type": "sqlite", **database_source}
+    server_source = config.get("server_source")
+    if config.get("mode") == "remote" and isinstance(server_source, dict) and server_source.get("url"):
+        return {"type": "server", **server_source}
+    raise ValueError("Источник базы данных не настроен.")
+
+
 def fallback_database_path(primary_source: dict) -> str:
     digest = hashlib.sha256(source_identifier(primary_source).encode("utf-8")).hexdigest()[:20]
     return str(application_data_directory() / "fallback" / digest / "fallback.db")
@@ -240,15 +272,44 @@ def is_safe_fallback_path(value: str) -> bool:
 def migrate_config(config: dict) -> dict:
     """Upgrade the flat legacy config without ever discarding its primary source."""
     migrated = dict(config or {})
-    primary = migrated.get("primary_source")
+    primary = None
+    database_source = migrated.get("database_source")
+    server_source = migrated.get("server_source")
+    if isinstance(database_source, dict) and database_source.get("path"):
+        primary = {"type": "sqlite", **database_source}
+    elif isinstance(server_source, dict) and server_source.get("url"):
+        primary = {"type": "server", **server_source}
+    # Migrate the short-lived union model as well as older flat configs.
+    elif isinstance(database_source, dict) and database_source.get("type") in {"server", "sqlite"}:
+        primary = database_source
     if not isinstance(primary, dict) or primary.get("type") not in {"server", "sqlite"}:
-        if migrated.get("mode") == "remote" and migrated.get("server_url"):
-            primary = {"type": "server", "url": str(migrated["server_url"]).strip().rstrip("/")}
-        elif migrated.get("mode") == "local" and migrated.get("database_path"):
+        primary = migrated.get("primary_source")
+    if not isinstance(primary, dict) or primary.get("type") not in {"server", "sqlite"}:
+        # Old database_path values include local, mapped-drive and UNC SQLite
+        # paths. They take precedence even if an old `mode` value is wrong.
+        if migrated.get("database_path"):
             primary = {"type": "sqlite", "path": str(migrated["database_path"])}
+        elif migrated.get("server_url"):
+            server_value = str(migrated["server_url"]).strip()
+            if classify_source_value(server_value) == "filesystem_path":
+                primary = {"type": "sqlite", "path": server_value}
+            else:
+                primary = {"type": "server", "url": server_value}
         else:
             return migrated
-    migrated["primary_source"] = primary
+    if primary["type"] == "sqlite":
+        primary = {**primary, "path": normalize_database_path(primary.get("path", ""), create_parent=False)}
+        primary.pop("url", None)
+    else:
+        primary = {**primary, "url": normalize_server_url(primary.get("url", ""))}
+        primary.pop("path", None)
+    if primary["type"] == "sqlite":
+        migrated["database_source"] = {key: value for key, value in primary.items() if key != "type"}
+        migrated.pop("server_source", None)
+    else:
+        migrated["server_source"] = {key: value for key, value in primary.items() if key != "type"}
+        migrated.pop("database_source", None)
+    migrated.pop("primary_source", None)
     fallback_sources = migrated.get("fallback_sources")
     if not isinstance(fallback_sources, dict):
         fallback_sources = {}
@@ -269,11 +330,14 @@ def migrate_config(config: dict) -> dict:
     migrated["mode"] = "remote" if primary["type"] == "server" else "local"
     migrated["server_url"] = primary.get("url", "")
     migrated["database_path"] = primary.get("path", "")
+    # A persisted port would be stale. webview_url exists only in the runtime
+    # model after Flask has bound its loopback port.
+    migrated.pop("webview_url", None)
     return migrated
 
 
 def get_fallback_path(config: dict) -> str:
-    primary = config["primary_source"]
+    primary = configured_source(config)
     path = config["fallback_sources"][source_identifier(primary)]
     if not is_safe_fallback_path(path):
         raise ValueError("Некорректный путь fallback-базы.")
@@ -314,7 +378,7 @@ def archive_dirty_fallback(config: dict) -> dict:
     state = fallback_state(str(fallback_path))
     if not state["dirty"] or state["state"] == "archived_with_unsynced_changes":
         return {"ok": True, "backup": "", "state": state["state"]}
-    primary_key = hashlib.sha256(source_identifier(config["primary_source"]).encode("utf-8")).hexdigest()[:20]
+    primary_key = hashlib.sha256(source_identifier(configured_source(config)).encode("utf-8")).hexdigest()[:20]
     session_id = re.sub(r"[^a-zA-Z0-9-]", "", state["session_id"] or "unknown")[:64]
     archive_directory = application_data_directory() / "fallback-backups" / primary_key
     archive_path = archive_directory / f"fallback-{timestamp_token()}-{session_id}.db"
@@ -342,7 +406,7 @@ def ensure_fallback_session(config: dict) -> str:
     sessions = config.get("fallback_sessions")
     if not isinstance(sessions, dict):
         sessions = {}
-    key = source_identifier(config["primary_source"])
+    key = source_identifier(configured_source(config))
     state = fallback_state(get_fallback_path(config))
     if not sessions.get(key) or state["state"] == "archived_with_unsynced_changes":
         sessions[key] = str(uuid.uuid4())
@@ -350,24 +414,82 @@ def ensure_fallback_session(config: dict) -> str:
     return sessions[key]
 
 
+def prepare_fallback_database(config: dict) -> str:
+    """Prepare fallback only while the primary source is confirmed available."""
+    primary = configured_source(config)
+    primary_check = inspect_source(primary)
+    if primary_check["code"] != SOURCE_OK:
+        raise OSError(primary_check["message"] or "Основной источник недоступен.")
+    fallback = Path(get_fallback_path(config))
+    if fallback.is_file():
+        return str(fallback)
+    fallback.parent.mkdir(parents=True, exist_ok=True)
+    ensure_free_space(fallback.parent, 16 * 1024 * 1024)
+    if primary["type"] == "sqlite":
+        # sqlite_backup intentionally uses file: URIs for local maintenance
+        # operations. A configured source may be UNC, so copy it using the raw
+        # filesystem path instead.
+        source_connection = sqlite3.connect(str(primary["path"]), timeout=5.0)
+        destination_connection = sqlite3.connect(str(fallback), timeout=5.0)
+        try:
+            source_connection.execute("PRAGMA query_only=ON")
+            source_connection.backup(destination_connection)
+            result = destination_connection.execute("PRAGMA quick_check;").fetchone()
+            if not result or str(result[0]).casefold() != "ok":
+                raise sqlite3.DatabaseError("Fallback quick_check failed")
+            destination_connection.commit()
+        except Exception:
+            destination_connection.close()
+            source_connection.close()
+            try:
+                fallback.unlink()
+            except OSError:
+                pass
+            raise
+        else:
+            destination_connection.close()
+            source_connection.close()
+    else:
+        # Remote HTTP sources cannot be copied directly. Creating the SQLite
+        # container while online is safe; the local server initializes schema.
+        sqlite3.connect(str(fallback)).close()
+    return str(fallback)
+
+
 def _source_result(code: str, message: str = "", *, available: bool = False) -> dict:
     return {"code": code, "message": message, "available": available}
 
 
+def _missing_sqlite_result(path: Path, original: str, exc: OSError | None = None) -> dict:
+    winerror = getattr(exc, "winerror", None)
+    if isinstance(exc, PermissionError) or winerror == 5:
+        return _source_result(SOURCE_PERMISSION_DENIED, "Нет прав для чтения базы данных.")
+    network_errors = {53, 64, 67, 121, 1231, 1232}
+    if original.startswith(("\\\\", "//")) and (winerror in network_errors or not path.parent.exists()):
+        return _source_result(SOURCE_NETWORK_UNAVAILABLE, "Сетевой ресурс недоступен.")
+    return _source_result(SOURCE_FILE_NOT_FOUND, "Файл базы данных не найден.")
+
+
 def inspect_sqlite_source(database_path: str, timeout: float = 2.0) -> dict:
-    path = Path(str(database_path or ""))
-    if not path.is_file():
-        code = SOURCE_NETWORK_UNAVAILABLE if str(database_path).startswith(("\\\\", "//")) else SOURCE_MISSING
-        message = "Сетевой ресурс недоступен." if code == SOURCE_NETWORK_UNAVAILABLE else "Файл базы данных не найден."
-        return _source_result(code, message)
+    original = str(database_path or "").strip().strip('"')
+    path = Path(original)
     try:
-        uri_path = urllib.parse.quote(path.resolve().as_posix(), safe="/:@")
-        connection = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True, timeout=timeout)
+        path.stat()
+        if not path.is_file():
+            return _source_result(SOURCE_FILE_NOT_FOUND, "Файл базы данных не найден.")
+        # Check ACLs before SQLite. UNC remains a filesystem path throughout;
+        # it is never quoted, parsed, joined or converted to a file: URI.
+        with path.open("rb") as stream:
+            stream.read(1)
+    except OSError as exc:
+        return _missing_sqlite_result(path, original, exc)
+    try:
+        connection = sqlite3.connect(original, timeout=timeout)
         try:
             connection.execute("PRAGMA query_only=ON")
-            result = connection.execute("PRAGMA quick_check(1)").fetchone()
+            result = connection.execute("PRAGMA quick_check;").fetchone()
             if not result or str(result[0]).casefold() != "ok":
-                return _source_result(SOURCE_CORRUPT, "База данных требует проверки. Изменения структуры не выполнялись.")
+                return _source_result(SOURCE_DATABASE_CORRUPT, "База данных требует проверки. Изменения структуры не выполнялись.")
             version = read_schema_version(path)
             if version > CURRENT_SCHEMA_VERSION:
                 return _source_result(
@@ -385,20 +507,23 @@ def inspect_sqlite_source(database_path: str, timeout: float = 2.0) -> dict:
         logging.warning("Primary SQLite operational error for %s: %s", database_path, exc)
         error_text = str(exc).casefold()
         if "malformed" in error_text or "not a database" in error_text:
-            return _source_result(SOURCE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
+            return _source_result(SOURCE_DATABASE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
+        if "permission denied" in error_text or "access is denied" in error_text or "readonly" in error_text:
+            return _source_result(SOURCE_PERMISSION_DENIED, "Нет прав для чтения базы данных.")
         if "locked" in error_text or "busy" in error_text:
             return _source_result(
                 SOURCE_LOCKED,
                 "База данных временно занята другим процессом. Повторите операцию позднее.",
-                available=True,
             )
+        if original.startswith(("\\\\", "//")):
+            return _source_result(SOURCE_NETWORK_UNAVAILABLE, "Сетевой ресурс недоступен.")
         return _source_result(SOURCE_UNKNOWN_ERROR, "Не удалось открыть базу данных.")
     except sqlite3.DatabaseError as exc:
         logging.warning("Primary SQLite corruption detected for %s: %s", database_path, exc)
-        return _source_result(SOURCE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
+        return _source_result(SOURCE_DATABASE_CORRUPT, "База данных повреждена или имеет неизвестный формат.")
     except OSError as exc:
         logging.warning("Primary SQLite connection failed for %s: %s", database_path, exc)
-        return _source_result(SOURCE_UNKNOWN_ERROR, "Не удалось открыть базу данных. Проверьте доступ и сеть.")
+        return _missing_sqlite_result(path, original, exc)
 
 
 def check_sqlite_connection(database_path: str, timeout: float = 2.0) -> str:
@@ -426,6 +551,8 @@ def normalize_server_url(value: str, *, optional: bool = False) -> str:
     value = str(value or "").strip().rstrip("/")
     if optional and not value:
         return ""
+    if classify_source_value(value) != "server_url":
+        raise AmbiguousSourceError("Укажите полный серверный URL с http:// либо https://.")
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("Укажите полный адрес сервера, например https://manticore.example.ru.")
@@ -436,12 +563,15 @@ def normalize_server_url(value: str, *, optional: bool = False) -> str:
     return value
 
 
-def normalize_database_path(value: str) -> str:
-    path = Path(str(value or "").strip().strip('"')).expanduser()
+def normalize_database_path(value: str, *, create_parent: bool = True) -> str:
+    raw_value = str(value or "").strip().strip('"')
+    if classify_source_value(raw_value) != "filesystem_path":
+        raise AmbiguousSourceError("Укажите абсолютный локальный, подключённый или UNC-путь к SQLite.")
+    path = Path(raw_value).expanduser()
     if path.suffix.casefold() not in {".db", ".sqlite", ".sqlite3"}:
         raise ValueError("Выберите файл базы с расширением .db, .sqlite или .sqlite3.")
-    path = path.resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if create_parent and not raw_value.startswith(("\\\\", "//")):
+        path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
 
 
@@ -486,13 +616,24 @@ class SetupApi:
         self.saved = False
 
     def get_state(self) -> dict:
+        configuration_error = str(self.existing.get("configuration_error") or "")
+        try:
+            existing = migrate_config(self.existing)
+        except AmbiguousSourceError as exc:
+            existing = dict(self.existing)
+            configuration_error = str(exc)
+        try:
+            source = configured_source(existing)
+        except ValueError:
+            source = {}
         return {
             "page": self.page,
             "version": current_version(),
-            "mode": self.existing.get("mode") if self.existing.get("mode") in {"remote", "local"} else "remote",
-            "server_url": str(self.existing.get("server_url") or ""),
-            "database_path": str(self.existing.get("database_path") or default_database_path()),
-            "update_server_url": str(self.existing.get("update_server_url") or ""),
+            "mode": "remote" if source.get("type") != "sqlite" else "local",
+            "server_url": str(source.get("url") or existing.get("server_url") or ""),
+            "database_path": str(source.get("path") or existing.get("database_path") or default_database_path()),
+            "update_server_url": str(existing.get("update_server_url") or ""),
+            "configuration_error": configuration_error,
         }
 
     @staticmethod
@@ -527,7 +668,7 @@ class SetupApi:
                     "server_url": server_url,
                     "update_server_url": server_url,
                     "database_path": str(payload.get("database_path") or "").strip(),
-                    "primary_source": {"type": "server", "url": server_url},
+                    "server_source": {"url": server_url},
                 }
             elif mode == "local":
                 configured = {
@@ -535,7 +676,7 @@ class SetupApi:
                     "server_url": "",
                     "database_path": normalize_database_path(payload.get("database_path", "")),
                     "update_server_url": normalize_server_url(payload.get("update_server_url", ""), optional=True),
-                    "primary_source": {"type": "sqlite", "path": normalize_database_path(payload.get("database_path", "")), "create_if_missing": True},
+                    "database_source": {"path": normalize_database_path(payload.get("database_path", "")), "create_if_missing": True},
                 }
             else:
                 raise ValueError("Выберите режим работы.")
@@ -709,7 +850,7 @@ def show_source_dialog(state: dict) -> dict:
 
 
 def source_dialog_state(config: dict, error: str = "", *, recovered: bool = False) -> dict:
-    primary = config["primary_source"]
+    primary = configured_source(config)
     primary_value = primary.get("url") if primary["type"] == "server" else primary.get("path")
     fallback_path = get_fallback_path(config)
     local_state = fallback_state(fallback_path)
@@ -730,7 +871,7 @@ def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
     """Resolve startup source interactively while retaining the primary definition."""
     config = migrate_config(config)
     while True:
-        primary = config["primary_source"]
+        primary = configured_source(config)
         primary_error = check_source_connection(primary)
         fallback_path = get_fallback_path(config)
         fallback_exists = Path(fallback_path).is_file()
@@ -781,16 +922,22 @@ def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
         if action == "fallback":
             if fallback_exists and fallback_error:
                 continue
+            # A temporary network/ACL/lock failure must never manufacture an
+            # empty fallback and present it as recovered data.
+            if not fallback_exists:
+                if primary_error:
+                    logging.warning("Fallback creation refused while primary source is unavailable")
+                    return None, config
+                try:
+                    fallback_path = prepare_fallback_database(config)
+                except (OSError, sqlite3.Error) as exc:
+                    logging.warning("Could not prepare fallback database: %s", exc)
+                    return None, config
             path = Path(fallback_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists():
-                ensure_free_space(path.parent, 16 * 1024 * 1024)
             config["active_source"] = "fallback"
             config["preferred_source"] = "fallback" if remember else "ask"
             ensure_fallback_session(config)
             save_config(config)
-            if not path.exists():
-                logging.info("Creating fallback database for primary source %s at %s", source_identifier(primary), path)
             return {"type": "sqlite", "path": str(path), "fallback": True}, config
         if action in {"database", "server", "settings"}:
             configured = show_configuration_dialog(config)
@@ -1167,7 +1314,10 @@ class DesktopApi:
 
     def get_client_info(self) -> dict:
         config = migrate_config(load_config())
-        primary = config.get("primary_source", {})
+        try:
+            primary = configured_source(config)
+        except ValueError:
+            primary = {}
         primary_value = primary.get("url") if primary.get("type") == "server" else primary.get("path")
         fallback_path = get_fallback_path(config) if primary else ""
         primary_check = inspect_source(primary) if primary else _source_result(SOURCE_UNKNOWN_ERROR, "Источник не настроен.")
@@ -1175,6 +1325,7 @@ class DesktopApi:
         return {
             "desktop": True,
             "version": current_version(),
+            "webview_url": self.target_url,
             "mode": config.get("mode", ""),
             "server_url": config.get("server_url", ""),
             "database_path": config.get("database_path", ""),
@@ -1194,7 +1345,7 @@ class DesktopApi:
 
     def check_primary_source(self) -> dict:
         config = migrate_config(load_config())
-        result = inspect_source(config["primary_source"])
+        result = inspect_source(configured_source(config))
         return {**result, "error": result["message"], "active_source": config.get("active_source", "primary")}
 
     def switch_source(self, target: str, remember: bool = False, confirm_unsynced: bool = False) -> dict:
@@ -1202,7 +1353,7 @@ class DesktopApi:
             return {"ok": False, "error": "Неизвестный источник."}
         config = migrate_config(load_config())
         if target == "primary":
-            error = check_source_connection(config["primary_source"])
+            error = check_source_connection(configured_source(config))
             if error:
                 return {"ok": False, "error": error}
             local_state = fallback_state(get_fallback_path(config))
@@ -1219,7 +1370,10 @@ class DesktopApi:
                     logging.exception("Could not archive dirty fallback")
                     return {"ok": False, "error": f"Не удалось создать резервную копию локальной базы: {exc}"}
         else:
-            Path(get_fallback_path(config)).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                prepare_fallback_database(config)
+            except (OSError, sqlite3.Error) as exc:
+                return {"ok": False, "error": f"Fallback нельзя подготовить: {exc}"}
             ensure_fallback_session(config)
         config["active_source"] = target
         config["preferred_source"] = target if remember else "ask"
@@ -1352,7 +1506,7 @@ def check_server_connection(url: str, timeout: float = 5.0) -> str:
 class LocalServer:
     def __init__(self, database_path: str, admin_password: str | None, secret_key: str,
                  *, fallback_session_id: str = "", primary_source_id: str = ""):
-        database = Path(database_path).resolve()
+        database = Path(database_path)
         os.environ["UPLOAD_FOLDER"] = str(database.parent)
         os.environ["DB_FILENAME"] = database.name
         os.environ["SECRET_KEY"] = secret_key
@@ -1389,6 +1543,17 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
                         source_config: dict | None = None) -> bool:
     import webview
 
+    # The renderer boundary accepts HTTP(S) only. A filesystem source can
+    # therefore never accidentally reach WebView2 as its initial URL.
+    webview_url = normalize_server_url(url)
+    if source_config:
+        try:
+            source = configured_source(source_config)
+        except ValueError:
+            source = {}
+        if source.get("type") == "sqlite" and not is_loopback_host(urllib.parse.urlsplit(webview_url).hostname):
+            raise ValueError("Для SQLite WebView может открывать только локальный Flask на 127.0.0.1.")
+
     # pywebview disables downloads by default. On Windows, enabling this delegates
     # HTTP, authenticated and blob downloads to WebView2's native streaming
     # download handler and Save As dialog, preserving the response filename.
@@ -1399,7 +1564,7 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
 
     storage_path = application_data_directory() / "webview"
     storage_path.mkdir(parents=True, exist_ok=True)
-    api = DesktopApi(update_server_url or url, url, source_config)
+    api = DesktopApi(update_server_url or webview_url, webview_url, source_config)
     startup_page = bundle_root() / "desktop" / "ui" / "startup.html"
     error_page = bundle_root() / "desktop" / "ui" / "connection_error.html"
     window = webview.create_window(
@@ -1416,7 +1581,7 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
         # Keep the updater usable with older remote server templates as well.
         try:
             current = window.get_current_url() or ""
-            target = urllib.parse.urlsplit(url)
+            target = urllib.parse.urlsplit(webview_url)
             page = urllib.parse.urlsplit(current)
             # pywebview serves local HTML through its private loopback server.
             # Resolve only our two fixed bundled paths, never a renderer-supplied URL.
@@ -1431,12 +1596,12 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
     window.events.loaded += install_updater_ui
 
     def finish_startup() -> None:
-        connection_error = check_server_connection(url)
+        connection_error = check_server_connection(webview_url)
         if connection_error:
             api.connection_error = connection_error
             window.load_url(str(error_page))
         else:
-            window.load_url(url)
+            window.load_url(webview_url)
         if not skip_update and getattr(sys, "frozen", False):
             timer = threading.Timer(4, api.check_for_update)
             timer.daemon = True
@@ -1524,18 +1689,18 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
         admin_password,
         secret_key,
         fallback_session_id=fallback_session_id,
-        primary_source_id=source_identifier(config["primary_source"]) if is_fallback else "",
+        primary_source_id=source_identifier(configured_source(config)) if is_fallback else "",
     )
     local_server.start()
     try:
         update_server = config.get("update_server_url") or local_server.url
-        switched = open_desktop_window(local_server.url, update_server, skip_update=args.skip_update, source_config=config)
+        runtime_config = {**config, "webview_url": local_server.url}
+        switched = open_desktop_window(local_server.url, update_server, skip_update=args.skip_update, source_config=runtime_config)
     finally:
         local_server.stop()
-    if source is config.get("primary_source") or (
-        source.get("type") == "sqlite" and source.get("path") == config.get("primary_source", {}).get("path")
-    ):
-        config["primary_source"].pop("create_if_missing", None)
+    primary = configured_source(config)
+    if source.get("type") == "sqlite" and source.get("path") == primary.get("path"):
+        config["database_source"].pop("create_if_missing", None)
         save_config(config)
     if switched:
         relaunch_after_source_switch(args)
@@ -1569,7 +1734,12 @@ def main() -> int:
             result_path.unlink()
         except (OSError, ValueError):
             logging.exception("[Updater] Could not read installation result")
-    config = migrate_config(load_config())
+    loaded_config = load_config()
+    try:
+        config = migrate_config(loaded_config)
+    except AmbiguousSourceError as exc:
+        logging.warning("Desktop source requires an explicit type choice: %s", exc)
+        config = {**loaded_config, "mode": "", "configuration_error": str(exc)}
     if args.configure or config.get("mode") not in {"remote", "local"}:
         configured = show_configuration_dialog(config)
         if configured is None:

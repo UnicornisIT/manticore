@@ -130,10 +130,20 @@ class AppMetadataTests(unittest.TestCase):
     def test_login_renders_one_compact_footer_with_shared_contact_links(self):
         body = self.get_page('/login')
         self.assertEqual(body.count('id="main-footer"'), 1)
+        self.assertNotIn('<h2>Manticore</h2>', body)
+        self.assertEqual(body.count('alt="Manticore"'), 2)
+        self.assertIn('Система управления приёмной кампанией', body)
         footer = self.section(body, 'footer', 'main-footer')
         self.assertIn(self.manticore.APP_METADATA['name'], footer)
         self.assertIn(self.manticore.APP_METADATA['developer_name'], footer)
         self.assert_contact_links(footer, self.manticore.APP_METADATA)
+        documentation_links = [
+            link for link in LinkParser(footer).links
+            if link.get('href') == '/documentation'
+        ]
+        self.assertEqual(len(documentation_links), 1)
+        self.assertNotIn('target', documentation_links[0])
+        self.assertNotIn('data-external-link', documentation_links[0])
         self.assertNotRegex(footer.split('>', 1)[0], r'\bhidden\b')
 
     def test_running_app_version_matches_release_source(self):

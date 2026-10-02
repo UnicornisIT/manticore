@@ -3,6 +3,7 @@
 {% block title %}Список студентов{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/students_list.css') }}">
+<script src="{{ url_for('static', filename='js/students-migration-datepicker.js') }}" defer></script>
 {% endblock %}
 {% block content %}
 {% macro sort_link(column, label) -%}
@@ -39,8 +40,30 @@
         {% endif %}
         <fieldset class="students-date-filter">
             <legend>Дата перевода из абитуриентов</legend>
-            <label>С <input type="date" name="migrated_from" value="{{ request.args.get('migrated_from', '') }}"></label>
-            <label>По <input type="date" name="migrated_to" value="{{ request.args.get('migrated_to', '') }}"></label>
+            {% for field_name, field_label in [('migrated_from', 'С'), ('migrated_to', 'По')] %}
+            {% set field_value = request.args.get(field_name, '') %}
+            <label>{{ field_label }}
+                <span class="migration-datepicker" data-migration-datepicker data-calendar-url="{{ url_for('students_migration_calendar') }}">
+                    <input type="hidden" name="{{ field_name }}" value="{{ field_value }}" data-date-value>
+                    <input
+                        class="migration-datepicker-input"
+                        type="text"
+                        value="{{ format_display_date(field_value) if field_value else '' }}"
+                        placeholder="ДД.ММ.ГГГГ"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        aria-label="{{ field_label }}: дата перевода из абитуриентов"
+                        aria-haspopup="dialog"
+                        aria-expanded="false"
+                        data-date-display
+                    >
+                    <button class="migration-datepicker-toggle" type="button" aria-label="Открыть календарь: {{ field_label|lower }}" tabindex="-1" data-date-toggle>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"></path></svg>
+                    </button>
+                    <div class="migration-calendar" role="dialog" aria-label="Календарь даты перевода" hidden data-date-popup></div>
+                </span>
+            </label>
+            {% endfor %}
         </fieldset>
         <button type="submit" class="btn">Применить фильтры</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Очистить</a>

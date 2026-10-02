@@ -27,6 +27,11 @@
                 <input class="docs-search-input" type="search" placeholder="Найти в документации" autocomplete="off" data-docs-search>
             </label>
             <p class="docs-search-status" data-docs-search-status aria-live="polite"></p>
+            {% if session.get('user') %}
+                <a class="docs-session-link" href="{{ url_for('index') }}">Вернуться в Manticore</a>
+            {% else %}
+                <a class="docs-session-link" href="{{ url_for('login') }}">Войти</a>
+            {% endif %}
         </div>
 
         <nav class="docs-nav" data-docs-nav>
@@ -71,7 +76,11 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
                 Разделы
             </button>
-            <span>Документация</span>
+            {% if session.get('user') %}
+                <a class="docs-mobile-session-link" href="{{ url_for('index') }}">В Manticore</a>
+            {% else %}
+                <a class="docs-mobile-session-link" href="{{ url_for('login') }}">Войти</a>
+            {% endif %}
         </div>
 
         <article class="docs-article">

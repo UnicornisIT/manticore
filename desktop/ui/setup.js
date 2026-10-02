@@ -21,6 +21,7 @@
       $('#server-url').value=state.server_url||'';
       $('#database-path').value=state.database_path||'';
       $('#update-server-url').value=state.update_server_url||'';
+      showError($('#configuration-error'),state.configuration_error||'');
       syncMode();
     }catch(error){
       $('#loading-view').querySelector('h1').textContent='Не удалось открыть настройку';

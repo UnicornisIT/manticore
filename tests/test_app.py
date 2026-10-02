@@ -571,12 +571,55 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertNotIn('visible-secret', body)
         self.assertIn('••••••', body)
 
-    def test_documentation_is_available_to_authenticated_users(self):
+    def test_documentation_is_public_read_only_and_keeps_private_routes_protected(self):
         client = manticore.app.test_client()
 
         anonymous_response = client.get('/documentation')
-        self.assertEqual(anonymous_response.status_code, 302)
-        self.assertIn('/login', anonymous_response.headers['Location'])
+        anonymous_body = anonymous_response.get_data(as_text=True)
+        self.assertEqual(anonymous_response.status_code, 200)
+        self.assertIn('id="roles"', anonymous_body)
+        self.assertIn('href="/login">Войти</a>', anonymous_body)
+        self.assertNotIn('class="main-nav"', anonymous_body)
+        self.assertNotIn('href="/students"', anonymous_body)
+        self.assertNotIn('href="/abiturients"', anonymous_body)
+        self.assertNotIn('href="/management"', anonymous_body)
+
+        head_response = client.head('/documentation')
+        self.assertEqual(head_response.status_code, 200)
+        self.assertEqual(head_response.get_data(), b'')
+
+        for path in ('/students', '/abiturients', '/management'):
+            with self.subTest(protected_path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers['Location'], '/login')
+
+        csrf_token = self.csrf_from_response(client.get('/login'))
+        protected_post = client.post(
+            '/delete_student',
+            data={'csrf_token': csrf_token, 'username': 'guest-cannot-delete'},
+        )
+        self.assertEqual(protected_post.status_code, 302)
+        self.assertEqual(protected_post.headers['Location'], '/login')
+
+        for method in ('POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
+            with self.subTest(disallowed_documentation_method=method):
+                documentation_write = client.open(
+                    '/documentation',
+                    method=method,
+                    data={'csrf_token': csrf_token},
+                )
+                self.assertEqual(documentation_write.status_code, 405)
+
+        for asset_path in (
+            '/static/documentation.css',
+            '/static/documentation.js',
+            '/static/documentation/dashboard-test-stand.png',
+        ):
+            with self.subTest(public_asset=asset_path):
+                asset_response = client.get(asset_path)
+                self.assertEqual(asset_response.status_code, 200)
+                self.assertNotIn('text/html', asset_response.content_type)
 
         self.login_session(client, username='viewer', role='viewer')
         response = client.get('/documentation')
@@ -590,6 +633,7 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('Форматы файлов', body)
         self.assertIn('documentation.css', body)
         self.assertIn('documentation.js', body)
+        self.assertIn('href="/">Вернуться в Manticore</a>', body)
 
     def test_abiturients_sort_links_keep_current_filters(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
@@ -1108,6 +1152,105 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('lastname', exported.columns)
         self.assertEqual(set(exported['lastname']), {'Фамилия'})
 
+    def test_migration_calendar_api_aggregates_counts_by_local_calendar_day(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            for username, migrated_at in (
+                ('first', '2026-10-02 10:00:00'),
+                ('second', '2026-10-02 12:00:00'),
+                ('third', '2026-10-05 09:00:00'),
+            ):
+                conn.execute(
+                    'INSERT INTO students (username, migrated_to_student_at) VALUES (?, ?)',
+                    (username, migrated_at),
+                )
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/api/students/migration-calendar?year=2026&month=10')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload['days'], {'2026-10-02': 2, '2026-10-05': 1})
+        self.assertEqual(payload['range_from'], '2026-09-28')
+        self.assertEqual(payload['range_to_exclusive'], '2026-11-09')
+
+    def test_migration_calendar_api_ignores_null_migration_date(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute("INSERT INTO students (username, migrated_to_student_at) VALUES ('null_date', NULL)")
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        payload = client.get('/api/students/migration-calendar?year=2026&month=10').get_json()
+
+        self.assertEqual(payload['days'], {})
+
+    def test_directly_imported_student_does_not_create_calendar_event(self):
+        file_path = os.path.join(TEST_UPLOAD_DIR, 'calendar-direct-student.xlsx')
+        pd.DataFrame([{
+            'username': 'calendar_direct', 'password': 'secret', 'email': 'direct@gmail.com',
+            'firstname': 'Иван', 'lastname': 'Иванов', 'cohort1': '26ФМ-11-1',
+        }]).to_excel(file_path, index=False)
+        manticore.apply_students_import(file_path)
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        payload = client.get('/api/students/migration-calendar?year=2026&month=10').get_json()
+
+        self.assertEqual(payload['days'], {})
+
+    def test_migration_calendar_api_includes_single_student(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO students (username, migrated_to_student_at) VALUES ('one_student', '2026-10-15')"
+            )
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        payload = client.get('/api/students/migration-calendar?year=2026&month=10').get_json()
+
+        self.assertEqual(payload['days']['2026-10-15'], 1)
+
+    def test_migration_calendar_api_returns_empty_days_for_empty_month(self):
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/api/students/migration-calendar?year=2026&month=10')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['days'], {})
+
+    def test_migration_calendar_api_rejects_invalid_month(self):
+        client = manticore.app.test_client()
+        self.login_session(client)
+
+        response = client.get('/api/students/migration-calendar?year=2026&month=13')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('error', response.get_json())
+
+    def test_migration_calendar_api_requires_authentication(self):
+        client = manticore.app.test_client()
+
+        response = client.get('/api/students/migration-calendar?year=2026&month=10')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers['Location'].endswith('/login'))
+
+    def test_migration_calendar_query_uses_migration_timestamp_index(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            plan = conn.execute(
+                '''EXPLAIN QUERY PLAN
+                   SELECT date(migrated_to_student_at), COUNT(*)
+                   FROM students
+                   WHERE migrated_to_student_at IS NOT NULL
+                     AND migrated_to_student_at >= ?
+                     AND migrated_to_student_at < ?
+                   GROUP BY date(migrated_to_student_at)''',
+                ('2026-09-28', '2026-11-09'),
+            ).fetchall()
+
+        self.assertIn('idx_students_migrated_to_student_at', ' '.join(str(row) for row in plan))
+
     def test_students_migration_adds_nullable_column_without_backfill(self):
         with tempfile.TemporaryDirectory() as directory:
             old_database = os.path.join(directory, 'old.db')
@@ -1125,6 +1268,41 @@ class ManticoreAppTests(unittest.TestCase):
                 conn.close()
             self.assertIn('migrated_to_student_at', columns)
             self.assertIsNone(migrated_at)
+
+    def test_transfer_schema_migration_backfills_current_campaign_and_history_columns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old_database = os.path.join(directory, 'old-transfer.db')
+            conn = sqlite3.connect(old_database)
+            try:
+                conn.execute(
+                    '''CREATE TABLE students
+                       (id INTEGER PRIMARY KEY, username TEXT, cohort1 TEXT, source_campaign_year TEXT)'''
+                )
+                conn.execute('CREATE TABLE groups (id INTEGER PRIMARY KEY, name TEXT, group_year TEXT)')
+                conn.execute("INSERT INTO groups (name, group_year) VALUES ('23СД-11-1', '2023')")
+                conn.execute(
+                    "INSERT INTO students (username, cohort1, source_campaign_year) VALUES ('legacy', '23СД-11-1', '2026')"
+                )
+                conn.execute(
+                    '''CREATE TABLE student_group_transfers
+                       (id INTEGER PRIMARY KEY, username TEXT, old_cohort1 TEXT,
+                        old_cohort2 TEXT, new_cohort1 TEXT, new_cohort2 TEXT,
+                        order_filename TEXT, order_original_filename TEXT,
+                        order_mime_type TEXT, order_size INTEGER, created_by TEXT, created_at TEXT)'''
+                )
+
+                manticore.ensure_students_origin_columns(conn)
+                manticore.create_student_group_transfers_table(conn)
+                current_campaign = conn.execute(
+                    "SELECT current_campaign_year FROM students WHERE username='legacy'"
+                ).fetchone()[0]
+                history_columns = manticore.get_table_columns(conn, 'student_group_transfers')
+            finally:
+                conn.close()
+
+        self.assertEqual(current_campaign, '2023')
+        self.assertIn('old_campaign_year', history_columns)
+        self.assertIn('new_campaign_year', history_columns)
 
     def test_direct_student_import_keeps_migration_date_null(self):
         file_path = os.path.join(TEST_UPLOAD_DIR, 'direct-student.xlsx')
@@ -3232,6 +3410,13 @@ class ManticoreAppTests(unittest.TestCase):
                     ''',
                     ('student_unknown', 'cron', 'unknown@example.test', 'Петр', 'Петров', '26ЛабД-11-1')
                 )
+                conn.execute(
+                    '''CREATE TABLE schema_metadata
+                       (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, updated_at TEXT)'''
+                )
+                conn.execute(
+                    'INSERT INTO schema_metadata (id, version, updated_at) VALUES (1, 2, datetime(\'now\'))'
+                )
 
             manticore.init_db()
 
@@ -3248,9 +3433,10 @@ class ManticoreAppTests(unittest.TestCase):
                 conn.execute('UPDATE students SET cohort2=? WHERE username=?', ('ЛД-9', 'student_old'))
 
             self.assertIn('cohort2', columns)
+            self.assertIn('current_campaign_year', columns)
             self.assertEqual(rows['student_old'], ('cron', '26СД-9-1', 'СД-9'))
             self.assertEqual(rows['student_unknown'], ('cron', '26ЛабД-11-1', None))
-            self.assertEqual(schema_version, 2)
+            self.assertEqual(schema_version, manticore.CURRENT_SCHEMA_VERSION)
             self.assertRegex(record_uuid, r'^[0-9a-f-]{36}$')
             self.assertTrue(list(Path(TEST_UPLOAD_DIR).glob('old_students_schema.backup-before-migration-*.db')))
 
@@ -4535,6 +4721,173 @@ class ManticoreAppTests(unittest.TestCase):
         self.login_session(client)
         token = self.csrf_from_response(client.get('/edit_student/moving'))
         return client, dict(csrf_token=token, new_cohort1='26СД-9-1', expected_source='26ЛД-11-1')
+
+    def seed_cross_campaign_transfer(self):
+        migrated_at = '2026-09-01 10:15:00'
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute('DELETE FROM groups')
+            conn.executemany(
+                'INSERT INTO groups (name, group_year, is_hidden) VALUES (?, ?, ?)',
+                [
+                    ('26ЛД-11-1', '2026', 0),
+                    ('26СД-9-1', '2026', 0),
+                    ('23СД-11-1', '2023', 0),
+                    ('23ЛД-11-9', '2023', 1),
+                ],
+            )
+            conn.execute(
+                '''INSERT OR REPLACE INTO campaign_settings
+                   (campaign_year, is_archived, is_active, archived_at, archived_by)
+                   VALUES ('2023', 1, 0, datetime('now', 'localtime'), 'admin')'''
+            )
+            conn.execute(
+                '''INSERT INTO students
+                   (username, password, email, firstname, lastname, cohort1, cohort2,
+                    source_campaign_year, current_campaign_year, source_dogovor, source_fio,
+                    migrated_to_student_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    'moving-campaign', 'unchanged-secret', 'moving-campaign@example.test',
+                    'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026', '2026',
+                    '2026-001', 'Андреева Анна', migrated_at,
+                ),
+            )
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/edit_student/moving-campaign')
+        token = self.csrf_from_response(page)
+        return client, page, {
+            'csrf_token': token,
+            'new_cohort1': '23СД-11-1',
+            'target_campaign_year': '2023',
+            'expected_source': '26ЛД-11-1',
+            'expected_campaign': '2026',
+        }
+
+    def test_cross_campaign_group_api_returns_only_selected_campaign_groups(self):
+        client, page, _data = self.seed_cross_campaign_transfer()
+        body = page.get_data(as_text=True)
+        self.assertIn('value="2026"', body)
+        self.assertIn('value="2023"', body)
+        self.assertIn('архивная', body)
+
+        response = client.get(
+            '/api/student-transfer/groups',
+            query_string={'campaign_year': '2023', 'username': 'moving-campaign'},
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([group['name'] for group in response.json['groups']], ['23СД-11-1'])
+        self.assertNotIn('password', response.get_data(as_text=True))
+        self.assertNotIn('email', response.get_data(as_text=True))
+
+    def test_cross_campaign_transfer_is_atomic_and_preserves_origin_identity(self):
+        client, _page, data = self.seed_cross_campaign_transfer()
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            before = conn.execute(
+                '''SELECT id, record_uuid, username, password, email, source_campaign_year,
+                          source_dogovor, source_fio, migrated_to_student_at
+                   FROM students WHERE username='moving-campaign' ''',
+            ).fetchone()
+
+        preview = client.post(
+            '/edit_student/moving-campaign/transfer_group',
+            data=dict(data, preview='true'),
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.json['campaign_changed'])
+        self.assertIn('кампания 2026', preview.json['message'])
+        self.assertIn('кампания 2023', preview.json['message'])
+
+        response = client.post(
+            '/edit_student/moving-campaign/transfer_group',
+            data=data,
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 200)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                '''SELECT id, record_uuid, username, password, email, source_campaign_year,
+                          source_dogovor, source_fio, migrated_to_student_at,
+                          current_campaign_year, cohort1, cohort2
+                   FROM students WHERE username='moving-campaign' ''',
+            ).fetchone()
+            transfer = conn.execute(
+                '''SELECT old_campaign_year, new_campaign_year, old_cohort1, new_cohort1,
+                          old_cohort2, new_cohort2
+                   FROM student_group_transfers WHERE username='moving-campaign' ''',
+            ).fetchone()
+            audit = conn.execute(
+                '''SELECT action, details FROM audit_logs
+                   WHERE entity_id='moving-campaign' ORDER BY id DESC LIMIT 1'''
+            ).fetchone()
+            duplicate_count = conn.execute(
+                "SELECT COUNT(*) FROM students WHERE username='moving-campaign'"
+            ).fetchone()[0]
+
+        self.assertEqual(student[:9], before)
+        self.assertEqual(student[9:11], ('2023', '23СД-11-1'))
+        self.assertEqual(student[11], manticore.derive_cohort2('23СД-11-1'))
+        self.assertEqual(transfer[:4], ('2026', '2023', '26ЛД-11-1', '23СД-11-1'))
+        self.assertEqual(transfer[4:], ('ЛД-11', manticore.derive_cohort2('23СД-11-1')))
+        self.assertEqual(audit[0], 'student_campaign_transferred')
+        self.assertIn('old_campaign=2026', audit[1])
+        self.assertIn('new_campaign=2023', audit[1])
+        self.assertEqual(duplicate_count, 1)
+        self.assertNotIn(
+            'moving-campaign',
+            {row['username'] for row in manticore.get_all_students(campaign_year='2026')},
+        )
+        self.assertIn(
+            'moving-campaign',
+            {row['username'] for row in manticore.get_all_students(campaign_year='2023')},
+        )
+        with manticore.app.test_request_context('/'):
+            self.assertEqual(manticore.get_dashboard_data('2026')['students_total'], 0)
+            self.assertEqual(manticore.get_dashboard_data('2023')['students_total'], 1)
+
+    def test_cross_campaign_transfer_rejects_stale_campaign_without_changes(self):
+        client, _page, data = self.seed_cross_campaign_transfer()
+        data['expected_campaign'] = '2025'
+        response = client.post(
+            '/edit_student/moving-campaign/transfer_group',
+            data=data,
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json['code'], 'concurrent_update')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                "SELECT current_campaign_year, cohort1, migrated_to_student_at FROM students WHERE username='moving-campaign'"
+            ).fetchone()
+            history_count = conn.execute(
+                "SELECT COUNT(*) FROM student_group_transfers WHERE username='moving-campaign'"
+            ).fetchone()[0]
+        self.assertEqual(student, ('2026', '26ЛД-11-1', '2026-09-01 10:15:00'))
+        self.assertEqual(history_count, 0)
+
+    def test_cross_campaign_transfer_audit_failure_rolls_back_every_field(self):
+        client, _page, data = self.seed_cross_campaign_transfer()
+        with mock.patch.object(manticore, 'log_action', side_effect=sqlite3.OperationalError('audit failure')):
+            response = client.post(
+                '/edit_student/moving-campaign/transfer_group',
+                data=data,
+                headers={'Accept': 'application/json'},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json['code'], 'database_error')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                '''SELECT current_campaign_year, cohort1, cohort2, source_campaign_year,
+                          migrated_to_student_at
+                   FROM students WHERE username='moving-campaign' ''',
+            ).fetchone()
+            history_count = conn.execute(
+                "SELECT COUNT(*) FROM student_group_transfers WHERE username='moving-campaign'"
+            ).fetchone()[0]
+        self.assertEqual(student, ('2026', '26ЛД-11-1', 'ЛД-11', '2026', '2026-09-01 10:15:00'))
+        self.assertEqual(history_count, 0)
 
     def test_manual_capacity_override_full_and_overfilled(self):
         for count in (25, 27):

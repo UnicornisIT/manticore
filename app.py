@@ -20,7 +20,7 @@ import hmac
 import uuid
 from string import Formatter
 from functools import wraps
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from time import time
 import update_app
@@ -28,6 +28,7 @@ import desktop_releases
 from app_metadata import APP_METADATA
 from email_validation import ensure_dns_cache_table, validate_email
 from db_safety import (
+    CURRENT_SCHEMA_VERSION,
     DatabaseIntegrityError,
     DatabaseSchemaTooNewError,
     migrate_database,
@@ -1333,6 +1334,7 @@ def ensure_students_origin_columns(conn):
     student_columns = {
         'cohort2': 'TEXT',
         'source_campaign_year': 'TEXT',
+        'current_campaign_year': 'TEXT',
         'source_dogovor': 'TEXT',
         'source_fio': 'TEXT',
         'migrated_to_student_at': 'TEXT',
@@ -1341,7 +1343,38 @@ def ensure_students_origin_columns(conn):
         if column not in columns:
             conn.execute(f'ALTER TABLE students ADD COLUMN {column} {column_type}')
             columns.append(column)
+    rows = conn.execute(
+        '''
+        SELECT id, cohort1, source_campaign_year
+        FROM students
+        WHERE current_campaign_year IS NULL OR TRIM(current_campaign_year)=''
+        '''
+    ).fetchall()
+    has_groups_table = table_exists(conn, 'groups')
+    for student_id, cohort1, source_campaign_year in rows:
+        group = (
+            conn.execute(
+                'SELECT group_year FROM groups WHERE name=?',
+                (normalize_group_name(cohort1),),
+            ).fetchone()
+            if has_groups_table else None
+        )
+        current_campaign_year = (
+            str(group[0]) if group and group[0]
+            else normalize_campaign_year(
+                source_campaign_year,
+                infer_group_year(cohort1, DEFAULT_CAMPAIGN_YEAR),
+            )
+        )
+        conn.execute(
+            'UPDATE students SET current_campaign_year=? WHERE id=?',
+            (current_campaign_year, student_id),
+        )
     backfill_students_cohort2(conn)
+    conn.execute('''
+        CREATE INDEX IF NOT EXISTS idx_students_current_campaign_year
+        ON students (current_campaign_year)
+    ''')
     conn.execute('''
         CREATE INDEX IF NOT EXISTS idx_students_migrated_to_student_at
         ON students (migrated_to_student_at)
@@ -1773,6 +1806,8 @@ def create_student_group_transfers_table(conn):
     columns = get_table_columns(conn, 'student_group_transfers')
     extra_columns = {
         'movement_type': "TEXT DEFAULT 'transfer'",
+        'old_campaign_year': 'TEXT',
+        'new_campaign_year': 'TEXT',
         'enrollment_order_id': 'INTEGER',
         'enrollment_order_upload_id': 'INTEGER',
         'order_number': 'TEXT',
@@ -1940,11 +1975,14 @@ def get_dashboard_data(campaign_year):
         duplicates = conn.execute('SELECT COUNT(*) FROM pending_duplicates WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
         conflicts = conn.execute('SELECT COUNT(*) FROM login_conflicts WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
         students_total = conn.execute(
-            'SELECT COUNT(*) FROM students WHERE source_campaign_year=?',
+            '''SELECT COUNT(*) FROM students
+               WHERE COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)=?''',
             (campaign_year,)
         ).fetchone()[0]
         students_without_campaign = conn.execute(
-            "SELECT COUNT(*) FROM students WHERE source_campaign_year IS NULL OR source_campaign_year=''"
+            """SELECT COUNT(*) FROM students
+               WHERE COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year) IS NULL
+                  OR COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)=''"""
         ).fetchone()[0]
         students_without_dogovor = conn.execute(
             "SELECT COUNT(*) FROM students WHERE source_campaign_year=? AND (source_dogovor IS NULL OR source_dogovor='')",
@@ -2631,6 +2669,7 @@ PERSON_FIELD_LABELS = {
     'password': 'Пароль Moodle',
     'campaign_year': 'Приемная кампания',
     'source_campaign_year': 'Кампания поступления',
+    'current_campaign_year': 'Текущая приемная кампания',
     'fam': 'Фамилия',
     'imotch': 'Имя и отчество',
     'firstname': 'Имя',
@@ -2655,6 +2694,7 @@ PERSON_FIELD_HELP = {
     'password': 'Пароль к учетной записи Moodle.',
     'campaign_year': 'Год приемной кампании, к которой относится запись.',
     'source_campaign_year': 'Год приемной кампании, из которой пришел студент.',
+    'current_campaign_year': 'Кампания, к которой студент относится сейчас.',
     'fam': 'Фамилия отдельно, используется при формировании логина и списков.',
     'imotch': 'Имя и отчество отдельно, используется при формировании логина и списков.',
     'firstname': 'Имя студента в Moodle.',
@@ -2678,7 +2718,7 @@ PERSON_SECTION_FIELDS = {
         ('Дополнительно', ['comment', 'created_at', 'id']),
     ],
     'student': [
-        ('Основные данные', ['lastname', 'firstname', 'source_fio', 'cohort1', 'cohort2']),
+        ('Основные данные', ['lastname', 'firstname', 'source_fio', 'current_campaign_year', 'cohort1', 'cohort2']),
         ('Контакты и доступ', ['username', 'password', 'email']),
         ('Данные при поступлении', ['source_dogovor', 'source_campaign_year']),
         ('Служебная информация', ['id']),
@@ -4724,13 +4764,15 @@ def apply_students_import(file_path):
                 conn.execute(
                     '''
                     INSERT INTO students
-                        (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (username, password, email, firstname, lastname, cohort1, cohort2,
+                         source_campaign_year, current_campaign_year, source_dogovor, source_fio)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
                     (
                         row["username"], row["password"], row["email"],
                         row["firstname"], row["lastname"], row["cohort1"], row["cohort2"],
-                        row["source_campaign_year"], row["source_dogovor"], row["source_fio"]
+                        row["source_campaign_year"], row["source_campaign_year"],
+                        row["source_dogovor"], row["source_fio"]
                     )
                 )
             elif action == 'duplicate':
@@ -4970,30 +5012,31 @@ def get_groups_with_counts(conn, group_year=None, include_hidden=False):
     if group_year:
         if include_hidden:
             rows = conn.execute(
-                'SELECT name, group_year, is_hidden FROM groups WHERE group_year=? ORDER BY is_hidden, name',
+                'SELECT id, name, group_year, is_hidden FROM groups WHERE group_year=? ORDER BY is_hidden, name',
                 (group_year,)
             )
         else:
             rows = conn.execute(
-                'SELECT name, group_year, is_hidden FROM groups WHERE group_year=? AND COALESCE(is_hidden, 0)=0 ORDER BY name',
+                'SELECT id, name, group_year, is_hidden FROM groups WHERE group_year=? AND COALESCE(is_hidden, 0)=0 ORDER BY name',
                 (group_year,)
             )
     else:
         if include_hidden:
-            rows = conn.execute('SELECT name, group_year, is_hidden FROM groups ORDER BY group_year, is_hidden, name')
+            rows = conn.execute('SELECT id, name, group_year, is_hidden FROM groups ORDER BY group_year, is_hidden, name')
         else:
             rows = conn.execute(
-                'SELECT name, group_year, is_hidden FROM groups WHERE COALESCE(is_hidden, 0)=0 ORDER BY group_year, name'
+                'SELECT id, name, group_year, is_hidden FROM groups WHERE COALESCE(is_hidden, 0)=0 ORDER BY group_year, name'
             )
 
     for row in rows:
-        name = row[0]
-        row_group_year = row[1] or infer_group_year(name, DEFAULT_CAMPAIGN_YEAR)
-        is_hidden = bool(row[2])
+        group_id, name = row[0], row[1]
+        row_group_year = row[2] or infer_group_year(name, DEFAULT_CAMPAIGN_YEAR)
+        is_hidden = bool(row[3])
         count = get_group_student_count(conn, name)
         is_full = count >= MAX_GROUP_STUDENTS
         can_create_next = not is_hidden and is_full and is_last_subgroup(conn, name, row_group_year)
         groups.append({
+            'id': group_id,
             'name': name,
             'group_year': row_group_year,
             'specialty_key': group_specialty_key(name),
@@ -5007,6 +5050,72 @@ def get_groups_with_counts(conn, group_year=None, include_hidden=False):
             'can_create_next': can_create_next,
             'next_name': get_next_subgroup_name(conn, name, row_group_year) if can_create_next else '',
         })
+    return groups
+
+def resolve_student_current_campaign_year(conn, cohort1, current_campaign_year, source_campaign_year):
+    current_campaign_year = str(current_campaign_year or '').strip()
+    if _campaign_year_re.fullmatch(current_campaign_year):
+        return current_campaign_year
+    group = conn.execute(
+        'SELECT group_year FROM groups WHERE name=?',
+        (normalize_group_name(cohort1),),
+    ).fetchone()
+    if group and _campaign_year_re.fullmatch(str(group[0] or '')):
+        return str(group[0])
+    source_campaign_year = str(source_campaign_year or '').strip()
+    if _campaign_year_re.fullmatch(source_campaign_year):
+        return source_campaign_year
+    return infer_group_year(cohort1, get_active_campaign_year())
+
+def get_student_transfer_campaigns(conn, current_campaign_year):
+    """Campaigns with real records, including archived years and group-only years."""
+    years = {str(current_campaign_year)} if current_campaign_year else set()
+    create_campaign_settings_table(conn)
+    metadata = {
+        str(row[0]): {'is_archived': bool(row[1]), 'is_active': bool(row[2])}
+        for row in conn.execute(
+            'SELECT campaign_year, is_archived, is_active FROM campaign_settings'
+        )
+        if row[0]
+    }
+    years.update(metadata)
+    for table, column in (
+        ('groups', 'group_year'),
+        ('abiturients', 'campaign_year'),
+        ('enrollment_candidates', 'campaign_year'),
+        ('enrollment_orders', 'campaign_year'),
+        ('enrollment_order_uploads', 'campaign_year'),
+        ('students', 'current_campaign_year'),
+        ('students', 'source_campaign_year'),
+    ):
+        if not table_exists(conn, table) or column not in get_table_columns(conn, table):
+            continue
+        rows = conn.execute(
+            f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL AND TRIM({column})<>''"
+        ).fetchall()
+        years.update(str(row[0]) for row in rows if _campaign_year_re.fullmatch(str(row[0] or '')))
+    current_campaign_year = str(current_campaign_year or '')
+    ordered_years = sorted(
+        (year for year in years if _campaign_year_re.fullmatch(year)),
+        key=lambda year: (year != current_campaign_year, -int(year)),
+    )
+    return [
+        {
+            'campaign_year': year,
+            'is_current': year == current_campaign_year,
+            'is_archived': metadata.get(year, {}).get('is_archived', False),
+            'is_active': metadata.get(year, {}).get('is_active', False),
+        }
+        for year in ordered_years
+    ]
+
+def sort_student_transfer_groups(groups, current_group):
+    current_base = base_group_name(current_group)
+    groups.sort(key=lambda group: (
+        base_group_name(group['name']) != current_base,
+        2 if group['is_over_capacity'] else 1 if group['is_full'] else 0,
+        natural_text_sort_key(group['name']),
+    ))
     return groups
 
 def get_candidate_group_options(groups, specialty_key=None):
@@ -7600,7 +7709,8 @@ def get_student_transfer_orders(username):
         ensure_student_enrollment_movement(conn, username)
         cur = conn.execute(
             '''
-            SELECT id, username, movement_type, old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+            SELECT id, username, movement_type, old_campaign_year, new_campaign_year,
+                   old_cohort1, old_cohort2, new_cohort1, new_cohort2,
                    enrollment_order_id, enrollment_order_upload_id, order_number, order_date, order_source,
                    order_filename, order_original_filename, order_mime_type, order_size,
                    created_by, created_at
@@ -7656,6 +7766,13 @@ def get_student_transfer_orders(username):
         )
         order['from_group_text'] = order.get('old_cohort1') or 'Без группы'
         order['to_group_text'] = order.get('new_cohort1') or 'Без группы'
+        order['from_campaign_text'] = order.get('old_campaign_year') or '-'
+        order['to_campaign_text'] = order.get('new_campaign_year') or '-'
+        order['campaign_changed'] = bool(
+            order.get('old_campaign_year')
+            and order.get('new_campaign_year')
+            and order['old_campaign_year'] != order['new_campaign_year']
+        )
         order['cohort2_text'] = order.get('new_cohort2') or '-'
         if order['has_order_file']:
             order['order_file_text'] = order.get('order_original_filename') or 'PDF прикреплен'
@@ -7682,16 +7799,24 @@ def record_student_enrollment_movement(conn, username, target_group, target_coho
     order_match = order_match or {}
     if not order_match:
         return
+    group = conn.execute(
+        'SELECT group_year FROM groups WHERE name=?',
+        (target_group,),
+    ).fetchone()
+    target_campaign_year = str(group[0]) if group and group[0] else infer_group_year(target_group)
     conn.execute(
         '''
         INSERT INTO student_group_transfers
-            (username, movement_type, old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+            (username, movement_type, old_campaign_year, new_campaign_year,
+             old_cohort1, old_cohort2, new_cohort1, new_cohort2,
              enrollment_order_id, enrollment_order_upload_id, order_number, order_date, order_source,
              order_filename, order_original_filename, order_mime_type, order_size, created_by)
-        VALUES (?, 'enrollment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, 'enrollment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         (
             username,
+            '',
+            target_campaign_year,
             'Абитуриенты',
             '',
             target_group,
@@ -7773,10 +7898,9 @@ def index():
     dashboard = get_dashboard_data(campaign_year)
     return render_template('index.html', dashboard=dashboard)
 
-@app.route('/documentation')
-@login_required
+@app.route('/documentation', methods=['GET'], provide_automatic_options=False)
 def documentation():
-    """Render the read-only in-app user guide."""
+    """Render the public, read-only in-app user guide."""
     return render_template('documentation.html')
 
 @app.route('/desktop_settings')
@@ -8732,7 +8856,7 @@ def get_all_students(
     '''
     params = []
     if campaign_year:
-        query += ' AND s.source_campaign_year=?'
+        query += " AND COALESCE(NULLIF(s.current_campaign_year, ''), s.source_campaign_year)=?"
         params.append(normalize_campaign_year(campaign_year, get_active_campaign_year()))
     if cohort:
         query += " AND s.cohort1 = ?"
@@ -8788,6 +8912,32 @@ def get_all_students(
             )
         )
     return students
+
+def get_student_migration_calendar(year, month):
+    """Return migration counts for the six-week calendar grid containing a month."""
+    first_day = date(year, month, 1)
+    grid_start = first_day - timedelta(days=first_day.weekday())
+    grid_end = grid_start + timedelta(days=42)
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            '''
+            SELECT date(migrated_to_student_at) AS day, COUNT(*) AS student_count
+            FROM students
+            WHERE migrated_to_student_at IS NOT NULL
+              AND migrated_to_student_at >= ?
+              AND migrated_to_student_at < ?
+            GROUP BY date(migrated_to_student_at)
+            ORDER BY day
+            ''',
+            (grid_start.isoformat(), grid_end.isoformat()),
+        ).fetchall()
+    return {
+        'year': year,
+        'month': month,
+        'range_from': grid_start.isoformat(),
+        'range_to_exclusive': grid_end.isoformat(),
+        'days': {day: count for day, count in rows if day},
+    }
 
 def get_pending_duplicates(campaign_year=None):
     campaign_year = normalize_campaign_year(campaign_year, get_active_campaign_year())
@@ -10277,6 +10427,19 @@ def students_list():
         order_dir=order_dir
     )
 
+@app.route('/api/students/migration-calendar')
+@login_required
+def students_migration_calendar():
+    try:
+        year = int(request.args.get('year', ''))
+        month = int(request.args.get('month', ''))
+        if not 1 <= year <= 9998 or not 1 <= month <= 12:
+            raise ValueError
+        date(year, month, 1)
+    except (TypeError, ValueError):
+        return jsonify(error='Параметры year и month должны задавать корректный месяц.'), 400
+    return jsonify(get_student_migration_calendar(year, month))
+
 @app.route('/students/download')
 @login_required
 def download_students():
@@ -10316,22 +10479,74 @@ def download_students():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="students.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+@app.route('/api/student-transfer/groups')
+@login_required
+@role_required('admin')
+def student_transfer_campaign_groups():
+    username = request.args.get('username', '').strip()
+    try:
+        campaign_year = require_campaign_year(request.args.get('campaign_year'))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    with sqlite3.connect(DB_PATH) as conn:
+        student = conn.execute(
+            '''SELECT cohort1, source_campaign_year, current_campaign_year
+               FROM students WHERE username=?''',
+            (username,),
+        ).fetchone()
+        if not student:
+            return jsonify(error='Студент не найден.'), 404
+        current_group, source_campaign_year, stored_campaign_year = student
+        current_campaign_year = resolve_student_current_campaign_year(
+            conn, current_group, stored_campaign_year, source_campaign_year
+        )
+        campaigns = get_student_transfer_campaigns(conn, current_campaign_year)
+        if campaign_year not in {item['campaign_year'] for item in campaigns}:
+            return jsonify(error='Приёмная кампания не найдена.'), 404
+        groups = sort_student_transfer_groups(
+            get_groups_with_counts(conn, campaign_year), current_group
+        )
+    return jsonify(
+        campaign_year=campaign_year,
+        groups=[
+            {
+                'id': group['id'],
+                'name': group['name'],
+                'current_students': group['count'],
+                'capacity': group['capacity'],
+                'cohort2': group['cohort2'],
+                'is_current_group': group['name'] == current_group,
+                'is_full': group['is_full'],
+                'is_over_capacity': group['is_over_capacity'],
+            }
+            for group in groups
+        ],
+    )
+
 @app.route('/edit_student/<username>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_student(username):
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT username, password, email, firstname, lastname, cohort1, cohort2 FROM students WHERE username=?', (username,))
+        cur = conn.execute(
+            '''SELECT username, password, email, firstname, lastname, cohort1, cohort2,
+                      source_campaign_year, current_campaign_year
+               FROM students WHERE username=?''',
+            (username,),
+        )
         student = cur.fetchone()
-        transfer_group_year = infer_group_year(student[5], get_active_campaign_year()) if student else get_active_campaign_year()
-        transfer_groups = get_groups_with_counts(conn, transfer_group_year)
         if student:
-            current_base = base_group_name(student[5])
-            transfer_groups.sort(key=lambda group: (
-                base_group_name(group['name']) != current_base,
-                2 if group['is_over_capacity'] else 1 if group['is_full'] else 0,
-                group['name'],
-            ))
+            transfer_group_year = resolve_student_current_campaign_year(
+                conn, student[5], student[8], student[7]
+            )
+            transfer_groups = sort_student_transfer_groups(
+                get_groups_with_counts(conn, transfer_group_year), student[5]
+            )
+            transfer_campaigns = get_student_transfer_campaigns(conn, transfer_group_year)
+        else:
+            transfer_group_year = get_active_campaign_year()
+            transfer_groups = []
+            transfer_campaigns = []
     if not student:
         flash('Студент не найден')
         return redirect(url_for('students_list'))
@@ -10346,12 +10561,14 @@ def edit_student(username):
             student = (username, password, email, firstname, lastname, student[5], student[6])
             return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
                                    transfer_group_year=transfer_group_year,
+                                   transfer_campaigns=transfer_campaigns,
                                    transfer_orders=get_student_transfer_orders(username), email_warning=None)
         if email_check.severity == 'warning' and request.form.get('email_warning_confirm') != '1':
             flash('Проверьте домен почты. Адрес не изменён.', 'warning')
             student = (username, password, email, firstname, lastname, student[5], student[6])
             return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
                                    transfer_group_year=transfer_group_year,
+                                   transfer_campaigns=transfer_campaigns,
                                    transfer_orders=get_student_transfer_orders(username), email_warning=email_check)
         backup_path = create_database_backup('before_edit_student')
         cohort1 = student[5]
@@ -10373,6 +10590,7 @@ def edit_student(username):
         student=student,
         transfer_groups=transfer_groups,
         transfer_group_year=transfer_group_year,
+        transfer_campaigns=transfer_campaigns,
         transfer_orders=get_student_transfer_orders(username),
         email_warning=None,
     )
@@ -10383,14 +10601,14 @@ class StudentTransferError(Exception):
         self.code, self.status, self.details = code, status, details
 
 
-def transfer_student_to_group(username, selected_group, *, actor_role, order_file=None,
-                              capacity_override=False, expected_source=None, preview=False,
-                              comment=''):
+def transfer_student_to_group(username, selected_group, *, actor_role, target_campaign_year=None,
+                              order_file=None, capacity_override=False, expected_source=None,
+                              expected_campaign=None, preview=False, comment=''):
     """Manual administrative transfer. SQLite write lock precedes every authoritative read.
 
     Automatic allocation deliberately does not call this operation or receive its override.
-    Specialty/base changes are permitted by the existing manual transfer policy;
-    campaign changes and hidden targets are not.
+    Specialty/base and campaign changes are permitted by the manual transfer policy;
+    hidden targets are not.
     """
     if actor_role != 'admin':
         raise StudentTransferError('permission_denied', 'Перевод доступен только администратору.', 403)
@@ -10400,21 +10618,35 @@ def transfer_student_to_group(username, selected_group, *, actor_role, order_fil
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('BEGIN IMMEDIATE')
             student = conn.execute(
-                'SELECT cohort1, cohort2, source_campaign_year FROM students WHERE username=?',
+                '''SELECT cohort1, cohort2, source_campaign_year, current_campaign_year,
+                          migrated_to_student_at
+                   FROM students WHERE username=?''',
                 (username,)).fetchone()
             if not student:
                 raise StudentTransferError('student_not_found', 'Студент не найден.', 404)
-            old_cohort1, old_cohort2, source_year = student
+            old_cohort1, old_cohort2, source_year, stored_current_year, _migrated_at = student
+            current_campaign_year = resolve_student_current_campaign_year(
+                conn, old_cohort1, stored_current_year, source_year
+            )
             if expected_source is not None and expected_source != old_cohort1:
                 raise StudentTransferError('concurrent_update', 'Группа студента изменилась. Обновите карточку.')
+            if expected_campaign is not None and expected_campaign != current_campaign_year:
+                raise StudentTransferError('concurrent_update', 'Кампания студента изменилась. Обновите карточку.')
+            if target_campaign_year is None:
+                target_campaign_year = current_campaign_year
+            try:
+                target_campaign_year = require_campaign_year(target_campaign_year)
+            except ValueError as exc:
+                raise StudentTransferError('target_campaign_not_found', str(exc), 400) from exc
             target = conn.execute(
                 'SELECT group_year, is_hidden FROM groups WHERE name=?', (selected_group,)).fetchone()
             if not target or target[1]:
                 raise StudentTransferError('target_group_not_found', 'Выберите новую группу из справочника академических групп.', 404)
-            source = conn.execute('SELECT group_year FROM groups WHERE name=?', (old_cohort1,)).fetchone()
-            group_year = (source[0] if source else None) or infer_group_year(old_cohort1, source_year or get_active_campaign_year())
-            if str(target[0]) != str(group_year):
-                raise StudentTransferError('incompatible_campaign', 'Нельзя перевести студента в группу другой кампании.')
+            if str(target[0]) != target_campaign_year:
+                raise StudentTransferError(
+                    'incompatible_campaign',
+                    'Выбранная группа не относится к указанной приёмной кампании.'
+                )
             if normalize_group_name(old_cohort1).casefold() == selected_group.casefold():
                 raise StudentTransferError('same_group', 'Студент уже находится в этой группе.')
             source_count = get_group_student_count(conn, old_cohort1)
@@ -10431,13 +10663,22 @@ def transfer_student_to_group(username, selected_group, *, actor_role, order_fil
                     warnings.append('Вы переводите студента в группу другой специальности.')
                 if old_parts['base'] != new_parts['base']:
                     warnings.append('Изменяется образовательная база группы.')
+            campaign_changed = current_campaign_year != target_campaign_year
             message = (f'{old_cohort1}: {source_count}/{MAX_GROUP_STUDENTS} → {source_count - 1}/{MAX_GROUP_STUDENTS}. '
                        f'{selected_group}: {target_count}/{MAX_GROUP_STUDENTS} → {target_count + 1}/{MAX_GROUP_STUDENTS}. ')
+            if campaign_changed:
+                message = (
+                    'Студент будет перенесён в другую приёмную кампанию. '
+                    f'Сейчас: кампания {current_campaign_year}, группа {old_cohort1}. '
+                    f'Будет: кампания {target_campaign_year}, группа {selected_group}. '
+                ) + message
             if full:
                 message = (f'Выбранная группа заполнена: {selected_group}, {target_count}/{MAX_GROUP_STUDENTS}. '
                            f'После перевода в группе будет {target_count + 1} студентов. ') + message
             message += ' '.join(warnings)
             result = dict(old_group=old_cohort1, new_group=selected_group, cohort2=new_cohort2,
+                          old_campaign=current_campaign_year, new_campaign=target_campaign_year,
+                          campaign_changed=campaign_changed,
                           source_count=source_count, target_count=target_count,
                           capacity=MAX_GROUP_STUDENTS, capacity_exceeded=full, message=message)
             if full and not capacity_override:
@@ -10448,18 +10689,26 @@ def transfer_student_to_group(username, selected_group, *, actor_role, order_fil
             saved_file = (save_student_transfer_order_file(username, order_file)
                           if order_file and order_file.filename else
                           dict(filename='', original_filename='', mime_type='', size=0))
-            conn.execute('UPDATE students SET cohort1=?, cohort2=? WHERE username=?',
-                         (selected_group, new_cohort2, username))
+            conn.execute(
+                '''UPDATE students
+                   SET cohort1=?, cohort2=?, current_campaign_year=?
+                   WHERE username=?''',
+                (selected_group, new_cohort2, target_campaign_year, username),
+            )
             conn.execute(
                 """INSERT INTO student_group_transfers
-                   (username, movement_type, old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+                   (username, movement_type, old_campaign_year, new_campaign_year,
+                    old_cohort1, old_cohort2, new_cohort1, new_cohort2,
                     order_source, order_filename, order_original_filename, order_mime_type,
                     order_size, created_by)
-                   VALUES (?, 'transfer', ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?)""",
-                (username, old_cohort1, old_cohort2, selected_group, new_cohort2,
+                   VALUES (?, 'transfer', ?, ?, ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?)""",
+                (username, current_campaign_year, target_campaign_year,
+                 old_cohort1, old_cohort2, selected_group, new_cohort2,
                  saved_file['filename'], saved_file['original_filename'], saved_file['mime_type'],
                  saved_file['size'], session.get('user', '')))
-            log_action('student_group_transferred', 'student', username,
+            log_action('student_campaign_transferred' if campaign_changed else 'student_group_transferred',
+                       'student', username,
+                       f"old_campaign={current_campaign_year}; new_campaign={target_campaign_year}; "
                        f"old_cohort1={old_cohort1}; old_cohort2={old_cohort2}; "
                        f"new_cohort1={selected_group}; new_cohort2={new_cohort2}; "
                        f"source_count={source_count}->{source_count - 1}; "
@@ -10483,9 +10732,11 @@ def transfer_student_group(username):
     try:
         result = transfer_student_to_group(
             username, request.form.get('new_cohort1', ''), actor_role=session.get('role'),
+            target_campaign_year=request.form.get('target_campaign_year'),
             order_file=request.files.get('transfer_order_file'),
             capacity_override=request.form.get('capacity_override') == 'true',
             expected_source=request.form.get('expected_source'),
+            expected_campaign=request.form.get('expected_campaign'),
             preview=request.form.get('preview') == 'true', comment=request.form.get('comment', '').strip())
         if request.form.get('preview') == 'true':
             return jsonify(result)
@@ -10504,7 +10755,14 @@ def transfer_student_group(username):
             return jsonify(code=code, message=message, **details), status
         flash(message, 'error')
         return redirect(url_for('edit_student', username=username))
-    flash(f"Студент переведён: {result['old_group']} → {result['new_group']}.", 'success')
+    if result['campaign_changed']:
+        flash(
+            f"Студент успешно перенесён в приёмную кампанию {result['new_campaign']}, "
+            f"группа {result['new_group']}.",
+            'success',
+        )
+    else:
+        flash(f"Студент переведён: {result['old_group']} → {result['new_group']}.", 'success')
     if result['capacity_exceeded']:
         flash(f"Группа теперь переполнена: {result['target_count'] + 1}/{result['capacity']}.", 'warning')
     destination = url_for('edit_student', username=username)
@@ -10730,13 +10988,15 @@ def abiturients_to_students():
                     conn.execute(
                         '''
                         INSERT INTO students
-                            (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio, migrated_to_student_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                            (username, password, email, firstname, lastname, cohort1, cohort2,
+                             source_campaign_year, current_campaign_year, source_dogovor, source_fio,
+                             migrated_to_student_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                         ''',
                         (
                             plan_row['login'], 'cron', plan_row['email'],
                             plan_row['firstname'], plan_row['lastname'], target_group, target_cohort2,
-                            campaign_year, plan_row['dogovor'], plan_row['fio']
+                            campaign_year, campaign_year, plan_row['dogovor'], plan_row['fio']
                         )
                     )
                     record_student_enrollment_movement(
@@ -10898,13 +11158,15 @@ def abiturients_to_students():
                 conn.execute(
                     '''
                     INSERT INTO students
-                        (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year, source_dogovor, source_fio, migrated_to_student_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                        (username, password, email, firstname, lastname, cohort1, cohort2,
+                         source_campaign_year, current_campaign_year, source_dogovor, source_fio,
+                         migrated_to_student_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                     ''',
                     (
                         candidate['username'], 'cron', candidate['email'],
                         candidate['firstname'], candidate['lastname'], target_group, target_cohort2,
-                        campaign_year, candidate['dogovor'], candidate['fio']
+                        campaign_year, campaign_year, candidate['dogovor'], candidate['fio']
                     )
                 )
                 record_student_enrollment_movement(

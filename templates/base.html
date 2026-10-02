@@ -202,7 +202,11 @@
     <footer id="main-footer">
         <div class="footer-inner">
             <p>© {{ app_metadata.name }} <span class="footer-version">{{ app_version }}</span> · Разработчик: {{ app_metadata.developer_name }}</p>
-            <nav aria-label="Контакты разработчика">{{ developer_links(app_metadata) }}</nav>
+            <nav aria-label="Ссылки и контакты разработчика">
+                {{ developer_links(app_metadata) }}
+                <span aria-hidden="true">·</span>
+                <a href="{{ url_for('documentation') }}" class="footer-link">Документация</a>
+            </nav>
         </div>
     </footer>
     {% endif %}

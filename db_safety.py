@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 MIGRATION_BACKUP_KEEP = 5
 LARGE_DATABASE_BYTES = 512 * 1024 * 1024
 
