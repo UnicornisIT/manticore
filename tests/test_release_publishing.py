@@ -106,6 +106,10 @@ save()
 '''
 
 
+@unittest.skipIf(
+    os.environ.get('MANTICORE_SKIP_RELEASE_WORKFLOW_TESTS') == '1',
+    'The release job performs the real publish workflow after application tests.',
+)
 @unittest.skipUnless(PWSH, 'PowerShell 7 is required (available on the Windows release runner)')
 class ReleasePublishingTests(unittest.TestCase):
     @classmethod

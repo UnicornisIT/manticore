@@ -50,6 +50,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts' }
       - name: Syntax checks and existing test suite
         shell: pwsh
+        env:
+          # Avoid recursively simulating this workflow dozens of times inside
+          # the real release job. The publishing stage below performs the
+          # end-to-end verification against the actual GitHub draft.
+          MANTICORE_SKIP_RELEASE_WORKFLOW_TESTS: '1'
         run: |
           .venv-desktop/Scripts/python.exe -m compileall -q app.py desktop desktop_releases.py
           if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed' }
