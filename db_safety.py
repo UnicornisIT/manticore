@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,15 @@ SCHEMA_INTRODUCED_IN = {
     3: "0.1.0-alpha",
     4: "0.1.1",
 }
+SCHEMA_VERSION_FLOOR = 4
+if CURRENT_SCHEMA_VERSION < SCHEMA_VERSION_FLOOR:
+    raise RuntimeError("CURRENT_SCHEMA_VERSION must never be lower than the released schema floor.")
+if CURRENT_SCHEMA_VERSION != SCHEMA_VERSION_FLOOR:
+    raise RuntimeError("A schema bump must also advance SCHEMA_VERSION_FLOOR permanently.")
+if CURRENT_SCHEMA_VERSION != max(SCHEMA_INTRODUCED_IN):
+    raise RuntimeError("CURRENT_SCHEMA_VERSION must match the newest SCHEMA_INTRODUCED_IN entry.")
+if set(SCHEMA_INTRODUCED_IN) != set(range(2, CURRENT_SCHEMA_VERSION + 1)):
+    raise RuntimeError("SCHEMA_INTRODUCED_IN history must remain contiguous and must not delete old entries.")
 # Indexing deliberately fails during tests/builds if a schema bump is not
 # assigned a new application version at the same time.
 CURRENT_SCHEMA_MIN_APP_VERSION = SCHEMA_INTRODUCED_IN[CURRENT_SCHEMA_VERSION]
@@ -35,6 +45,10 @@ class DatabaseSchemaTooNewError(DatabaseSafetyError):
     pass
 
 
+class DatabaseSchemaMismatchError(DatabaseSafetyError):
+    pass
+
+
 class DatabaseLockedError(DatabaseSafetyError):
     pass
 
@@ -48,6 +62,32 @@ def schema_too_new_message(actual_version: int) -> str:
         "Эта база данных была обновлена более новой версией Manticore "
         f"(схема БД: {int(actual_version)}, поддерживается: {CURRENT_SCHEMA_VERSION}). "
         "Установите более новую версию программы."
+    )
+
+
+@dataclass(frozen=True)
+class SchemaVersionState:
+    metadata_version: int | None
+    pragma_user_version: int
+    metadata_table_exists: bool
+
+    @property
+    def effective_version(self) -> int:
+        return max(int(self.metadata_version or 0), int(self.pragma_user_version))
+
+    @property
+    def mismatch(self) -> bool:
+        if not self.metadata_table_exists:
+            return self.pragma_user_version != 0
+        return self.metadata_version is None or self.metadata_version != self.pragma_user_version
+
+
+def schema_mismatch_message(state: SchemaVersionState) -> str:
+    metadata = "отсутствует" if state.metadata_version is None else str(state.metadata_version)
+    return (
+        "Версии схемы SQLite не совпадают "
+        f"(schema_metadata: {metadata}, PRAGMA user_version: {state.pragma_user_version}). "
+        "База не изменялась; требуется диагностика совместимости."
     )
 
 
@@ -142,14 +182,25 @@ def restore_sqlite_backup(source_path: str | os.PathLike, destination_path: str 
     return destination_path
 
 
-def schema_version(connection: sqlite3.Connection) -> int:
+def schema_version_state(connection: sqlite3.Connection) -> SchemaVersionState:
     table = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_metadata'"
     ).fetchone()
     if not table:
-        return 0
-    row = connection.execute("SELECT version FROM schema_metadata WHERE id=1").fetchone()
-    return int(row[0]) if row else 0
+        metadata_version = None
+    else:
+        row = connection.execute("SELECT version FROM schema_metadata WHERE id=1").fetchone()
+        metadata_version = int(row[0]) if row else None
+    pragma_row = connection.execute("PRAGMA user_version").fetchone()
+    pragma_user_version = int(pragma_row[0]) if pragma_row else 0
+    return SchemaVersionState(metadata_version, pragma_user_version, bool(table))
+
+
+def schema_version(connection: sqlite3.Connection) -> int:
+    state = schema_version_state(connection)
+    if state.mismatch:
+        raise DatabaseSchemaMismatchError(schema_mismatch_message(state))
+    return state.effective_version
 
 
 def set_schema_version(connection: sqlite3.Connection, version: int) -> None:
@@ -182,6 +233,18 @@ def read_schema_version(path: str | os.PathLike) -> int:
     connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2.0)
     try:
         return schema_version(connection)
+    finally:
+        connection.close()
+
+
+def read_schema_state(path: str | os.PathLike) -> SchemaVersionState:
+    path = Path(path).resolve()
+    if not path.is_file() or path.stat().st_size == 0:
+        return SchemaVersionState(None, 0, False)
+    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2.0)
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        return schema_version_state(connection)
     finally:
         connection.close()
 

@@ -28,10 +28,15 @@ from pathlib import Path
 import desktop_releases
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
+    DatabaseSafetyError,
     DatabaseIntegrityError,
+    DatabaseLockedError,
+    DatabaseSchemaMismatchError,
     DatabaseSchemaTooNewError,
+    InsufficientDiskSpaceError,
     ensure_free_space,
-    read_schema_version,
+    read_schema_state,
+    schema_mismatch_message,
     schema_too_new_message,
     sqlite_backup,
     timestamp_token,
@@ -62,6 +67,7 @@ SOURCE_FILE_NOT_FOUND = "SOURCE_FILE_NOT_FOUND"
 SOURCE_DATABASE_CORRUPT = "SOURCE_DATABASE_CORRUPT"
 SOURCE_LOCKED = "SOURCE_LOCKED"
 SOURCE_SCHEMA_TOO_NEW = "SOURCE_SCHEMA_TOO_NEW"
+SOURCE_SCHEMA_MISMATCH = "SOURCE_SCHEMA_MISMATCH"
 SOURCE_UNKNOWN_ERROR = "SOURCE_UNKNOWN_ERROR"
 # Compatibility aliases for integrations built against the first fallback release.
 SOURCE_MISSING = SOURCE_FILE_NOT_FOUND
@@ -612,8 +618,8 @@ def prepare_fallback_database(config: dict) -> str:
     return str(fallback)
 
 
-def _source_result(code: str, message: str = "", *, available: bool = False) -> dict:
-    return {"code": code, "message": message, "available": available}
+def _source_result(code: str, message: str = "", *, available: bool = False, **details) -> dict:
+    return {"code": code, "message": message, "available": available, **details}
 
 
 def _missing_sqlite_result(path: Path, original: str, exc: OSError | None = None) -> dict:
@@ -640,22 +646,35 @@ def inspect_sqlite_source(database_path: str, timeout: float = 2.0) -> dict:
     except OSError as exc:
         return _missing_sqlite_result(path, original, exc)
     try:
-        connection = sqlite3.connect(original, timeout=timeout)
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout)
         try:
             connection.execute("PRAGMA query_only=ON")
             result = connection.execute("PRAGMA quick_check;").fetchone()
             if not result or str(result[0]).casefold() != "ok":
                 return _source_result(SOURCE_DATABASE_CORRUPT, "База данных требует проверки. Изменения структуры не выполнялись.")
-            version = read_schema_version(path)
+            state = read_schema_state(path)
+            details = {
+                "database_schema": state.effective_version,
+                "schema_metadata_version": state.metadata_version,
+                "pragma_user_version": state.pragma_user_version,
+            }
+            if state.mismatch:
+                return _source_result(
+                    SOURCE_SCHEMA_MISMATCH,
+                    schema_mismatch_message(state),
+                    **details,
+                )
+            version = state.effective_version
             if version > CURRENT_SCHEMA_VERSION:
                 return _source_result(
                     SOURCE_SCHEMA_TOO_NEW,
                     schema_too_new_message(version),
+                    **details,
                 )
             connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
         finally:
             connection.close()
-        return _source_result(SOURCE_OK, available=True)
+        return _source_result(SOURCE_OK, available=True, **details)
     except PermissionError as exc:
         logging.warning("Primary SQLite permission denied for %s: %s", database_path, exc)
         return _source_result(SOURCE_PERMISSION_DENIED, "Нет прав для чтения базы данных.")
@@ -907,11 +926,20 @@ def database_has_admin(database_path: str) -> bool:
     if not path.is_file() or path.stat().st_size == 0:
         return False
     try:
-        with sqlite3.connect(str(path)) as connection:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+            connection.execute("PRAGMA query_only=ON")
             row = connection.execute("SELECT 1 FROM users WHERE username='admin' LIMIT 1").fetchone()
         return bool(row)
-    except sqlite3.Error:
-        return False
+    except sqlite3.OperationalError as exc:
+        if any(token in str(exc).casefold() for token in ("locked", "busy")):
+            raise DatabaseLockedError(
+                "База данных временно занята другим процессом. Запуск остановлен до освобождения файла."
+            ) from exc
+        raise DatabaseSafetyError(f"Не удалось безопасно прочитать пользователей базы: {exc}") from exc
+    except sqlite3.DatabaseError as exc:
+        raise DatabaseIntegrityError(
+            "База данных повреждена или имеет неизвестный формат. Исходный файл не изменён."
+        ) from exc
 
 
 def prompt_initial_admin_password() -> str | None:
@@ -1023,23 +1051,111 @@ def source_dialog_state(config: dict, error: str = "", *, recovered: bool = Fals
     }
 
 
+def database_compatibility_message(source: dict, result: dict) -> str:
+    path = str(source.get("path") or "")
+    database_schema = result.get("database_schema", "не определена")
+    metadata_schema = result.get("schema_metadata_version")
+    pragma_schema = result.get("pragma_user_version")
+    if result.get("code") == SOURCE_SCHEMA_TOO_NEW:
+        return (
+            "Версия базы данных несовместима с этой сборкой Manticore.\n\n"
+            f"Версия приложения: {current_version()}\n"
+            f"Версия схемы базы: {database_schema}\n"
+            f"Максимальная поддерживаемая схема: {CURRENT_SCHEMA_VERSION}\n\n"
+            f"Файл:\n{path}\n\n"
+            "База не изменялась. Установите версию Manticore, поддерживающую эту схему, "
+            "либо выберите другую базу данных."
+        )
+    if result.get("code") == SOURCE_SCHEMA_MISMATCH:
+        metadata_label = "отсутствует" if metadata_schema is None else metadata_schema
+        return (
+            "Версии схемы базы данных не согласованы.\n\n"
+            f"Версия приложения: {current_version()}\n"
+            f"schema_metadata.version: {metadata_label}\n"
+            f"PRAGMA user_version: {pragma_schema}\n"
+            f"Максимальная поддерживаемая схема: {CURRENT_SCHEMA_VERSION}\n\n"
+            f"Файл:\n{path}\n\n"
+            "База не изменялась. Автоматическое исправление заблокировано; выберите другую базу "
+            "или передайте этот файл для диагностики."
+        )
+    return str(result.get("message") or "Не удалось открыть базу данных.")
+
+
+def log_startup_diagnostics(config: dict, source: dict, result: dict) -> None:
+    path_text = str(source.get("path") or "") if source.get("type") == "sqlite" else ""
+    exists = False
+    size = None
+    if path_text:
+        try:
+            path = Path(path_text)
+            exists = path.is_file()
+            size = path.stat().st_size if exists else None
+        except OSError:
+            pass
+    logging.info(
+        "Desktop startup diagnostics: app_version=%s executable=%s frozen=%s bundle_root=%s "
+        "database_path=%s exists=%s size=%s active_source=%s preferred_source=%s "
+        "create_if_missing=%s supported_schema=%s schema_metadata_version=%s "
+        "pragma_user_version=%s inspect_code=%s",
+        current_version(),
+        sys.executable,
+        bool(getattr(sys, "frozen", False)),
+        bundle_root(),
+        path_text,
+        exists,
+        size,
+        config.get("active_source", "primary"),
+        config.get("preferred_source", "ask"),
+        bool(source.get("create_if_missing")),
+        CURRENT_SCHEMA_VERSION,
+        result.get("schema_metadata_version"),
+        result.get("pragma_user_version"),
+        result.get("code"),
+    )
+    if result.get("code") in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}:
+        logging.error(
+            "Database compatibility check failed: app_version=%s supported_schema=%s "
+            "database_schema=%s schema_metadata_version=%s pragma_user_version=%s "
+            "path=%s action=blocked_before_write",
+            current_version(),
+            CURRENT_SCHEMA_VERSION,
+            result.get("database_schema"),
+            result.get("schema_metadata_version"),
+            result.get("pragma_user_version"),
+            path_text,
+        )
+
+
 def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
     """Resolve startup source interactively while retaining the primary definition."""
     config = migrate_config(config)
     while True:
         primary = configured_source(config)
-        primary_error = check_source_connection(primary)
+        primary_result = inspect_source(primary)
+        log_startup_diagnostics(config, primary, primary_result)
+        primary_error = "" if primary_result["code"] == SOURCE_OK else (
+            database_compatibility_message(primary, primary_result)
+            if primary_result["code"] in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}
+            else primary_result["message"]
+        )
         fallback_path = get_fallback_path(config)
         fallback_exists = Path(fallback_path).is_file()
-        fallback_error = check_sqlite_connection(fallback_path) if fallback_exists else ""
+        fallback_result = inspect_sqlite_source(fallback_path) if fallback_exists else _source_result(SOURCE_FILE_NOT_FOUND)
+        fallback_error = "" if fallback_result["code"] == SOURCE_OK else fallback_result["message"]
         active = config.get("active_source", "primary")
         preferred = config.get("preferred_source", "ask")
+        primary_blocked = primary_result["code"] in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}
 
-        if active == "primary" and not primary_error:
+        if active == "primary" and primary_result["code"] == SOURCE_OK:
             return primary, config
-        if active == "primary" and primary.get("type") == "sqlite" and primary.get("create_if_missing"):
+        if (
+            active == "primary"
+            and primary.get("type") == "sqlite"
+            and primary.get("create_if_missing")
+            and primary_result["code"] == SOURCE_FILE_NOT_FOUND
+        ):
             return primary, config
-        if active == "fallback" and fallback_exists and not fallback_error:
+        if active == "fallback" and fallback_exists and fallback_result["code"] == SOURCE_OK:
             if primary_error or preferred == "fallback":
                 ensure_fallback_session(config)
                 save_config(config)
@@ -1050,7 +1166,7 @@ def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
                     save_config(config)
                     return primary, config
             choice = show_source_dialog(source_dialog_state(config, recovered=True))
-        elif primary_error and preferred == "fallback" and fallback_exists:
+        elif primary_error and not primary_blocked and preferred == "fallback" and fallback_exists:
             config["active_source"] = "fallback"
             ensure_fallback_session(config)
             save_config(config)
@@ -1069,7 +1185,7 @@ def resolve_active_source(config: dict) -> tuple[dict | None, dict]:
         remember = bool(choice.get("remember"))
         if action == "retry":
             continue
-        if action == "primary" and not primary_error:
+        if action == "primary" and primary_result["code"] == SOURCE_OK:
             archive_dirty_fallback(config)
             config["active_source"] = "primary"
             config["preferred_source"] = "primary" if remember else "ask"
@@ -1834,7 +1950,22 @@ class DesktopLifecycle:
         if tray is not None:
             try:
                 tray.stop()
-                logging.info("Tray stopped")
+                # pystray creates a non-daemon setup_handler before the native
+                # backend reports ready. If the backend exits (or shutdown wins
+                # that race), Icon.stop() is a no-op and Python waits forever
+                # for setup_handler at interpreter shutdown. Release the private
+                # readiness queue only during teardown, then verify the thread
+                # has actually exited.
+                setup_thread = getattr(tray, "_setup_thread", None)
+                if isinstance(setup_thread, threading.Thread) and setup_thread.is_alive():
+                    readiness_queue = getattr(tray, "_Icon__queue", None)
+                    if readiness_queue is not None:
+                        readiness_queue.put(False)
+                    setup_thread.join(timeout=2)
+                if isinstance(setup_thread, threading.Thread) and setup_thread.is_alive():
+                    logging.error("Tray setup thread did not stop during shutdown")
+                else:
+                    logging.info("Tray stopped")
             except Exception:
                 logging.exception("Could not stop tray")
         return True
@@ -1929,7 +2060,123 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--admin-password-child", metavar="RESULT_PATH", help=argparse.SUPPRESS)
     parser.add_argument("--source-dialog-child", nargs=2, metavar=("STATE_PATH", "RESULT_PATH"), help=argparse.SUPPRESS)
     parser.add_argument("--wait-pid", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--build-info-file", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--preflight-database", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--preflight-result", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--startup-smoke-database", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--startup-smoke-result", metavar="PATH", help=argparse.SUPPRESS)
+    parser.add_argument("--create-if-missing", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
+
+
+def bundled_build_metadata() -> dict:
+    path = bundle_root() / "build-metadata.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        if isinstance(payload, dict):
+            return payload
+    except (OSError, ValueError):
+        pass
+    return {"version": current_version(), "schema_version": CURRENT_SCHEMA_VERSION, "commit": "development"}
+
+
+def write_json_result(path: str, payload: dict) -> None:
+    destination = Path(path).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def run_packaged_preflight(args: argparse.Namespace) -> int:
+    source = {
+        "type": "sqlite",
+        "path": normalize_database_path(args.preflight_database, create_parent=False),
+        "create_if_missing": bool(args.create_if_missing),
+    }
+    result = inspect_sqlite_source(source["path"])
+    allowed = result["code"] == SOURCE_OK or (
+        result["code"] == SOURCE_FILE_NOT_FOUND and source["create_if_missing"]
+    )
+    message = (
+        database_compatibility_message(source, result)
+        if result["code"] in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}
+        else result.get("message", "")
+    )
+    payload = {
+        **bundled_build_metadata(),
+        **result,
+        "allowed": allowed,
+        "message": message,
+        "path": source["path"],
+        "create_if_missing": source["create_if_missing"],
+    }
+    if args.preflight_result:
+        write_json_result(args.preflight_result, payload)
+    return 0 if allowed else 3
+
+
+def run_packaged_startup_smoke(args: argparse.Namespace) -> int:
+    """Exercise packaged app import, database initialization and HTTP startup."""
+    source = {
+        "type": "sqlite",
+        "path": normalize_database_path(args.startup_smoke_database, create_parent=False),
+        "create_if_missing": bool(args.create_if_missing),
+    }
+    result = inspect_sqlite_source(source["path"])
+    allowed = result["code"] == SOURCE_OK or (
+        result["code"] == SOURCE_FILE_NOT_FOUND and source["create_if_missing"]
+    )
+    payload = {
+        **bundled_build_metadata(),
+        **result,
+        "allowed": allowed,
+        "message": (
+            database_compatibility_message(source, result)
+            if result["code"] in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}
+            else result.get("message", "")
+        ),
+        "path": source["path"],
+        "create_if_missing": source["create_if_missing"],
+        "startup": "blocked",
+    }
+    if not allowed:
+        if args.startup_smoke_result:
+            write_json_result(args.startup_smoke_result, payload)
+        return 3
+
+    local_server = None
+    try:
+        require_safe_local_source(source)
+        admin_password = None if database_has_admin(source["path"]) else secrets.token_urlsafe(32)
+        require_safe_local_source(source)
+        local_server = LocalServer(source["path"], admin_password, secrets.token_urlsafe(48))
+        local_server.start()
+        with urllib.request.urlopen(local_server.url + "/healthz", timeout=10) as response:
+            status = int(getattr(response, "status", 200))
+            if status >= 400:
+                raise RuntimeError(f"Packaged health check returned HTTP {status}")
+        final_result = inspect_sqlite_source(source["path"])
+        if final_result["code"] != SOURCE_OK:
+            raise DatabaseSafetyError(final_result.get("message") or "Post-startup database check failed.")
+        payload.update(final_result)
+        payload.update({"allowed": True, "startup": "ok", "http_status": status})
+        exit_code = 0
+    except DatabaseSafetyError as exc:
+        payload.update({"allowed": False, "startup": "blocked", "message": str(exc)})
+        exit_code = 3
+    except Exception as exc:
+        payload.update({"allowed": False, "startup": "failed", "message": str(exc)})
+        exit_code = 4
+    finally:
+        if local_server is not None:
+            local_server.stop()
+    if args.startup_smoke_result:
+        write_json_result(args.startup_smoke_result, payload)
+    return exit_code
 
 
 def wait_for_process_exit(process_id: int) -> None:
@@ -1962,6 +2209,39 @@ def relaunch_after_source_switch(args: argparse.Namespace) -> None:
     )
 
 
+def require_safe_local_source(source: dict) -> dict:
+    """Repeat the read-only preflight immediately before importing the web app."""
+    result = inspect_sqlite_source(str(source.get("path") or ""))
+    code = result["code"]
+    if code == SOURCE_OK:
+        return result
+    if code == SOURCE_FILE_NOT_FOUND and source.get("create_if_missing"):
+        return result
+    message = (
+        database_compatibility_message(source, result)
+        if code in {SOURCE_SCHEMA_TOO_NEW, SOURCE_SCHEMA_MISMATCH}
+        else result.get("message") or "Проверка базы данных не пройдена."
+    )
+    if code == SOURCE_SCHEMA_TOO_NEW:
+        raise DatabaseSchemaTooNewError(message)
+    if code == SOURCE_SCHEMA_MISMATCH:
+        raise DatabaseSchemaMismatchError(message)
+    if code == SOURCE_DATABASE_CORRUPT:
+        raise DatabaseIntegrityError(message)
+    if code == SOURCE_LOCKED:
+        raise DatabaseLockedError(message)
+    raise DatabaseSafetyError(message)
+
+
+def show_database_safety_error(error: DatabaseSafetyError) -> None:
+    logging.error("Desktop database startup blocked before write: %s", error)
+    show_native_message(
+        "Manticore — база данных недоступна",
+        f"{error}\n\nБаза данных не изменялась. Подробности записаны в журнал клиента.",
+        error=True,
+    )
+
+
 def run_configured_client(config: dict, args: argparse.Namespace) -> int:
     source, config = resolve_active_source(config)
     if source is None:
@@ -1987,30 +2267,44 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
         return 0
 
     database_path = normalize_database_path(source.get("path") or default_database_path())
-    admin_password = None
-    if not database_has_admin(database_path):
-        admin_password = prompt_initial_admin_password()
-        if not admin_password:
-            return 1
-    secret_key = config.get("local_secret_key") or secrets.token_urlsafe(48)
-    config.update({"local_secret_key": secret_key})
-    save_config(config)
-
-    is_fallback = bool(source.get("fallback"))
-    fallback_session_id = ensure_fallback_session(config) if is_fallback else ""
-    if is_fallback:
+    source = {**source, "path": database_path}
+    try:
+        require_safe_local_source(source)
+        admin_password = None
+        if not database_has_admin(database_path):
+            admin_password = prompt_initial_admin_password()
+            if not admin_password:
+                return 1
+        # The password dialog can remain open for an arbitrary time. Repeat the
+        # preflight so a replaced/locked/newer file can never reach app import.
+        require_safe_local_source(source)
+        secret_key = config.get("local_secret_key") or secrets.token_urlsafe(48)
+        config.update({"local_secret_key": secret_key})
         save_config(config)
-    local_server = LocalServer(
-        database_path,
-        admin_password,
-        secret_key,
-        fallback_session_id=fallback_session_id,
-        primary_source_id=source_identifier(configured_source(config)) if is_fallback else "",
-    )
+
+        is_fallback = bool(source.get("fallback"))
+        fallback_session_id = ensure_fallback_session(config) if is_fallback else ""
+        if is_fallback:
+            save_config(config)
+        local_server = LocalServer(
+            database_path,
+            admin_password,
+            secret_key,
+            fallback_session_id=fallback_session_id,
+            primary_source_id=source_identifier(configured_source(config)) if is_fallback else "",
+        )
+    except (DatabaseSchemaTooNewError, DatabaseSchemaMismatchError, DatabaseIntegrityError,
+            DatabaseLockedError, InsufficientDiskSpaceError, DatabaseSafetyError) as exc:
+        show_database_safety_error(exc)
+        return 1
     lifecycle = DesktopLifecycle(config, local_server)
     lifecycle.start_tray()
     try:
         local_server.start()
+        primary = configured_source(config)
+        if source.get("type") == "sqlite" and source.get("path") == primary.get("path"):
+            config["database_source"].pop("create_if_missing", None)
+            save_config(config)
         update_server = config.get("update_server_url") or local_server.url
         runtime_config = {**config, "webview_url": local_server.url}
         switched = open_desktop_window(
@@ -2022,10 +2316,6 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
         )
     finally:
         lifecycle.shutdown_application()
-    primary = configured_source(config)
-    if source.get("type") == "sqlite" and source.get("path") == primary.get("path"):
-        config["database_source"].pop("create_if_missing", None)
-        save_config(config)
     if switched:
         relaunch_after_source_switch(args)
     return 0
@@ -2063,9 +2353,16 @@ def run_primary_instance(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    args = parse_arguments()
+    if args.build_info_file:
+        write_json_result(args.build_info_file, bundled_build_metadata())
+        return 0
+    if args.preflight_database:
+        return run_packaged_preflight(args)
+    if args.startup_smoke_database:
+        return run_packaged_startup_smoke(args)
     configure_logging()
     cleanup_old_installers()
-    args = parse_arguments()
     if args.source_dialog_child:
         return run_source_dialog_child(*args.source_dialog_child)
     if args.wait_pid:
@@ -2088,6 +2385,9 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except DatabaseSafetyError as exc:
+        show_database_safety_error(exc)
+        raise SystemExit(1)
     except Exception as exc:
         logging.exception("Desktop client stopped unexpectedly")
         show_native_message(

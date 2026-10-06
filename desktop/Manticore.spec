@@ -27,6 +27,7 @@ a = Analysis(
         (str(project_root / "static"), "static"),
         (str(project_root / "data"), "data"),
         (str(project_root / "VERSION"), "."),
+        (str(project_root / "build" / "build-metadata.json"), "."),
         (str(project_root / "desktop" / "manticore.ico"), "desktop"),
         (str(project_root / "desktop" / "ui"), "desktop/ui"),
         (str(project_root / "build" / "trusted_update.json"), "desktop"),

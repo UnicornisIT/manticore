@@ -1,6 +1,8 @@
 import base64
+import hashlib
 import json
 import os
+import queue
 import sqlite3
 import tempfile
 import threading
@@ -81,12 +83,111 @@ class WindowsClientTests(unittest.TestCase):
             connection = sqlite3.connect(newer)
             connection.execute('CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY, version INTEGER, updated_at TEXT)')
             connection.execute('INSERT INTO schema_metadata VALUES (1, ?, NULL)', (windows_client.CURRENT_SCHEMA_VERSION + 1,))
+            connection.execute(f'PRAGMA user_version={windows_client.CURRENT_SCHEMA_VERSION + 1}')
             connection.commit()
             connection.close()
             self.assertEqual(
                 windows_client.inspect_sqlite_source(str(newer))['code'],
                 windows_client.SOURCE_SCHEMA_TOO_NEW,
             )
+
+    def test_create_if_missing_never_bypasses_newer_schema(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory) / 'app-data'
+        ):
+            database = Path(directory) / 'newer.db'
+            connection = sqlite3.connect(database)
+            connection.execute('CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY, version INTEGER, updated_at TEXT)')
+            connection.execute(
+                'INSERT INTO schema_metadata VALUES (1, ?, NULL)',
+                (windows_client.CURRENT_SCHEMA_VERSION + 1,),
+            )
+            connection.execute(f'PRAGMA user_version={windows_client.CURRENT_SCHEMA_VERSION + 1}')
+            connection.commit()
+            connection.close()
+            before = hashlib.sha256(database.read_bytes()).hexdigest()
+            config = windows_client.migrate_config({
+                'mode': 'local',
+                'database_source': {'path': str(database), 'create_if_missing': True},
+            })
+            with mock.patch.object(
+                windows_client, 'show_source_dialog', return_value={'action': 'cancel', 'remember': False}
+            ), mock.patch.object(windows_client, 'LocalServer') as local_server, \
+                 mock.patch.object(windows_client, 'database_has_admin') as database_has_admin:
+                source, _ = windows_client.resolve_active_source(config)
+                exit_code = windows_client.run_configured_client(config, mock.Mock(skip_update=True))
+            self.assertIsNone(source)
+            self.assertEqual(exit_code, 0)
+            local_server.assert_not_called()
+            database_has_admin.assert_not_called()
+            self.assertEqual(hashlib.sha256(database.read_bytes()).hexdigest(), before)
+
+    def test_create_if_missing_allows_only_a_missing_sqlite_file(self):
+        denied_codes = (
+            windows_client.SOURCE_SCHEMA_TOO_NEW,
+            windows_client.SOURCE_SCHEMA_MISMATCH,
+            windows_client.SOURCE_DATABASE_CORRUPT,
+            windows_client.SOURCE_LOCKED,
+            windows_client.SOURCE_PERMISSION_DENIED,
+            windows_client.SOURCE_NETWORK_UNAVAILABLE,
+            windows_client.SOURCE_UNKNOWN_ERROR,
+        )
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            windows_client, 'application_data_directory', return_value=Path(directory) / 'app-data'
+        ):
+            config = windows_client.migrate_config({
+                'mode': 'local',
+                'database_source': {
+                    'path': str(Path(directory) / 'missing.db'),
+                    'create_if_missing': True,
+                },
+            })
+            with mock.patch.object(windows_client, 'inspect_source', return_value={
+                'code': windows_client.SOURCE_FILE_NOT_FOUND,
+                'message': 'missing',
+                'available': False,
+            }):
+                source, _ = windows_client.resolve_active_source(config)
+            self.assertEqual(source['path'], config['database_source']['path'])
+
+            for code in denied_codes:
+                with self.subTest(code=code), \
+                     mock.patch.object(windows_client, 'inspect_source', return_value={
+                         'code': code,
+                         'message': code,
+                         'available': False,
+                     }), mock.patch.object(
+                         windows_client, 'show_source_dialog', return_value={'action': 'cancel', 'remember': False}
+                     ):
+                    source, _ = windows_client.resolve_active_source(config)
+                self.assertIsNone(source)
+
+            config['database_source'].pop('create_if_missing')
+            with mock.patch.object(windows_client, 'inspect_source', return_value={
+                'code': windows_client.SOURCE_FILE_NOT_FOUND,
+                'message': 'missing',
+                'available': False,
+            }), mock.patch.object(
+                windows_client, 'show_source_dialog', return_value={'action': 'cancel', 'remember': False}
+            ):
+                source, _ = windows_client.resolve_active_source(config)
+            self.assertIsNone(source)
+
+    def test_schema_version_mismatch_is_reported_without_modifying_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'mismatch.db'
+            connection = sqlite3.connect(database)
+            connection.execute('CREATE TABLE schema_metadata (id INTEGER PRIMARY KEY, version INTEGER, updated_at TEXT)')
+            connection.execute('INSERT INTO schema_metadata VALUES (1, ?, NULL)', (windows_client.CURRENT_SCHEMA_VERSION,))
+            connection.execute(f'PRAGMA user_version={windows_client.CURRENT_SCHEMA_VERSION - 1}')
+            connection.commit()
+            connection.close()
+            before = hashlib.sha256(database.read_bytes()).hexdigest()
+            result = windows_client.inspect_sqlite_source(str(database))
+            self.assertEqual(result['code'], windows_client.SOURCE_SCHEMA_MISMATCH)
+            self.assertEqual(result['schema_metadata_version'], windows_client.CURRENT_SCHEMA_VERSION)
+            self.assertEqual(result['pragma_user_version'], windows_client.CURRENT_SCHEMA_VERSION - 1)
+            self.assertEqual(hashlib.sha256(database.read_bytes()).hexdigest(), before)
 
     def test_dirty_fallback_is_backed_up_and_archived(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
@@ -135,7 +236,9 @@ class WindowsClientTests(unittest.TestCase):
     def test_unavailable_primary_can_select_fallback_and_keep_primary(self):
         with tempfile.TemporaryDirectory() as directory, \
              mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
-             mock.patch.object(windows_client, 'check_source_connection', return_value='Недоступна'), \
+             mock.patch.object(windows_client, 'inspect_source', return_value={
+                 'code': windows_client.SOURCE_NETWORK_UNAVAILABLE, 'message': 'Недоступна', 'available': False,
+             }), \
              mock.patch.object(windows_client, 'show_source_dialog', return_value={'action': 'fallback', 'remember': True}), \
              mock.patch.object(windows_client, 'save_config') as save:
             config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
@@ -167,7 +270,9 @@ class WindowsClientTests(unittest.TestCase):
     def test_recovered_primary_prompts_without_automatic_switch(self):
         with tempfile.TemporaryDirectory() as directory, \
              mock.patch.object(windows_client, 'application_data_directory', return_value=Path(directory)), \
-             mock.patch.object(windows_client, 'check_source_connection', return_value=''), \
+             mock.patch.object(windows_client, 'inspect_source', return_value={
+                 'code': windows_client.SOURCE_OK, 'message': '', 'available': True,
+             }), \
              mock.patch.object(windows_client, 'show_source_dialog', return_value={'action': 'primary', 'remember': True}) as dialog, \
              mock.patch.object(windows_client, 'save_config'):
             config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
@@ -190,7 +295,9 @@ class WindowsClientTests(unittest.TestCase):
     def test_fallback_preference_never_discards_primary(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             windows_client, 'application_data_directory', return_value=Path(directory)
-        ), mock.patch.object(windows_client, 'check_source_connection', return_value=''):
+        ), mock.patch.object(windows_client, 'inspect_source', return_value={
+            'code': windows_client.SOURCE_OK, 'message': '', 'available': True,
+        }):
             config = windows_client.migrate_config({'mode': 'remote', 'server_url': 'https://primary.example'})
             fallback = Path(windows_client.get_fallback_path(config))
             fallback.parent.mkdir(parents=True)
@@ -285,7 +392,11 @@ class WindowsClientTests(unittest.TestCase):
                  'code': windows_client.SOURCE_OK, 'message': '', 'available': True,
              }), \
              mock.patch.object(windows_client, 'database_has_admin', return_value=True), \
+             mock.patch.object(windows_client, 'require_safe_local_source', return_value={
+                 'code': windows_client.SOURCE_OK, 'message': '', 'available': True,
+             }), \
              mock.patch.object(windows_client, 'LocalServer', FakeLocalServer), \
+             mock.patch.object(windows_client.DesktopLifecycle, 'start_tray', return_value=False), \
              mock.patch.object(windows_client, 'save_config'), \
              mock.patch.object(windows_client, 'open_desktop_window', return_value=False) as open_window:
             config = windows_client.migrate_config({'mode': 'local', 'database_path': unc})
@@ -574,6 +685,26 @@ class WindowsClientTests(unittest.TestCase):
         timer.cancel.assert_called_once_with()
         close_windows.assert_called_once_with()
 
+    def test_shutdown_unblocks_pystray_setup_thread_before_ready(self):
+        readiness_queue = queue.Queue()
+        tray = mock.Mock()
+        tray._Icon__queue = readiness_queue
+
+        def setup_handler():
+            readiness_queue.get()
+
+        setup_thread = threading.Thread(target=setup_handler, name='setup_handler')
+        tray._setup_thread = setup_thread
+        setup_thread.start()
+        lifecycle = windows_client.DesktopLifecycle({})
+        lifecycle._tray = tray
+
+        lifecycle.shutdown_application()
+
+        setup_thread.join(timeout=1)
+        self.assertFalse(setup_thread.is_alive())
+        tray.stop.assert_called_once_with()
+
     def test_tray_open_restores_existing_window_or_reports_missing_ui(self):
         lifecycle = windows_client.DesktopLifecycle({})
         with mock.patch.object(windows_client, 'activate_desktop_window', return_value=True), \
@@ -586,7 +717,15 @@ class WindowsClientTests(unittest.TestCase):
             self.assertIn('Интерфейс Manticore недоступен', message.call_args.args[1])
 
     def test_second_instance_signals_existing_process_without_starting_client(self):
-        args = mock.Mock(source_dialog_child=None, wait_pid=None, configuration_child=False, admin_password_child=None)
+        args = mock.Mock(
+            source_dialog_child=None,
+            wait_pid=None,
+            configuration_child=False,
+            admin_password_child=None,
+            build_info_file=None,
+            preflight_database=None,
+            startup_smoke_database=None,
+        )
         with mock.patch.object(windows_client, 'configure_logging'), \
              mock.patch.object(windows_client, 'cleanup_old_installers'), \
              mock.patch.object(windows_client, 'parse_arguments', return_value=args), \

@@ -35,6 +35,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Show build metadata
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $commit = (git rev-parse HEAD).Trim()
+          $tagCommit = (git rev-list -n 1 $env:RELEASE_TAG).Trim()
+          $description = (git describe --tags --always).Trim()
+          $schema = (python -c "from db_safety import CURRENT_SCHEMA_VERSION; print(CURRENT_SCHEMA_VERSION)").Trim()
+          Write-Host "Release tag: $env:RELEASE_TAG"
+          Write-Host "VERSION: $version"
+          Write-Host "Git commit: $commit"
+          Write-Host "Tag commit: $tagCommit"
+          Write-Host "Git describe: $description"
+          Write-Host "CURRENT_SCHEMA_VERSION: $schema"
+          if ($commit -cne $tagCommit) { throw 'Checked-out commit does not match the release tag' }
+          if ('${{ github.event_name }}' -eq 'push' -and $commit -cne '${{ github.sha }}') {
+            throw 'Tag push commit does not match github.sha'
+          }
       - name: Validate release tag against VERSION
         shell: pwsh
         env:
@@ -48,22 +68,57 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
           .venv-desktop/Scripts/python.exe -m pip check
           if ($LASTEXITCODE -ne 0) { throw 'Dependency conflicts' }
-      - name: Syntax checks and existing test suite
+      - name: Python compile check
         shell: pwsh
-        env:
-          # Avoid recursively simulating this workflow dozens of times inside
-          # the real release job. The publishing stage below performs the
-          # end-to-end verification against the actual GitHub draft.
-          MANTICORE_SKIP_RELEASE_WORKFLOW_TESTS: '1'
         run: |
-          .venv-desktop/Scripts/python.exe -m compileall -q app.py desktop desktop_releases.py
+          .venv-desktop/Scripts/python.exe -m compileall -q app.py email_validation.py db_safety.py desktop tests
           if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed' }
+      - name: JavaScript syntax check
+        shell: pwsh
+        run: |
           foreach ($file in (Get-ChildItem static/js -Filter *.js)) {
             node --check $file.FullName
             if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
           }
-          .venv-desktop/Scripts/python.exe -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          foreach ($file in (Get-ChildItem desktop/ui -Filter *.js)) {
+            node --check $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $file" }
+          }
+      - name: Unit tests
+        timeout-minutes: 12
+        shell: pwsh
+        env:
+          # The workflow's own PowerShell simulations run in the next isolated
+          # step so their subprocess lifecycle cannot obscure the core suite.
+          MANTICORE_SKIP_RELEASE_WORKFLOW_TESTS: '1'
+        run: |
+          Write-Host '=== TESTS START ==='
+          $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+          & .venv-desktop/Scripts/python.exe -m unittest discover -s tests -v
+          $testExit = $LASTEXITCODE
+          $stopwatch.Stop()
+          Write-Host "Tests exit code: $testExit"
+          Write-Host "Tests elapsed: $($stopwatch.Elapsed)"
+          if ($testExit -ne 0) { throw 'Tests failed' }
+          Write-Host '=== TESTS PROCESS EXITED ==='
+      - name: Release workflow simulations
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          Write-Host '=== RELEASE WORKFLOW TESTS START ==='
+          & .venv-desktop/Scripts/python.exe -m unittest tests.test_release_publishing -v
+          if ($LASTEXITCODE -ne 0) { throw 'Release workflow simulations failed' }
+          Write-Host '=== RELEASE WORKFLOW TESTS PROCESS EXITED ==='
+      - name: Schema regression tests
+        shell: pwsh
+        run: |
+          & .venv-desktop/Scripts/python.exe -m unittest `
+            tests.test_db_safety `
+            tests.test_windows_client.WindowsClientTests.test_create_if_missing_never_bypasses_newer_schema `
+            tests.test_windows_client.WindowsClientTests.test_create_if_missing_allows_only_a_missing_sqlite_file `
+            tests.test_windows_client.WindowsClientTests.test_schema_version_mismatch_is_reported_without_modifying_database `
+            -v
+          if ($LASTEXITCODE -ne 0) { throw 'Schema regression tests failed' }
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -89,11 +144,53 @@ jobs:
           $certificate = $certificates | Where-Object HasPrivateKey | Select-Object -First 1
           if (-not $certificate) { throw 'Signing private key missing from PFX' }
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-      - name: Build Windows application and installer
+      - name: Build Windows executable
         shell: pwsh
         env:
           CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
-        run: ./build_windows_desktop.ps1 -SkipDependencies -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+        run: ./build_windows_desktop.ps1 -SkipDependencies -SkipInstaller -SkipSigning -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+      - name: Sign executable
+        if: steps.certificate.outputs.thumbprint != ''
+        shell: pwsh
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
+        run: ./desktop/sign_windows_binary.ps1 -Path dist/Manticore.exe -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+      - name: Validate packaged executable metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $expectedCommit = (git rev-parse HEAD).Trim()
+          $resultPath = Join-Path $env:RUNNER_TEMP 'manticore-build-info.json'
+          $process = Start-Process -FilePath 'dist/Manticore.exe' -ArgumentList @('--build-info-file', $resultPath) -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw "Packaged metadata probe failed: $($process.ExitCode)" }
+          $metadata = Get-Content $resultPath -Raw | ConvertFrom-Json
+          $schema = [int](.venv-desktop/Scripts/python.exe -c "from db_safety import CURRENT_SCHEMA_VERSION; print(CURRENT_SCHEMA_VERSION)")
+          if ($metadata.version -cne $version -or $metadata.schema_version -ne $schema -or $metadata.commit -cne $expectedCommit) {
+            throw 'Packaged VERSION, schema or commit does not match tagged source'
+          }
+          Write-Host "Packaged VERSION: $($metadata.version)"
+          Write-Host "Packaged CURRENT_SCHEMA_VERSION: $($metadata.schema_version)"
+          Write-Host "Packaged commit: $($metadata.commit)"
+      - name: Smoke test packaged executable with SQLite schemas
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $commit = (git rev-parse HEAD).Trim()
+          .venv-desktop/Scripts/python.exe desktop/package_smoke_test.py --executable dist/Manticore.exe --expected-version $version --expected-commit $commit
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged SQLite smoke test failed' }
+      - name: Build installer
+        shell: pwsh
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
+        run: ./build_windows_desktop.ps1 -SkipDependencies -SkipExecutableBuild -SkipSigning -SkipReleaseMetadata -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+      - name: Sign installer
+        if: steps.certificate.outputs.thumbprint != ''
+        shell: pwsh
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ steps.certificate.outputs.thumbprint }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          ./desktop/sign_windows_binary.ps1 -Path "dist/installer/Manticore-Setup-$version.exe" -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
       - name: Verify optional signature
         if: steps.certificate.outputs.thumbprint != ''
         shell: pwsh
@@ -105,6 +202,16 @@ jobs:
           }
           .venv-desktop/Scripts/python.exe desktop/release_tools.py --verify-signatures
           if ($LASTEXITCODE -ne 0) { throw 'Publisher pin or WinVerifyTrust verification failed' }
+      - name: Generate release metadata and SHA256
+        shell: pwsh
+        run: |
+          .venv-desktop/Scripts/python.exe desktop/release_tools.py --metadata
+          if ($LASTEXITCODE -ne 0) { throw 'Release metadata generation failed' }
+          $version = (Get-Content VERSION -Raw).Trim()
+          $installer = "dist/installer/Manticore-Setup-$version.exe"
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Installer: $installer"
+          Write-Host "Installer SHA256: $hash"
       - uses: actions/attest-build-provenance@v3
         with:
           subject-path: dist/installer/Manticore-Setup-*.exe

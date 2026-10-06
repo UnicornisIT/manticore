@@ -1,6 +1,9 @@
 ﻿param(
     [switch]$SkipDependencies,
     [switch]$SkipInstaller,
+    [switch]$SkipExecutableBuild,
+    [switch]$SkipSigning,
+    [switch]$SkipReleaseMetadata,
     [string]$CertificateThumbprint,
     [switch]$UnsignedDevelopmentBuild,
     [string]$TimestampUrl = 'http://timestamp.digicert.com'
@@ -12,6 +15,10 @@ $VirtualEnvironment = Join-Path $ProjectRoot '.venv-desktop'
 $Python = Join-Path $VirtualEnvironment 'Scripts\python.exe'
 $Version = (Get-Content (Join-Path $ProjectRoot 'VERSION') -Raw).Trim().TrimStart('v', 'V')
 $Repository = 'UnicornisIT/manticore'
+
+if ($SkipExecutableBuild -and $SkipInstaller) {
+    throw 'Nothing to build: both executable and installer builds are disabled.'
+}
 
 if ($Version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') {
     throw "Файл VERSION должен содержать версию в формате 1.2.3."
@@ -34,39 +41,49 @@ if ($CertificateThumbprint) {
     } finally {
         $Sha.Dispose()
     }
-    $SignToolCommand = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if ($SignToolCommand) {
-        $SignTool = $SignToolCommand.Source
-    } else {
-        $WindowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-        if (Test-Path -LiteralPath $WindowsKitsBin) {
-            $SignTool = Get-ChildItem $WindowsKitsBin -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
-                Sort-Object FullName -Descending |
-                Select-Object -ExpandProperty FullName -First 1
+    if (-not $SkipSigning) {
+        $SignToolCommand = Get-Command signtool.exe -ErrorAction SilentlyContinue
+        if ($SignToolCommand) {
+            $SignTool = $SignToolCommand.Source
+        } else {
+            $WindowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+            if (Test-Path -LiteralPath $WindowsKitsBin) {
+                $SignTool = Get-ChildItem $WindowsKitsBin -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+                    Sort-Object FullName -Descending |
+                    Select-Object -ExpandProperty FullName -First 1
+            }
         }
-    }
-    if (-not $SignTool) {
-        throw "signtool.exe не найден. Установите Windows SDK с Signing Tools."
+        if (-not $SignTool) {
+            throw "signtool.exe не найден. Установите Windows SDK с Signing Tools."
+        }
     }
 }
 
-$BuildDirectory = Join-Path $ProjectRoot 'build'
-New-Item -ItemType Directory -Force -Path $BuildDirectory | Out-Null
-$PyInstallerWorkDirectory = Join-Path $BuildDirectory 'Manticore'
-if (Test-Path -LiteralPath $PyInstallerWorkDirectory) {
-    $ResolvedWorkDirectory = (Resolve-Path -LiteralPath $PyInstallerWorkDirectory).Path
-    $ExpectedWorkDirectory = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'build\Manticore'))
-    if ($ResolvedWorkDirectory -ne $ExpectedWorkDirectory -or (Get-Item -LiteralPath $PyInstallerWorkDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw 'Unsafe PyInstaller work directory.'
+function Remove-SafeBuildDirectory([string]$Path, [string]$ExpectedPath) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
     }
-    Get-ChildItem -LiteralPath $PyInstallerWorkDirectory -Force -Recurse | ForEach-Object {
+    $ResolvedPath = (Resolve-Path -LiteralPath $Path).Path
+    $ExpectedFullPath = [IO.Path]::GetFullPath($ExpectedPath)
+    $Item = Get-Item -LiteralPath $Path -Force
+    if ($ResolvedPath -ne $ExpectedFullPath -or $Item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Unsafe build cleanup target: $ResolvedPath"
+    }
+    Get-ChildItem -LiteralPath $Path -Force -Recurse | ForEach-Object {
         $_.Attributes = $_.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
     }
-    $WorkDirectoryItem = Get-Item -LiteralPath $PyInstallerWorkDirectory -Force
-    $WorkDirectoryItem.Attributes = $WorkDirectoryItem.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
-    Remove-Item -LiteralPath $PyInstallerWorkDirectory -Recurse -Force
+    $Item.Attributes = $Item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+    Remove-Item -LiteralPath $Path -Recurse -Force
 }
+
+$BuildDirectory = Join-Path $ProjectRoot 'build'
+$DistributionDirectory = Join-Path $ProjectRoot 'dist'
+if (-not $SkipExecutableBuild) {
+    Remove-SafeBuildDirectory $BuildDirectory (Join-Path $ProjectRoot 'build')
+    Remove-SafeBuildDirectory $DistributionDirectory (Join-Path $ProjectRoot 'dist')
+}
+New-Item -ItemType Directory -Force -Path $BuildDirectory | Out-Null
 $TrustPolicy = [ordered]@{
     github_repository = $Repository
     signer_certificate_sha256 = $SignerSha256
@@ -75,7 +92,7 @@ $TrustPolicy = [ordered]@{
 $TrustPolicy | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BuildDirectory 'trusted_update.json') -Encoding UTF8
 
 function Sign-Binary([string]$Path) {
-    if (-not $CertificateThumbprint) {
+    if ($SkipSigning -or -not $CertificateThumbprint) {
         return
     }
     & $SignTool sign /sha1 $Certificate.Thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $Path
@@ -110,15 +127,33 @@ if (-not $SkipDependencies) {
     if ($LASTEXITCODE -ne 0) { throw 'Desktop dependencies installation failed.' }
 }
 
+$SchemaVersion = (& $Python -c "from db_safety import CURRENT_SCHEMA_VERSION; print(CURRENT_SCHEMA_VERSION)").Trim()
+if ($LASTEXITCODE -ne 0 -or $SchemaVersion -notmatch '^\d+$') {
+    throw 'Could not determine CURRENT_SCHEMA_VERSION for build metadata.'
+}
+$Commit = (& git -C $ProjectRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $Commit -notmatch '^[0-9a-f]{40}$') {
+    throw 'Could not determine the Git commit for build metadata.'
+}
+[ordered]@{
+    version = $Version
+    schema_version = [int]$SchemaVersion
+    commit = $Commit
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BuildDirectory 'build-metadata.json') -Encoding UTF8
+
 Push-Location $ProjectRoot
 try {
-    & $Python desktop/release_tools.py --version-resource
-    if ($LASTEXITCODE -ne 0) { throw 'Version resource generation failed.' }
-    & $Python -m PyInstaller --clean --noconfirm (Join-Path $ProjectRoot 'desktop\Manticore.spec')
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller завершился с ошибкой $LASTEXITCODE."
+    if (-not $SkipExecutableBuild) {
+        & $Python desktop/release_tools.py --version-resource
+        if ($LASTEXITCODE -ne 0) { throw 'Version resource generation failed.' }
+        & $Python -m PyInstaller --clean --noconfirm (Join-Path $ProjectRoot 'desktop\Manticore.spec')
+        if ($LASTEXITCODE -ne 0) {
+            throw "PyInstaller завершился с ошибкой $LASTEXITCODE."
+        }
+        Sign-Binary (Join-Path $ProjectRoot 'dist\Manticore.exe')
+    } elseif (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'dist\Manticore.exe') -PathType Leaf)) {
+        throw 'Cannot build installer because dist\Manticore.exe does not exist.'
     }
-    Sign-Binary (Join-Path $ProjectRoot 'dist\Manticore.exe')
 
     if (-not $SkipInstaller) {
         $CompilerCandidates = @(
@@ -141,14 +176,18 @@ try {
         $InstallerOutput = Join-Path $ProjectRoot 'dist\installer'
         New-Item -ItemType Directory -Force -Path $InstallerOutput | Out-Null
         Move-Item -LiteralPath $StagedInstaller -Destination (Join-Path $InstallerOutput "Manticore-Setup-$Version.exe") -Force
-        & $Python desktop/release_tools.py --metadata
-        if ($LASTEXITCODE -ne 0) { throw 'Release metadata generation failed.' }
+        if (-not $SkipReleaseMetadata) {
+            & $Python desktop/release_tools.py --metadata
+            if ($LASTEXITCODE -ne 0) { throw 'Release metadata generation failed.' }
+        }
     }
 } finally {
     Pop-Location
 }
 
-Write-Host "Windows-клиент собран: $ProjectRoot\dist\Manticore.exe"
+if (-not $SkipExecutableBuild) {
+    Write-Host "Windows-клиент собран: $ProjectRoot\dist\Manticore.exe"
+}
 if (-not $SkipInstaller) {
     Write-Host "Установщик готов: $ProjectRoot\dist\installer\Manticore-Setup-$Version.exe"
 }

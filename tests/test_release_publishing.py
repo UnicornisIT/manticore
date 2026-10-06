@@ -144,7 +144,7 @@ class ReleasePublishingTests(unittest.TestCase):
             env = dict(os.environ, GH_REPO='UnicornisIT/manticore', RELEASE_TAG=f'v{version}',
                        RUNNER_TEMP=directory, TEST_PYTHON=sys.executable)
             result = subprocess.run([PWSH, '-NoProfile', '-NonInteractive', '-File', str(root / 'publish.ps1')],
-                                    cwd=root, env=env, capture_output=True, text=True, timeout=60)
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=120)
             state = json.loads((root / 'state.json').read_text())
             self.assertEqual((root / 'remote/notes.txt').read_text(), 'preserve unrelated assets')
             return result, state['calls']
@@ -153,13 +153,20 @@ class ReleasePublishingTests(unittest.TestCase):
         """Run isolated workflow simulations concurrently to keep CI bounded."""
         cases = list(cases)
         results = {}
-        with ThreadPoolExecutor(max_workers=min(4, len(cases))) as executor:
+        # Starting too many PowerShell hosts at once can make an otherwise fast
+        # case hit the per-process timeout on shared Windows runners. Two hosts
+        # retain most of the speed-up without introducing startup contention.
+        with ThreadPoolExecutor(max_workers=min(2, len(cases))) as executor:
             pending = {
                 executor.submit(self.run_release, mode, version): (mode, version)
                 for mode, version in cases
             }
             for future in as_completed(pending):
-                results[pending[future]] = future.result()
+                case = pending[future]
+                try:
+                    results[case] = future.result()
+                except Exception as exc:
+                    raise AssertionError(f'Release workflow simulation failed for {case!r}') from exc
         return results
 
     def test_create_and_reuse_drafts_in_all_channels(self):

@@ -3417,6 +3417,7 @@ class ManticoreAppTests(unittest.TestCase):
                 conn.execute(
                     'INSERT INTO schema_metadata (id, version, updated_at) VALUES (1, 3, datetime(\'now\'))'
                 )
+                conn.execute('PRAGMA user_version=3')
 
             manticore.init_db()
 

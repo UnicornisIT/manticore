@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -12,6 +13,12 @@ class DatabaseSafetyTests(unittest.TestCase):
         self.assertEqual(
             db_safety.CURRENT_SCHEMA_MIN_APP_VERSION,
             db_safety.SCHEMA_INTRODUCED_IN[db_safety.CURRENT_SCHEMA_VERSION],
+        )
+        self.assertEqual(db_safety.CURRENT_SCHEMA_VERSION, db_safety.SCHEMA_VERSION_FLOOR)
+        self.assertEqual(max(db_safety.SCHEMA_INTRODUCED_IN), db_safety.CURRENT_SCHEMA_VERSION)
+        self.assertEqual(
+            set(db_safety.SCHEMA_INTRODUCED_IN),
+            set(range(2, db_safety.CURRENT_SCHEMA_VERSION + 1)),
         )
 
     def make_legacy_database(self, directory):
@@ -62,12 +69,29 @@ class DatabaseSafetyTests(unittest.TestCase):
             db_safety.set_schema_version(connection, db_safety.CURRENT_SCHEMA_VERSION + 1)
             connection.commit()
             connection.close()
+            before = hashlib.sha256(path.read_bytes()).hexdigest()
             callback = mock.Mock()
             with self.assertRaises(db_safety.DatabaseSchemaTooNewError) as raised:
                 db_safety.migrate_database(path, callback)
             callback.assert_not_called()
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), before)
             self.assertIn(f'схема БД: {db_safety.CURRENT_SCHEMA_VERSION + 1}', str(raised.exception))
             self.assertIn(f'поддерживается: {db_safety.CURRENT_SCHEMA_VERSION}', str(raised.exception))
+
+    def test_schema_metadata_and_pragma_mismatch_is_diagnosed_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.make_legacy_database(directory)
+            connection = sqlite3.connect(path)
+            db_safety.set_schema_version(connection, db_safety.CURRENT_SCHEMA_VERSION)
+            connection.execute(f'PRAGMA user_version={db_safety.CURRENT_SCHEMA_VERSION - 1}')
+            connection.commit()
+            connection.close()
+            before = hashlib.sha256(path.read_bytes()).hexdigest()
+            with self.assertRaises(db_safety.DatabaseSchemaMismatchError) as raised:
+                db_safety.migrate_database(path, mock.Mock())
+            self.assertIn('schema_metadata', str(raised.exception))
+            self.assertIn('PRAGMA user_version', str(raised.exception))
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), before)
 
     def test_locked_database_is_not_treated_as_corrupt_or_migrated(self):
         with tempfile.TemporaryDirectory() as directory:
