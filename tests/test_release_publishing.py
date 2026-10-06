@@ -9,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,12 +145,25 @@ class ReleasePublishingTests(unittest.TestCase):
             self.assertEqual((root / 'remote/notes.txt').read_text(), 'preserve unrelated assets')
             return result, state['calls']
 
+    def run_release_cases(self, cases):
+        """Run isolated workflow simulations concurrently to keep CI bounded."""
+        cases = list(cases)
+        results = {}
+        with ThreadPoolExecutor(max_workers=min(4, len(cases))) as executor:
+            pending = {
+                executor.submit(self.run_release, mode, version): (mode, version)
+                for mode, version in cases
+            }
+            for future in as_completed(pending):
+                results[pending[future]] = future.result()
+        return results
+
     def test_create_and_reuse_drafts_in_all_channels(self):
-        for mode, version in [('new', '0.0.3-alpha'), ('reuse', '0.0.3-beta'),
-                              ('reuse', '0.0.3-rc.1'), ('reuse', '0.0.3'),
-                              ('cli_without_digest', '0.0.3-alpha'), ('draft_url', '0.0.3-alpha')]:
+        cases = [('new', '0.0.3-alpha'), ('reuse', '0.0.3-beta'),
+                 ('reuse', '0.0.3-rc.1'), ('reuse', '0.0.3'),
+                 ('cli_without_digest', '0.0.3-alpha'), ('draft_url', '0.0.3-alpha')]
+        for (mode, version), (result, calls) in self.run_release_cases(cases).items():
             with self.subTest(mode=mode, version=version):
-                result, calls = self.run_release(mode, version)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('Draft verification: PASS', result.stdout)
                 self.assertIn('Release publish: PASS', result.stdout)
@@ -159,14 +173,15 @@ class ReleasePublishingTests(unittest.TestCase):
                 self.assertIn('--prerelease' if '-' in version else '--prerelease=false', calls[-1])
 
     def test_failures_never_publish(self):
-        for mode in ['published', 'wrong_tag', 'changed_id', 'lookup_error', 'create_error',
-                     'upload_error', 'view_error', 'download_error', 'api_error', 'missing_asset',
-                     'extra_exe', 'remote_size', 'corrupt_installer', 'corrupt_metadata', 'corrupt_sums',
-                     'download_missing', 'api_no_digest', 'api_wrong_digest', 'api_wrong_url',
-                     'api_wrong_tag', 'api_wrong_repo', 'api_wrong_filename', 'api_url_query',
-                     'published_during_download', 'changed_assets', 'local_metadata', 'local_hash', 'local_sums']:
+        modes = ['published', 'wrong_tag', 'changed_id', 'lookup_error', 'create_error',
+                 'upload_error', 'view_error', 'download_error', 'api_error', 'missing_asset',
+                 'extra_exe', 'remote_size', 'corrupt_installer', 'corrupt_metadata', 'corrupt_sums',
+                 'download_missing', 'api_no_digest', 'api_wrong_digest', 'api_wrong_url',
+                 'api_wrong_tag', 'api_wrong_repo', 'api_wrong_filename', 'api_url_query',
+                 'published_during_download', 'changed_assets', 'local_metadata', 'local_hash', 'local_sums']
+        cases = [(mode, '0.0.3-alpha') for mode in modes]
+        for (mode, _version), (result, calls) in self.run_release_cases(cases).items():
             with self.subTest(mode=mode):
-                result, calls = self.run_release(mode)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertFalse(any(c[:2] == ['release', 'edit'] for c in calls), mode)
                 if mode in ('published', 'wrong_tag', 'changed_id', 'lookup_error', 'view_error',
