@@ -26,24 +26,6 @@
     window.addEventListener('resize', syncSidebarToggle, { passive: true });
   }
 
-  document.querySelectorAll('.row-action-popover[popover]').forEach((menu) => {
-    menu.addEventListener('toggle', () => {
-      if (!menu.matches(':popover-open')) return;
-      const trigger = document.querySelector(`[popovertarget="${CSS.escape(menu.id)}"]`);
-      if (!trigger) return;
-      const triggerRect = trigger.getBoundingClientRect();
-      const menuRect = menu.getBoundingClientRect();
-      const gap = 6;
-      const left = Math.max(10, Math.min(window.innerWidth - menuRect.width - 10, triggerRect.right - menuRect.width));
-      const below = triggerRect.bottom + gap;
-      const top = below + menuRect.height <= window.innerHeight - 10
-        ? below
-        : Math.max(10, triggerRect.top - menuRect.height - gap);
-      menu.style.left = `${left}px`;
-      menu.style.top = `${top}px`;
-    });
-  });
-
   const themeToggle = document.querySelector('[data-theme-toggle]');
   const themeLabels = { system: 'системная', light: 'светлая', dark: 'тёмная' };
   const syncThemeTitle = () => {
@@ -69,6 +51,7 @@
 
   const confirmModal = document.getElementById('confirm-modal');
   if (confirmModal) {
+    const title = confirmModal.querySelector('#confirm-title');
     const message = confirmModal.querySelector('#confirm-message');
     const accept = confirmModal.querySelector('[data-confirm-accept]');
     const cancelControls = confirmModal.querySelectorAll('[data-confirm-cancel]');
@@ -87,11 +70,12 @@
     const openConfirm = (control) => {
       pending = control; restoreFocus = document.activeElement;
       message.textContent = control.dataset.confirm || 'Продолжить выполнение действия?';
+      title.textContent = control.dataset.confirmTitle || 'Подтвердите действие';
       accept.textContent = control.dataset.confirmAction || (control.matches('.btn-danger,[data-danger]') ? 'Удалить' : 'Продолжить');
       confirmModal.hidden = false; document.body.classList.add('modal-lock'); accept.focus();
     };
-    window.ManticoreConfirm = (text, action = 'Продолжить') => new Promise(resolve => {
-      openConfirm({ dataset: { confirm: text, confirmAction: action } });
+    window.ManticoreConfirm = (text, action = 'Продолжить', dialogTitle = 'Подтвердите действие') => new Promise(resolve => {
+      openConfirm({ dataset: { confirm: text, confirmAction: action, confirmTitle: dialogTitle } });
       resolveConfirm = resolve;
     });
     document.addEventListener('click', event => {

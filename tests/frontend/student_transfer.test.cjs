@@ -9,8 +9,8 @@ function option(value = '', text = '') {
   return { value, textContent: text, dataset: {}, disabled: false };
 }
 
-function fixture(responses, confirmations) {
-  const requests = [], dialogs = [];
+function fixture(responses, confirmations, { expulsion = false, operationType = 'transfer' } = {}) {
+  const requests = [], dialogs = [], targetFields = [{ hidden: false }, { hidden: false }];
   const button = {
     disabled: false,
     classList: { remove() {} },
@@ -36,6 +36,11 @@ function fixture(responses, confirmations) {
     replaceChildren(...children) { this.children = children; this.value = ''; },
     appendChild(child) { this.children.push(child); }
   };
+  const operationInput = { value: operationType };
+  const expulsionToggle = expulsion ? {
+    checked: false,
+    addEventListener: (_, callback) => { expulsionToggle.change = callback; }
+  } : null;
   const form = {
     action: '/transfer',
     dataset: { source: 'A', sourceCampaign: '2026', groupsUrl: '/api/groups', student: 'moving' },
@@ -43,12 +48,16 @@ function fixture(responses, confirmations) {
       '#target_campaign_year': campaignSelect,
       '#new_cohort1': groupSelect,
       '[type="submit"]': button,
-      '[data-group-status]': groupStatus
+      '[data-group-status]': groupStatus,
+      '[data-expulsion-toggle]': expulsionToggle,
+      '[data-operation-type]': expulsion ? operationInput : null,
+      '[name="operation_type"]': operationInput
     })[selector],
+    querySelectorAll: selector => selector === '[data-target-field]' ? targetFields : [],
     addEventListener: (_, callback) => { form.submit = callback; }
   };
   const window = {
-    ManticoreConfirm: async (message, action) => { dialogs.push(action); return confirmations.shift(); },
+    ManticoreConfirm: async (message, action, title) => { dialogs.push({ action, title, message }); return confirmations.shift(); },
     location: { assign: url => { window.destination = url; } }
   };
   vm.runInNewContext(script, {
@@ -62,7 +71,7 @@ function fixture(responses, confirmations) {
       createElement: () => option()
     },
     FormData: class extends Map {
-      constructor() { super([['new_cohort1', groupSelect.value], ['target_campaign_year', campaignSelect.value]]); }
+      constructor() { super([['new_cohort1', groupSelect.value], ['target_campaign_year', campaignSelect.value], ['operation_type', operationInput.value]]); }
     },
     URLSearchParams,
     window,
@@ -81,7 +90,9 @@ function fixture(responses, confirmations) {
   return {
     submit: () => form.submit({ preventDefault() {} }),
     changeCampaign: value => { campaignSelect.value = value; return campaignSelect.change(); },
-    requests, dialogs, window, button, error, groupSelect, groupStatus
+    selectGroup: value => { groupSelect.value = value; return groupSelect.change(); },
+    toggleExpulsion: () => { expulsionToggle.checked = !expulsionToggle.checked; expulsionToggle.change(); },
+    requests, dialogs, window, button, error, groupSelect, groupStatus, targetFields, operationInput
   };
 }
 
@@ -109,7 +120,7 @@ test('last seat race requires a second confirmation', async () => {
   const f = fixture([{ message: '24/25' }, { code: 'capacity_exceeded', message: '25/25' },
     { redirect: '/student' }], [true, true]);
   await f.submit();
-  assert.deepEqual(f.dialogs, ['Перевести', 'Перевести всё равно']);
+  assert.deepEqual(f.dialogs.map(dialog => dialog.action), ['Перевести', 'Перевести всё равно']);
   assert.equal(f.requests[1].body.capacity_override, 'false');
   assert.equal(f.requests[2].body.capacity_override, 'true');
 });
@@ -117,7 +128,7 @@ test('last seat race requires a second confirmation', async () => {
 test('cross-campaign preview uses an explicit serious confirmation action', async () => {
   const f = fixture([{ message: '2026 → 2023', campaign_changed: true }, { redirect: '/student' }], [true]);
   await f.submit();
-  assert.equal(f.dialogs[0], 'Перенести в другую кампанию');
+  assert.equal(f.dialogs[0].action, 'Перенести в другую кампанию');
 });
 
 test('campaign change clears a stale group and loads only returned campaign groups', async () => {
@@ -147,4 +158,29 @@ test('concurrent student change displays error without retrying', async () => {
   assert.equal(f.requests.length, 1);
   assert.equal(f.error.hidden, false);
   assert.equal(f.error.textContent, 'Обновите карточку.');
+});
+
+test('expulsion mode hides targets and uses explicit confirmation', async () => {
+  const f = fixture([{ operation_type: 'expulsion', message: 'Карточка сохранится' }, { redirect: '/student' }], [true], { expulsion: true });
+  f.toggleExpulsion();
+  assert.equal(f.operationInput.value, 'expulsion');
+  assert.equal(f.targetFields.every(field => field.hidden), true);
+  assert.equal(f.button.textContent, 'Оформить отчисление');
+  await f.submit();
+  assert.equal(f.requests[0].body.operation_type, 'expulsion');
+  assert.equal(f.dialogs[0].action, 'Отчислить');
+  assert.equal(f.dialogs[0].title, 'Отчисление студента');
+});
+
+test('restoration uses restoration labels and keeps target required', async () => {
+  const f = fixture([{ operation_type: 'restoration', message: 'Восстановить' }, { redirect: '/student' }], [true], { operationType: 'restoration' });
+  assert.equal(f.button.textContent, 'Восстановить студента');
+  f.selectGroup('');
+  assert.equal(f.button.disabled, true);
+  f.selectGroup('B');
+  assert.equal(f.button.disabled, false);
+  await f.submit();
+  assert.equal(f.requests[0].body.operation_type, 'restoration');
+  assert.equal(f.dialogs[0].action, 'Восстановить');
+  assert.equal(f.dialogs[0].title, 'Восстановление студента');
 });

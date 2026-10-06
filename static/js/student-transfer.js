@@ -9,10 +9,46 @@
   const capacityPreview = document.getElementById('transfer-capacity-preview');
   const cohort2Preview = document.getElementById('transfer_cohort2_preview');
   const groupStatus = form.querySelector('[data-group-status]');
+  const expulsionToggle = form.querySelector('[data-expulsion-toggle]');
+  const operationInput = form.querySelector('[name="operation_type"]');
+  const initialOperation = operationInput?.value || 'transfer';
+  const targetFields = Array.from(form.querySelectorAll?.('[data-target-field]') || []);
   if (!campaignSelect || !groupSelect || !button) return;
 
   let busy = false;
   let loadSequence = 0;
+
+  function isExpulsion() {
+    return Boolean(expulsionToggle?.checked);
+  }
+
+  function isRestoration() {
+    return !expulsionToggle && initialOperation === 'restoration';
+  }
+
+  function syncOperationMode() {
+    const expulsion = isExpulsion();
+    const restoration = isRestoration();
+    if (expulsion) loadSequence += 1;
+    if (operationInput) operationInput.value = expulsion ? 'expulsion' : initialOperation;
+    targetFields.forEach(field => { field.hidden = expulsion; });
+    campaignSelect.disabled = expulsion;
+    groupSelect.disabled = expulsion;
+    campaignSelect.required = !expulsion;
+    groupSelect.required = !expulsion;
+    button.textContent = expulsion
+      ? 'Оформить отчисление'
+      : restoration ? 'Восстановить студента' : 'Оформить перевод';
+    button.disabled = !expulsion && !groupSelect.value;
+    if (expulsion) {
+      capacityPreview.textContent = '';
+      cohort2Preview.textContent = '';
+      groupStatus.textContent = 'Текущая группа и кампания сохранятся в истории.';
+    } else {
+      updatePreviews();
+      groupStatus.textContent = '';
+    }
+  }
 
   function replaceGroupOptions(message) {
     const option = document.createElement('option');
@@ -38,7 +74,8 @@
     }
     const count = Number(option.dataset.count);
     const capacity = Number(option.dataset.capacity);
-    capacityPreview.textContent = `${option.textContent.trim()}. После перевода: ${count + 1}/${capacity}.`;
+    const operationLabel = isRestoration() ? 'После восстановления' : 'После перевода';
+    capacityPreview.textContent = `${option.textContent.trim()}. ${operationLabel}: ${count + 1}/${capacity}.`;
     if (count >= capacity) {
       capacityPreview.textContent += ' Требуется явное подтверждение переполнения.';
     }
@@ -48,6 +85,7 @@
   }
 
   async function loadCampaignGroups() {
+    if (isExpulsion()) return;
     const sequence = ++loadSequence;
     replaceGroupOptions('Загрузка групп...');
     groupSelect.disabled = true;
@@ -85,7 +123,9 @@
       button.disabled = !hasAvailableGroup;
       groupStatus.textContent = hasAvailableGroup
         ? 'Выберите группу назначения в этой приёмной кампании.'
-        : 'В выбранной приёмной кампании нет доступных групп для перевода.';
+        : isRestoration()
+          ? 'В выбранной приёмной кампании нет доступных групп для восстановления.'
+          : 'В выбранной приёмной кампании нет доступных групп для перевода.';
     } catch (exception) {
       if (sequence !== loadSequence) return;
       replaceGroupOptions('Группы недоступны');
@@ -97,11 +137,19 @@
   }
 
   campaignSelect.addEventListener('change', loadCampaignGroups);
-  groupSelect.addEventListener('change', updatePreviews);
+  groupSelect.addEventListener('change', () => {
+    updatePreviews();
+    if (!isExpulsion()) button.disabled = groupSelect.disabled || !groupSelect.value;
+  });
+  expulsionToggle?.addEventListener('change', syncOperationMode);
+  syncOperationMode();
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || !groupSelect.value) return;
+    const operation = isExpulsion()
+      ? 'expulsion'
+      : (form.querySelector('[name="operation_type"]')?.value || 'transfer');
+    if (busy || (operation !== 'expulsion' && !groupSelect.value)) return;
     busy = true;
     button.disabled = true;
     error.hidden = true;
@@ -123,11 +171,17 @@
         if (!response.ok && result.code !== 'capacity_exceeded') throw new Error(result.message);
         // Both initial preview and a newly occupied last seat require a fresh dialog.
         const override = result.code === 'capacity_exceeded';
+        const resultOperation = result.operation_type || operation;
         const actionLabel = override
-          ? 'Перевести всё равно'
-          : (result.campaign_changed ? 'Перенести в другую кампанию' : 'Перевести');
+          ? (resultOperation === 'restoration' ? 'Восстановить всё равно' : 'Перевести всё равно')
+          : resultOperation === 'expulsion' ? 'Отчислить'
+            : resultOperation === 'restoration' ? 'Восстановить'
+              : (result.campaign_changed ? 'Перенести в другую кампанию' : 'Перевести');
+        const dialogTitle = resultOperation === 'expulsion'
+          ? 'Отчисление студента'
+          : resultOperation === 'restoration' ? 'Восстановление студента' : 'Подтвердите перевод';
         const confirmed = await window.ManticoreConfirm(
-          `${result.message} Продолжить перевод?`, actionLabel
+          result.message, actionLabel, dialogTitle
         );
         if (!confirmed) return;
         data.delete('preview');
@@ -138,7 +192,7 @@
       error.hidden = false;
     } finally {
       busy = false;
-      button.disabled = groupSelect.disabled;
+      button.disabled = operation !== 'expulsion' && groupSelect.disabled;
       button.focus();
       button.removeAttribute('aria-busy');
       button.classList.remove('is-busy');

@@ -3,6 +3,8 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -480,6 +482,122 @@ class WindowsClientTests(unittest.TestCase):
             result = windows_client.fetch_update_manifest('https://ignored.example.test')
             self.assertEqual(bool(result), expected)
         self.assertEqual(fetch.call_args, mock.call())
+
+    @staticmethod
+    def _tray_modules(*, icon_error=None):
+        created = {}
+
+        class FakeMenuItem:
+            def __init__(self, text, action, default=False):
+                self.text = text
+                self.action = action
+                self.default = default
+
+        class FakeMenu:
+            SEPARATOR = object()
+
+            def __init__(self, *items):
+                self.items = items
+
+        class FakeIcon:
+            def __init__(self, name, image, title, menu):
+                if icon_error:
+                    raise icon_error
+                self.name = name
+                self.image = image
+                self.title = title
+                self.menu = menu
+                self.run_detached = mock.Mock()
+                self.stop = mock.Mock()
+                created['icon'] = self
+
+        pystray = types.ModuleType('pystray')
+        pystray.MenuItem = FakeMenuItem
+        pystray.Menu = FakeMenu
+        pystray.Icon = FakeIcon
+        image = types.ModuleType('PIL.Image')
+        image.open = mock.Mock(return_value=object())
+        pillow = types.ModuleType('PIL')
+        pillow.Image = image
+        return {'pystray': pystray, 'PIL': pillow, 'PIL.Image': image}, created
+
+    def test_tray_uses_bundled_icon_version_and_russian_menu(self):
+        modules, created = self._tray_modules()
+        lifecycle = windows_client.DesktopLifecycle({'active_source': 'primary'})
+        with mock.patch.dict('sys.modules', modules), \
+             mock.patch.object(windows_client, 'bundle_root', return_value=Path(r'C:\bundle')), \
+             mock.patch.object(windows_client, 'current_version', return_value='1.2.3'):
+            self.assertTrue(lifecycle.start_tray())
+
+        icon = created['icon']
+        self.assertEqual(icon.title, 'Manticore 1.2.3 — запущено')
+        self.assertEqual(
+            [item.text for item in icon.menu.items if hasattr(item, 'text')],
+            ['Открыть Manticore', 'Состояние', 'Завершить Manticore'],
+        )
+        self.assertTrue(icon.menu.items[0].default)
+        modules['PIL.Image'].open.assert_called_once_with(Path(r'C:\bundle') / windows_client.WINDOW_ICON_PATH)
+        icon.run_detached.assert_called_once_with()
+
+    def test_tray_initialization_failure_is_non_fatal(self):
+        modules, _created = self._tray_modules(icon_error=OSError('shell unavailable'))
+        lifecycle = windows_client.DesktopLifecycle({})
+        with mock.patch.dict('sys.modules', modules):
+            self.assertFalse(lifecycle.start_tray())
+        self.assertEqual(lifecycle.state, 'STARTING')
+
+    def test_shutdown_is_idempotent_during_x_and_tray_race(self):
+        server = mock.Mock()
+        tray = mock.Mock()
+        timer = mock.Mock()
+        lifecycle = windows_client.DesktopLifecycle({}, server)
+        lifecycle._tray = tray
+        lifecycle.register_timer(timer)
+        barrier = threading.Barrier(6)
+
+        def request_shutdown():
+            barrier.wait()
+            lifecycle.shutdown_application(close_window=True)
+
+        threads = [threading.Thread(target=request_shutdown) for _ in range(6)]
+        with mock.patch.object(windows_client, 'close_desktop_windows', return_value=True) as close_windows:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=2)
+            lifecycle.shutdown_application()
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(lifecycle.state, 'SHUTTING_DOWN')
+        server.stop.assert_called_once_with()
+        tray.stop.assert_called_once_with()
+        timer.cancel.assert_called_once_with()
+        close_windows.assert_called_once_with()
+
+    def test_tray_open_restores_existing_window_or_reports_missing_ui(self):
+        lifecycle = windows_client.DesktopLifecycle({})
+        with mock.patch.object(windows_client, 'activate_desktop_window', return_value=True), \
+             mock.patch.object(windows_client, 'show_native_message') as message:
+            lifecycle._tray_open()
+            message.assert_not_called()
+        with mock.patch.object(windows_client, 'activate_desktop_window', return_value=False), \
+             mock.patch.object(windows_client, 'show_native_message') as message:
+            lifecycle._tray_open()
+            self.assertIn('Интерфейс Manticore недоступен', message.call_args.args[1])
+
+    def test_second_instance_signals_existing_process_without_starting_client(self):
+        args = mock.Mock(source_dialog_child=None, wait_pid=None, configuration_child=False, admin_password_child=None)
+        with mock.patch.object(windows_client, 'configure_logging'), \
+             mock.patch.object(windows_client, 'cleanup_old_installers'), \
+             mock.patch.object(windows_client, 'parse_arguments', return_value=args), \
+             mock.patch.object(windows_client, 'acquire_single_instance', return_value=False), \
+             mock.patch.object(windows_client, 'signal_existing_instance', return_value=True) as signal, \
+             mock.patch.object(windows_client, 'run_primary_instance') as run_client, \
+             mock.patch.object(windows_client, 'show_native_message') as message:
+            self.assertEqual(windows_client.main(), 0)
+        signal.assert_called_once_with()
+        run_client.assert_not_called()
+        message.assert_not_called()
 
 
 if __name__ == "__main__":

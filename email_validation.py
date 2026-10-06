@@ -246,7 +246,15 @@ def _dns_query(domain: str, resolver=None) -> tuple[str, list[str], str]:
 
 def _cached_dns(domain: str, database_path: str | None, resolver=None, now=None):
     current = float(now if now is not None else time.time())
-    cache_key = (domain, str(database_path or ""), id(resolver) if resolver is not None else 0)
+    # Keep an explicit resolver alive as part of the key. Using id(resolver)
+    # allowed Python to reuse an id after a short-lived resolver was collected,
+    # returning a DNS result produced by a different resolver.
+    resolver_key = resolver
+    try:
+        hash(resolver_key)
+    except TypeError:
+        resolver_key = ("unhashable-resolver", id(resolver))
+    cache_key = (domain, str(database_path or ""), resolver_key)
     with _MEMORY_DNS_CACHE_LOCK:
         memory_row = _MEMORY_DNS_CACHE.get(cache_key)
     if memory_row and current - memory_row[1] < DNS_CACHE_TTL_SECONDS:

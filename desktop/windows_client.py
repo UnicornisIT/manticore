@@ -32,6 +32,7 @@ from db_safety import (
     DatabaseSchemaTooNewError,
     ensure_free_space,
     read_schema_version,
+    schema_too_new_message,
     sqlite_backup,
     timestamp_token,
 )
@@ -48,6 +49,11 @@ UNINSTALL_REGISTRY_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{
 WINTRUST_SUCCESS = 0x00000000
 WINTRUST_UNTRUSTED_ROOT = 0x800B0109
 _INSTANCE_MUTEX = None
+_INSTANCE_ACTIVATION_EVENT = None
+_INSTANCE_LISTENER_STOP = threading.Event()
+_INSTANCE_LISTENER_THREAD = None
+INSTANCE_MUTEX_NAME = r"Local\ManticoreDesktopClient"
+INSTANCE_ACTIVATION_EVENT_NAME = r"Local\ManticoreDesktopClient.Activate"
 SOURCE_PREFERENCES = {"primary", "fallback", "ask"}
 SOURCE_OK = "SOURCE_OK"
 SOURCE_NETWORK_UNAVAILABLE = "SOURCE_NETWORK_UNAVAILABLE"
@@ -64,6 +70,27 @@ SOURCE_CORRUPT = SOURCE_DATABASE_CORRUPT
 
 class AmbiguousSourceError(ValueError):
     """A source value needs an explicit filesystem/server choice."""
+
+
+def _instance_kernel32():
+    """Return handle-safe Win32 declarations for single-instance IPC."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateEventW.restype = wintypes.HANDLE
+    kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.OpenEventW.restype = wintypes.HANDLE
+    kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+    kernel32.SetEvent.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return kernel32
 
 
 def classify_source_value(value: str) -> str:
@@ -162,8 +189,8 @@ def acquire_single_instance() -> bool:
         return True
     import ctypes
 
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.CreateMutexW(None, False, "ManticoreDesktopClient")
+    kernel32 = _instance_kernel32()
+    handle = kernel32.CreateMutexW(None, False, INSTANCE_MUTEX_NAME)
     if not handle:
         return False
     if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
@@ -171,6 +198,135 @@ def acquire_single_instance() -> bool:
         return False
     _INSTANCE_MUTEX = handle
     return True
+
+
+def _windows_for_process(process_id: int | None = None) -> list[int]:
+    """Return top-level Manticore windows owned by a process."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    expected_pid = int(process_id or os.getpid())
+    handles: list[int] = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def collect(hwnd, _lparam):
+        owner_pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if owner_pid.value != expected_pid:
+            return True
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        title = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, title, length + 1)
+        if title.value.startswith(APP_NAME):
+            handles.append(int(hwnd))
+        return True
+
+    ctypes.windll.user32.EnumWindows(collect, 0)
+    return handles
+
+
+def activate_desktop_window() -> bool:
+    """Restore and foreground the existing WebView without touching pywebview threads."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    handles = _windows_for_process()
+    if not handles:
+        return False
+    hwnd = handles[0]
+    user32 = ctypes.windll.user32
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    return True
+
+
+def close_desktop_windows() -> bool:
+    """Ask all current-process Manticore windows to close on their UI threads."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    handles = _windows_for_process()
+    for hwnd in handles:
+        ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    return bool(handles)
+
+
+def signal_existing_instance() -> bool:
+    """Request activation from the process that owns the named mutex."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    kernel32 = _instance_kernel32()
+    handle = kernel32.OpenEventW(0x0002, False, INSTANCE_ACTIVATION_EVENT_NAME)  # EVENT_MODIFY_STATE
+    if not handle:
+        return False
+    try:
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+        return bool(kernel32.SetEvent(handle))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def start_instance_activation_listener() -> None:
+    """Start the first instance's lightweight activation IPC listener."""
+    global _INSTANCE_ACTIVATION_EVENT, _INSTANCE_LISTENER_THREAD
+    if os.name != "nt" or _INSTANCE_LISTENER_THREAD is not None:
+        return
+    import ctypes
+
+    kernel32 = _instance_kernel32()
+    event_handle = kernel32.CreateEventW(None, False, False, INSTANCE_ACTIVATION_EVENT_NAME)
+    if not event_handle:
+        logging.error("Could not create the single-instance activation event")
+        return
+    _INSTANCE_ACTIVATION_EVENT = event_handle
+    _INSTANCE_LISTENER_STOP.clear()
+
+    def listen() -> None:
+        while not _INSTANCE_LISTENER_STOP.is_set():
+            result = kernel32.WaitForSingleObject(event_handle, 500)
+            if result == 0 and not _INSTANCE_LISTENER_STOP.is_set():  # WAIT_OBJECT_0
+                logging.info("Existing instance activation requested")
+                if not activate_desktop_window():
+                    logging.warning("Existing instance has no available Manticore window")
+
+    _INSTANCE_LISTENER_THREAD = threading.Thread(
+        target=listen,
+        name="manticore-instance-activation",
+        daemon=True,
+    )
+    _INSTANCE_LISTENER_THREAD.start()
+
+
+def stop_instance_activation_listener() -> None:
+    global _INSTANCE_MUTEX, _INSTANCE_ACTIVATION_EVENT, _INSTANCE_LISTENER_THREAD
+    _INSTANCE_LISTENER_STOP.set()
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = _instance_kernel32()
+        if _INSTANCE_ACTIVATION_EVENT:
+            kernel32.SetEvent(_INSTANCE_ACTIVATION_EVENT)
+        if _INSTANCE_LISTENER_THREAD and _INSTANCE_LISTENER_THREAD is not threading.current_thread():
+            _INSTANCE_LISTENER_THREAD.join(timeout=2)
+            if _INSTANCE_LISTENER_THREAD.is_alive():
+                logging.warning("Single-instance activation listener did not stop within timeout")
+        if _INSTANCE_ACTIVATION_EVENT:
+            kernel32.CloseHandle(_INSTANCE_ACTIVATION_EVENT)
+        if _INSTANCE_MUTEX:
+            kernel32.CloseHandle(_INSTANCE_MUTEX)
+    _INSTANCE_MUTEX = None
+    _INSTANCE_ACTIVATION_EVENT = None
+    _INSTANCE_LISTENER_THREAD = None
 
 
 def load_config() -> dict:
@@ -494,7 +650,7 @@ def inspect_sqlite_source(database_path: str, timeout: float = 2.0) -> dict:
             if version > CURRENT_SCHEMA_VERSION:
                 return _source_result(
                     SOURCE_SCHEMA_TOO_NEW,
-                    "Эта база данных была обновлена более новой версией Manticore. Откройте её новой версией программы.",
+                    schema_too_new_message(version),
                 )
             connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
         finally:
@@ -1530,17 +1686,162 @@ class LocalServer:
         self._server = make_server("127.0.0.1", 0, manticore_app.app, threaded=True)
         self.url = f"http://127.0.0.1:{self._server.server_port}"
         self._thread = threading.Thread(target=self._server.serve_forever, name="manticore-local-server", daemon=True)
+        self._started = False
 
     def start(self) -> None:
         self._thread.start()
+        self._started = True
 
     def stop(self) -> None:
-        self._server.shutdown()
+        if not self._started:
+            return
+        shutdown_thread = threading.Thread(
+            target=self._server.shutdown,
+            name="manticore-local-server-shutdown",
+            daemon=True,
+        )
+        shutdown_thread.start()
+        shutdown_thread.join(timeout=5)
+        if shutdown_thread.is_alive():
+            logging.warning("Local Flask server shutdown call did not finish within timeout")
+        else:
+            self._server.server_close()
         self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            logging.warning("Local Flask server did not stop within timeout")
+        else:
+            logging.info("Local Flask server stopped")
+        self._started = False
+
+    def is_alive(self) -> bool:
+        return self._started and self._thread.is_alive()
+
+
+class DesktopLifecycle:
+    """Own the tray, window shutdown, and local server as one lifecycle."""
+
+    def __init__(self, config: dict, local_server: LocalServer | None = None):
+        self.config = dict(config)
+        self.local_server = local_server
+        self._lock = threading.RLock()
+        self._state = "STARTING"
+        self._shutdown_requested = False
+        self._cleanup_started = False
+        self._tray = None
+        self._timers: list[threading.Timer] = []
+
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._state
+
+    def mark_running(self) -> None:
+        with self._lock:
+            if not self._shutdown_requested:
+                self._state = "RUNNING"
+
+    def register_timer(self, timer: threading.Timer) -> None:
+        with self._lock:
+            if self._shutdown_requested:
+                timer.cancel()
+            else:
+                self._timers.append(timer)
+
+    def start_tray(self) -> bool:
+        """Show the bundled Manticore icon; failures never abort the desktop."""
+        try:
+            import pystray
+            from PIL import Image
+
+            icon_path = bundle_root() / WINDOW_ICON_PATH
+            image = Image.open(icon_path)
+            menu = pystray.Menu(
+                pystray.MenuItem("Открыть Manticore", self._tray_open, default=True),
+                pystray.MenuItem("Состояние", self._tray_status),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Завершить Manticore", self._tray_shutdown),
+            )
+            tooltip = f"Manticore {current_version()} — запущено"
+            self._tray = pystray.Icon("Manticore", image, tooltip, menu)
+            logging.info("Tray initialized")
+            self._tray.run_detached()
+            logging.info("Tray icon visible")
+            return True
+        except Exception:
+            self._tray = None
+            logging.exception("Tray initialization failed; desktop will continue without tray")
+            return False
+
+    def _tray_open(self, _icon=None, _item=None) -> None:
+        logging.info("Tray open requested")
+        if not activate_desktop_window():
+            show_native_message(
+                "Manticore",
+                "Интерфейс Manticore недоступен. Завершите приложение и запустите его снова.",
+                error=True,
+            )
+
+    def _tray_status(self, _icon=None, _item=None) -> None:
+        with self._lock:
+            state = self._state
+        source = "Fallback" if self.config.get("active_source") == "fallback" else "Primary"
+        lines = ["Manticore работает", f"Версия: {current_version()}", f"Источник: {source}"]
+        if self.local_server is not None:
+            lines.append(
+                "Внутренний сервер: доступен"
+                if self.local_server.is_alive()
+                else "Внутренний сервер Manticore недоступен."
+            )
+        if state == "SHUTTING_DOWN":
+            lines[0] = "Manticore завершает работу"
+        show_native_message("Состояние Manticore", "\n".join(lines), error=state == "ERROR")
+
+    def _tray_shutdown(self, _icon=None, _item=None) -> None:
+        logging.info("Tray shutdown requested")
+        self.shutdown_application(close_window=True)
+
+    def shutdown_application(self, *, close_window: bool = False) -> bool:
+        """Idempotently stop every resource owned by the desktop process."""
+        with self._lock:
+            first_request = not self._shutdown_requested
+            self._shutdown_requested = True
+            self._state = "SHUTTING_DOWN"
+            if close_window:
+                if not first_request:
+                    return False
+            elif self._cleanup_started:
+                return False
+            else:
+                self._cleanup_started = True
+        if first_request:
+            logging.info("Desktop shutdown started")
+        if close_window:
+            if not close_desktop_windows():
+                logging.warning("Shutdown requested with no available Manticore window")
+            # The main/UI thread completes cleanup after WebView's loop exits.
+            return True
+        with self._lock:
+            timers, self._timers = self._timers, []
+        for timer in timers:
+            timer.cancel()
+        if self.local_server is not None:
+            try:
+                self.local_server.stop()
+            except Exception:
+                logging.exception("Could not stop the local Flask server")
+        tray = self._tray
+        self._tray = None
+        if tray is not None:
+            try:
+                tray.stop()
+                logging.info("Tray stopped")
+            except Exception:
+                logging.exception("Could not stop tray")
+        return True
 
 
 def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_update: bool = False,
-                        source_config: dict | None = None) -> bool:
+                        source_config: dict | None = None, lifecycle: DesktopLifecycle | None = None) -> bool:
     import webview
 
     # The renderer boundary accepts HTTP(S) only. A filesystem source can
@@ -1602,9 +1903,13 @@ def open_desktop_window(url: str, update_server_url: str | None = None, *, skip_
             window.load_url(str(error_page))
         else:
             window.load_url(webview_url)
+        if lifecycle is not None:
+            lifecycle.mark_running()
         if not skip_update and getattr(sys, "frozen", False):
             timer = threading.Timer(4, api.check_for_update)
             timer.daemon = True
+            if lifecycle is not None:
+                lifecycle.register_timer(timer)
             timer.start()
 
     webview.start(
@@ -1665,7 +1970,18 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
     save_config(config)
     if source["type"] == "server":
         target_url = normalize_server_url(source.get("url", ""))
-        switched = open_desktop_window(target_url, target_url, skip_update=args.skip_update, source_config=config)
+        lifecycle = DesktopLifecycle(config)
+        lifecycle.start_tray()
+        try:
+            switched = open_desktop_window(
+                target_url,
+                target_url,
+                skip_update=args.skip_update,
+                source_config=config,
+                lifecycle=lifecycle,
+            )
+        finally:
+            lifecycle.shutdown_application()
         if switched:
             relaunch_after_source_switch(args)
         return 0
@@ -1691,13 +2007,21 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
         fallback_session_id=fallback_session_id,
         primary_source_id=source_identifier(configured_source(config)) if is_fallback else "",
     )
-    local_server.start()
+    lifecycle = DesktopLifecycle(config, local_server)
+    lifecycle.start_tray()
     try:
+        local_server.start()
         update_server = config.get("update_server_url") or local_server.url
         runtime_config = {**config, "webview_url": local_server.url}
-        switched = open_desktop_window(local_server.url, update_server, skip_update=args.skip_update, source_config=runtime_config)
+        switched = open_desktop_window(
+            local_server.url,
+            update_server,
+            skip_update=args.skip_update,
+            source_config=runtime_config,
+            lifecycle=lifecycle,
+        )
     finally:
-        local_server.stop()
+        lifecycle.shutdown_application()
     primary = configured_source(config)
     if source.get("type") == "sqlite" and source.get("path") == primary.get("path"):
         config["database_source"].pop("create_if_missing", None)
@@ -1707,21 +2031,7 @@ def run_configured_client(config: dict, args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
-    configure_logging()
-    cleanup_old_installers()
-    args = parse_arguments()
-    if args.source_dialog_child:
-        return run_source_dialog_child(*args.source_dialog_child)
-    if args.wait_pid:
-        wait_for_process_exit(args.wait_pid)
-    if args.configuration_child:
-        return run_setup_child("configuration")
-    if args.admin_password_child:
-        return run_setup_child("admin-password", args.admin_password_child)
-    if not acquire_single_instance():
-        show_native_message("Manticore", "Приложение уже запущено.")
-        return 0
+def run_primary_instance(args: argparse.Namespace) -> int:
     result_path = application_data_directory() / "updates" / "install-result.json"
     if result_path.is_file():
         try:
@@ -1750,6 +2060,29 @@ def main() -> int:
     elif config:
         save_config(config)
     return run_configured_client(config, args)
+
+
+def main() -> int:
+    configure_logging()
+    cleanup_old_installers()
+    args = parse_arguments()
+    if args.source_dialog_child:
+        return run_source_dialog_child(*args.source_dialog_child)
+    if args.wait_pid:
+        wait_for_process_exit(args.wait_pid)
+    if args.configuration_child:
+        return run_setup_child("configuration")
+    if args.admin_password_child:
+        return run_setup_child("admin-password", args.admin_password_child)
+    if not acquire_single_instance():
+        if not signal_existing_instance():
+            show_native_message("Manticore", "Приложение уже запущено, но его окно недоступно.")
+        return 0
+    start_instance_activation_listener()
+    try:
+        return run_primary_instance(args)
+    finally:
+        stop_instance_activation_listener()
 
 
 if __name__ == "__main__":

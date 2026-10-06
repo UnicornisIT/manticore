@@ -8,6 +8,12 @@ import db_safety
 
 
 class DatabaseSafetyTests(unittest.TestCase):
+    def test_current_schema_has_an_application_release_version(self):
+        self.assertEqual(
+            db_safety.CURRENT_SCHEMA_MIN_APP_VERSION,
+            db_safety.SCHEMA_INTRODUCED_IN[db_safety.CURRENT_SCHEMA_VERSION],
+        )
+
     def make_legacy_database(self, directory):
         path = Path(directory) / 'legacy.db'
         connection = sqlite3.connect(path)
@@ -57,9 +63,11 @@ class DatabaseSafetyTests(unittest.TestCase):
             connection.commit()
             connection.close()
             callback = mock.Mock()
-            with self.assertRaises(db_safety.DatabaseSchemaTooNewError):
+            with self.assertRaises(db_safety.DatabaseSchemaTooNewError) as raised:
                 db_safety.migrate_database(path, callback)
             callback.assert_not_called()
+            self.assertIn(f'схема БД: {db_safety.CURRENT_SCHEMA_VERSION + 1}', str(raised.exception))
+            self.assertIn(f'поддерживается: {db_safety.CURRENT_SCHEMA_VERSION}', str(raised.exception))
 
     def test_locked_database_is_not_treated_as_corrupt_or_migrated(self):
         with tempfile.TemporaryDirectory() as directory:

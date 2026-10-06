@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Отчисленные студенты{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pages/students_list.css') }}">
+{% endblock %}
+{% block content %}
+{% from '_ui_macros.html' import empty_state %}
+{% macro sort_link(column, label) -%}
+    {% set next_dir = 'desc' if order_by == column and order_dir == 'asc' else 'asc' %}
+    <a href="{{ url_for_with_query('expelled_students', order_by=column, order_dir=next_dir) }}">{{ label }}{% if order_by == column %} {{ '↑' if order_dir == 'asc' else '↓' }}{% endif %}</a>
+{%- endmacro %}
+<h1>Отчисленные студенты</h1>
+<form data-live-search=".students-table-wrap" method="get" action="{{ url_for('expelled_students') }}" class="students-filter">
+    <div class="students-filter-row">
+        <input type="hidden" name="order_by" value="{{ order_by }}">
+        <input type="hidden" name="order_dir" value="{{ order_dir }}">
+        <input data-live-search-input type="text" name="firstname" placeholder="Поиск по имени" value="{{ request.args.get('firstname', '') }}">
+        <input data-live-search-input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
+        <input data-live-search-input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
+        <select name="cohort">
+            <option value="">Все последние группы</option>
+            {% for cohort in cohorts %}<option value="{{ cohort }}" {% if request.args.get('cohort') == cohort %}selected{% endif %}>{{ cohort }}</option>{% endfor %}
+        </select>
+        <select name="campaign_year">
+            <option value="">Все кампании</option>
+            {% for campaign in campaigns %}<option value="{{ campaign }}" {% if request.args.get('campaign_year') == campaign %}selected{% endif %}>{{ campaign }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn">Применить фильтры</button>
+        <a href="{{ url_for('expelled_students') }}" class="btn btn-secondary">Очистить</a>
+        <a data-live-search-export href="{{ url_for('download_expelled_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
+    </div>
+</form>
+{% if students %}
+<div class="students-table-wrap">
+<table class="students-table">
+    <thead><tr>
+        <th>{{ sort_link('username', 'Логин') }}</th><th>Email</th>
+        <th>{{ sort_link('lastname', 'Фамилия') }}</th><th>{{ sort_link('firstname', 'Имя') }}</th>
+        <th>{{ sort_link('cohort1', 'Последняя группа') }}</th>
+        {% if course_groups_enabled %}<th>{{ sort_link('cohort2', 'Глобальная группа курса') }}</th>{% endif %}
+        <th>Кампания</th><th>Дата отчисления</th><th>Статус</th>
+        {% if session.get('role') == 'admin' %}<th class="table-actions-heading">Действия</th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for s in students %}
+        <tr>
+            <td>{{ s.username }}</td><td>{{ s.email or '—' }}</td><td>{{ s.lastname or '—' }}</td><td>{{ s.firstname or '—' }}</td>
+            <td>{{ s.cohort1 or 'Без группы' }}</td>
+            {% if course_groups_enabled %}<td>{{ s.cohort2 or '—' }}</td>{% endif %}
+            <td>{{ s.current_campaign_year or '—' }}</td>
+            <td>{{ format_display_date(s.expelled_at) if s.expelled_at else '—' }}</td>
+            <td><span class="status-badge status-danger">Отчислен</span></td>
+            {% if session.get('role') == 'admin' %}
+            <td class="students-table-actions">
+                <button type="button" class="row-action-trigger" popovertarget="expelled-actions-{{ loop.index }}" aria-haspopup="menu" aria-expanded="false" aria-label="Действия со студентом {{ s.username }}">
+                    <span>Действия</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+                </button>
+                <div class="row-action-popover" id="expelled-actions-{{ loop.index }}" popover aria-label="Действия со студентом {{ s.username }}">
+                    <a href="{{ url_for('edit_student', username=s.username) }}" class="row-action-item"><span>Восстановить студента</span></a>
+                </div>
+            </td>
+            {% endif %}
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+    {{ empty_state('Отчисленных студентов нет', 'После оформления отчисления студент появится в этом разделе.') }}
+{% endif %}
+{% endblock %}

@@ -10,7 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from desktop_releases import normalize_version, DEFAULT_GITHUB_REPOSITORY
+from db_safety import CURRENT_SCHEMA_MIN_APP_VERSION, CURRENT_SCHEMA_VERSION
+from desktop_releases import is_newer, normalize_version, DEFAULT_GITHUB_REPOSITORY
 
 
 def validate_tag(version, tag, *, allow_prerelease=False):
@@ -18,6 +19,16 @@ def validate_tag(version, tag, *, allow_prerelease=False):
         return
     if not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag) or tag != f"v{version}":
         raise ValueError(f"Stable tag {tag!r} must exactly match VERSION ({version}).")
+
+
+def validate_schema_release_version(version, *, schema_version=CURRENT_SCHEMA_VERSION,
+                                    minimum_version=CURRENT_SCHEMA_MIN_APP_VERSION):
+    """Prevent a schema-changing build from reusing an older app version."""
+    if is_newer(minimum_version, version):
+        raise ValueError(
+            f"Database schema {schema_version} requires VERSION {minimum_version} or newer; "
+            f"got {version}. Bump VERSION before building."
+        )
 
 
 def version_resource(version):
@@ -69,6 +80,7 @@ if __name__ == '__main__':
     version = normalize_version(raw_version)
     if raw_version != version:
         raise ValueError('VERSION must contain a plain SemVer without the v tag prefix.')
+    validate_schema_release_version(version)
     if args.check_tag:
         validate_tag(version, args.check_tag, allow_prerelease=args.allow_prerelease)
     if args.version_resource:

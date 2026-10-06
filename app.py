@@ -1338,6 +1338,7 @@ def ensure_students_origin_columns(conn):
         'source_dogovor': 'TEXT',
         'source_fio': 'TEXT',
         'migrated_to_student_at': 'TEXT',
+        'status': "TEXT NOT NULL DEFAULT 'active'",
     }
     for column, column_type in student_columns.items():
         if column not in columns:
@@ -1371,6 +1372,7 @@ def ensure_students_origin_columns(conn):
             (current_campaign_year, student_id),
         )
     backfill_students_cohort2(conn)
+    conn.execute("UPDATE students SET status='active' WHERE status IS NULL OR TRIM(status)='' OR status NOT IN ('active', 'expelled')")
     conn.execute('''
         CREATE INDEX IF NOT EXISTS idx_students_current_campaign_year
         ON students (current_campaign_year)
@@ -1378,6 +1380,10 @@ def ensure_students_origin_columns(conn):
     conn.execute('''
         CREATE INDEX IF NOT EXISTS idx_students_migrated_to_student_at
         ON students (migrated_to_student_at)
+    ''')
+    conn.execute('''
+        CREATE INDEX IF NOT EXISTS idx_students_status_campaign
+        ON students (status, current_campaign_year)
     ''')
 
 def ensure_record_uuids(conn):
@@ -1780,6 +1786,7 @@ def create_student_group_transfers_table(conn):
     conn.execute('''
         CREATE TABLE IF NOT EXISTS student_group_transfers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER,
             username TEXT NOT NULL,
             movement_type TEXT DEFAULT 'transfer',
             old_cohort1 TEXT,
@@ -1795,6 +1802,7 @@ def create_student_group_transfers_table(conn):
             order_original_filename TEXT,
             order_mime_type TEXT,
             order_size INTEGER,
+            comment TEXT,
             created_by TEXT,
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         )
@@ -1806,6 +1814,7 @@ def create_student_group_transfers_table(conn):
     columns = get_table_columns(conn, 'student_group_transfers')
     extra_columns = {
         'movement_type': "TEXT DEFAULT 'transfer'",
+        'student_id': 'INTEGER',
         'old_campaign_year': 'TEXT',
         'new_campaign_year': 'TEXT',
         'enrollment_order_id': 'INTEGER',
@@ -1813,6 +1822,7 @@ def create_student_group_transfers_table(conn):
         'order_number': 'TEXT',
         'order_date': 'TEXT',
         'order_source': 'TEXT',
+        'comment': 'TEXT',
     }
     for column, column_type in extra_columns.items():
         if column not in columns:
@@ -1976,16 +1986,18 @@ def get_dashboard_data(campaign_year):
         conflicts = conn.execute('SELECT COUNT(*) FROM login_conflicts WHERE campaign_year=?', (campaign_year,)).fetchone()[0]
         students_total = conn.execute(
             '''SELECT COUNT(*) FROM students
-               WHERE COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)=?''',
+               WHERE status='active'
+                 AND COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)=?''',
             (campaign_year,)
         ).fetchone()[0]
         students_without_campaign = conn.execute(
             """SELECT COUNT(*) FROM students
-               WHERE COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year) IS NULL
-                  OR COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)=''"""
+               WHERE status='active' AND (
+                    COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year) IS NULL
+                    OR COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)='')"""
         ).fetchone()[0]
         students_without_dogovor = conn.execute(
-            "SELECT COUNT(*) FROM students WHERE source_campaign_year=? AND (source_dogovor IS NULL OR source_dogovor='')",
+            "SELECT COUNT(*) FROM students WHERE status='active' AND source_campaign_year=? AND (source_dogovor IS NULL OR source_dogovor='')",
             (campaign_year,)
         ).fetchone()[0]
         groups = get_groups_with_counts(conn, campaign_year)
@@ -2249,7 +2261,8 @@ def get_data_quality_report(campaign_year=None):
             '''
             SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor, source_campaign_year
             FROM students
-            WHERE source_campaign_year=? OR source_campaign_year IS NULL OR source_campaign_year=''
+            WHERE status='active'
+              AND (source_campaign_year=? OR source_campaign_year IS NULL OR source_campaign_year='')
             ORDER BY lastname, firstname, username
             ''',
             (campaign_year,)
@@ -2562,7 +2575,7 @@ def global_search_records(query, campaign_year=None, limit=80):
 
         cur = conn.execute(
             '''
-            SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor
+            SELECT username, email, firstname, lastname, cohort1, cohort2, source_dogovor, status
             FROM students
             WHERE INSTR(NORMALIZE_SEARCH(username), ?) > 0 OR INSTR(NORMALIZE_SEARCH(email), ?) > 0 OR INSTR(NORMALIZE_SEARCH(firstname), ?) > 0 OR INSTR(NORMALIZE_SEARCH(lastname), ?) > 0 OR INSTR(NORMALIZE_SEARCH(cohort1), ?) > 0 OR INSTR(NORMALIZE_SEARCH(cohort2), ?) > 0 OR INSTR(NORMALIZE_SEARCH(source_dogovor), ?) > 0
             ORDER BY lastname, firstname
@@ -2581,7 +2594,7 @@ def global_search_records(query, campaign_year=None, limit=80):
                 'id': row[0],
                 'title': fio,
                 'subtitle': ' · '.join(subtitle_parts),
-                'status': 'Студент',
+                'status': 'Отчислен' if row[7] == 'expelled' else 'Студент',
             })
 
         cur = conn.execute(
@@ -2683,6 +2696,7 @@ PERSON_FIELD_LABELS = {
     'cohort2': 'Глобальная группа курса',
     'source_dogovor': 'Договор при поступлении',
     'source_fio': 'ФИО при поступлении',
+    'status': 'Статус',
 }
 
 PERSON_FIELD_HELP = {
@@ -2708,6 +2722,7 @@ PERSON_FIELD_HELP = {
     'cohort2': 'Автоматически определяемая глобальная группа курса для назначения набора курсов.',
     'source_dogovor': 'Договор, по которому студент был найден при миграции.',
     'source_fio': 'ФИО из исходной записи абитуриента.',
+    'status': 'Текущий бизнес-статус студента в контингенте.',
 }
 
 PERSON_SECTION_FIELDS = {
@@ -2718,7 +2733,7 @@ PERSON_SECTION_FIELDS = {
         ('Дополнительно', ['comment', 'created_at', 'id']),
     ],
     'student': [
-        ('Основные данные', ['lastname', 'firstname', 'source_fio', 'current_campaign_year', 'cohort1', 'cohort2']),
+        ('Основные данные', ['status', 'lastname', 'firstname', 'source_fio', 'current_campaign_year', 'cohort1', 'cohort2']),
         ('Контакты и доступ', ['username', 'password', 'email']),
         ('Данные при поступлении', ['source_dogovor', 'source_campaign_year']),
         ('Служебная информация', ['id']),
@@ -2739,7 +2754,7 @@ PERSON_SECTION_FIELDS = {
 
 PERSON_SUMMARY_FIELDS = {
     'abiturient': ['fio', 'dogovor', 'login', 'paid'],
-    'student': ['source_fio', 'cohort1', 'cohort2', 'username', 'source_dogovor'],
+    'student': ['status', 'source_fio', 'cohort1', 'cohort2', 'username', 'source_dogovor'],
     'duplicate': ['fio', 'dogovor', 'login'],
     'conflict': ['fio', 'dogovor', 'login'],
 }
@@ -2758,6 +2773,8 @@ def format_person_field_value(key, value):
         return 'Договор оплачен' if is_paid_person_value(value) else 'Договор не оплачен'
     if key == 'password' and value == '******':
         return 'Скрыт для безопасности'
+    if key == 'status':
+        return 'Отчислен' if value == 'expelled' else 'Действующий'
     if key == 'email' and is_blank_person_value(value):
         return 'Почта не указана'
     if key == 'comment' and is_blank_person_value(value):
@@ -3698,7 +3715,8 @@ def init_db():
                 cohort2 TEXT,
                 source_campaign_year TEXT,
                 source_dogovor TEXT,
-                source_fio TEXT
+                source_fio TEXT,
+                status TEXT NOT NULL DEFAULT 'active'
             )
         ''')
         conn.execute('''
@@ -4965,7 +4983,7 @@ def process_groups_csv(file_path, fallback_group_year=None):
     }
 
 def get_group_student_count(conn, group_name):
-    cur = conn.execute('SELECT COUNT(*) FROM students WHERE cohort1=?', (group_name,))
+    cur = conn.execute("SELECT COUNT(*) FROM students WHERE status='active' AND cohort1=?", (group_name,))
     return cur.fetchone()[0]
 
 def get_next_subgroup_name(conn, group_name, group_year=None):
@@ -7709,11 +7727,11 @@ def get_student_transfer_orders(username):
         ensure_student_enrollment_movement(conn, username)
         cur = conn.execute(
             '''
-            SELECT id, username, movement_type, old_campaign_year, new_campaign_year,
+            SELECT id, student_id, username, movement_type, old_campaign_year, new_campaign_year,
                    old_cohort1, old_cohort2, new_cohort1, new_cohort2,
                    enrollment_order_id, enrollment_order_upload_id, order_number, order_date, order_source,
                    order_filename, order_original_filename, order_mime_type, order_size,
-                   created_by, created_at
+                   comment, created_by, created_at
             FROM student_group_transfers
             WHERE username=?
             ORDER BY created_at DESC, id DESC
@@ -7752,8 +7770,14 @@ def get_student_transfer_orders(username):
         upload_info = upload_lookup.get(upload_key, {})
         order['movement_type'] = movement_type
         order['is_enrollment'] = movement_type == 'enrollment'
-        order['movement_type_label'] = 'Зачислен' if order['is_enrollment'] else 'Перевод'
-        order['movement_source_label'] = 'Приказ о зачислении' if order['is_enrollment'] else 'Приказ о переводе'
+        order['movement_type_label'] = {
+            'enrollment': 'Зачислен', 'transfer': 'Перевод',
+            'expulsion': 'Отчисление', 'restoration': 'Восстановление',
+        }.get(movement_type, 'Перемещение')
+        order['movement_source_label'] = {
+            'enrollment': 'Приказ о зачислении', 'transfer': 'Приказ о переводе',
+            'expulsion': 'Приказ об отчислении', 'restoration': 'Приказ о восстановлении',
+        }.get(movement_type, 'Операция со студентом')
         order['has_order_file'] = bool(str(order.get('order_filename') or '').strip())
         order['has_enrollment_order_file'] = order['is_enrollment'] and bool(upload_info.get('stored_filename'))
         order['order_size_text'] = format_upload_size(order.get('order_size') or 0)
@@ -7774,6 +7798,10 @@ def get_student_transfer_orders(username):
             and order['old_campaign_year'] != order['new_campaign_year']
         )
         order['cohort2_text'] = order.get('new_cohort2') or '-'
+        order['comment_text'] = order.get('comment') or '-'
+        order['timeline_title'] = {
+            'expulsion': 'ОТЧИСЛЕНИЕ', 'restoration': 'ВОССТАНОВЛЕНИЕ',
+        }.get(movement_type, order['to_group_text'])
         if order['has_order_file']:
             order['order_file_text'] = order.get('order_original_filename') or 'PDF прикреплен'
         elif order['is_enrollment']:
@@ -8829,7 +8857,7 @@ def student_enrollment_order_sort_key(student):
 def get_all_students(
     order_by='username', order_dir='asc', cohort=None, lastname=None,
     firstname=None, username=None, enrollment_order=None, campaign_year=None,
-    migrated_from=None, migrated_to=None
+    migrated_from=None, migrated_to=None, student_status='active', include_status_details=False
 ):
     valid_columns = {
         'username', 'lastname', 'firstname', 'cohort1', 'cohort2', 'email',
@@ -8839,11 +8867,20 @@ def get_all_students(
         order_by = 'username'
     if order_dir.lower() not in {'asc', 'desc'}:
         order_dir = 'asc'
-    query = '''
+    if student_status not in {'active', 'expelled'}:
+        raise ValueError('Некорректный статус студента.')
+    status_details = ''
+    if include_status_details:
+        status_details = ''', s.status,
+               COALESCE(NULLIF(s.current_campaign_year, ''), s.source_campaign_year) AS current_campaign_year,
+               (SELECT MAX(expulsion.created_at)
+                FROM student_group_transfers expulsion
+                WHERE expulsion.username=s.username AND expulsion.movement_type='expulsion') AS expelled_at'''
+    query = f'''
         SELECT s.username, s.password, s.email, s.firstname, s.lastname, s.cohort1, s.cohort2,
                TRIM(COALESCE(enrollment.order_number, '')) AS enrollment_order_number,
                TRIM(COALESCE(enrollment.order_date, '')) AS enrollment_order_date,
-               s.migrated_to_student_at
+               s.migrated_to_student_at{status_details}
         FROM students s
         LEFT JOIN student_group_transfers enrollment
           ON enrollment.id=(
@@ -8852,9 +8889,9 @@ def get_all_students(
               WHERE enrollment_row.username=s.username
                 AND enrollment_row.movement_type='enrollment'
           )
-        WHERE 1=1
+        WHERE s.status=?
     '''
-    params = []
+    params = [student_status]
     if campaign_year:
         query += " AND COALESCE(NULLIF(s.current_campaign_year, ''), s.source_campaign_year)=?"
         params.append(normalize_campaign_year(campaign_year, get_active_campaign_year()))
@@ -10378,7 +10415,7 @@ def students():
     )
 
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
+        cur = conn.execute("SELECT DISTINCT cohort1 FROM students WHERE status='active' ORDER BY cohort1")
         cohorts = [row[0] for row in cur.fetchall()]
 
     return render_template(
@@ -10416,7 +10453,7 @@ def students_list():
         migrated_to=request.args.get('migrated_to')
     )
     with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.execute('SELECT DISTINCT cohort1 FROM students ORDER BY cohort1')
+        cur = conn.execute("SELECT DISTINCT cohort1 FROM students WHERE status='active' ORDER BY cohort1")
         cohorts = [row[0] for row in cur.fetchall()]
     return render_template(
         'students_list.html',
@@ -10425,6 +10462,33 @@ def students_list():
         enrollment_orders=get_student_enrollment_order_options(),
         order_by=order_by,
         order_dir=order_dir
+    )
+
+@app.route('/students/expelled')
+@login_required
+def expelled_students():
+    order_by = request.args.get('order_by', 'lastname')
+    order_dir = request.args.get('order_dir', 'asc')
+    cohort = request.args.get('cohort')
+    lastname = request.args.get('lastname')
+    firstname = request.args.get('firstname')
+    username = request.args.get('username')
+    campaign_year = request.args.get('campaign_year')
+    student_rows = get_all_students(
+        order_by, order_dir, cohort, lastname, firstname, username,
+        campaign_year=campaign_year, student_status='expelled', include_status_details=True
+    )
+    with sqlite3.connect(DB_PATH) as conn:
+        cohorts = [row[0] for row in conn.execute(
+            "SELECT DISTINCT cohort1 FROM students WHERE status='expelled' ORDER BY cohort1"
+        ).fetchall()]
+        campaigns = [row[0] for row in conn.execute(
+            """SELECT DISTINCT COALESCE(NULLIF(current_campaign_year, ''), source_campaign_year)
+               FROM students WHERE status='expelled' ORDER BY 1 DESC"""
+        ).fetchall() if row[0]]
+    return render_template(
+        'students_expelled.html', students=student_rows, cohorts=cohorts,
+        campaigns=campaigns, order_by=order_by, order_dir=order_dir
     )
 
 @app.route('/api/students/migration-calendar')
@@ -10479,6 +10543,33 @@ def download_students():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="students.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+@app.route('/students/expelled/download')
+@login_required
+def download_expelled_students():
+    student_rows = get_all_students(
+        request.args.get('order_by', 'lastname'), request.args.get('order_dir', 'asc'),
+        request.args.get('cohort'), request.args.get('lastname'),
+        request.args.get('firstname'), request.args.get('username'),
+        campaign_year=request.args.get('campaign_year'), student_status='expelled',
+        include_status_details=True,
+    )
+    export_rows = [{
+        'username': row['username'], 'email': row['email'], 'lastname': row['lastname'],
+        'firstname': row['firstname'], 'cohort1': row['cohort1'], 'cohort2': row['cohort2'],
+        'campaign_year': row['current_campaign_year'], 'expelled_at': row['expelled_at'],
+        'status': row['status'],
+    } for row in student_rows]
+    if not are_course_groups_enabled():
+        export_rows = [{key: value for key, value in row.items() if key != 'cohort2'} for row in export_rows]
+    log_action('expelled_students_exported', 'students', '', f'rows={len(export_rows)}')
+    output = io.BytesIO()
+    pd.DataFrame(export_rows).to_excel(output, index=False)
+    output.seek(0)
+    return send_file(
+        output, as_attachment=True, download_name='expelled_students.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 @app.route('/api/student-transfer/groups')
 @login_required
 @role_required('admin')
@@ -10490,13 +10581,13 @@ def student_transfer_campaign_groups():
         return jsonify(error=str(exc)), 400
     with sqlite3.connect(DB_PATH) as conn:
         student = conn.execute(
-            '''SELECT cohort1, source_campaign_year, current_campaign_year
+            '''SELECT cohort1, source_campaign_year, current_campaign_year, status
                FROM students WHERE username=?''',
             (username,),
         ).fetchone()
         if not student:
             return jsonify(error='Студент не найден.'), 404
-        current_group, source_campaign_year, stored_campaign_year = student
+        current_group, source_campaign_year, stored_campaign_year, student_status = student
         current_campaign_year = resolve_student_current_campaign_year(
             conn, current_group, stored_campaign_year, source_campaign_year
         )
@@ -10515,7 +10606,7 @@ def student_transfer_campaign_groups():
                 'current_students': group['count'],
                 'capacity': group['capacity'],
                 'cohort2': group['cohort2'],
-                'is_current_group': group['name'] == current_group,
+                'is_current_group': student_status == 'active' and group['name'] == current_group,
                 'is_full': group['is_full'],
                 'is_over_capacity': group['is_over_capacity'],
             }
@@ -10530,12 +10621,13 @@ def edit_student(username):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
             '''SELECT username, password, email, firstname, lastname, cohort1, cohort2,
-                      source_campaign_year, current_campaign_year
+                      source_campaign_year, current_campaign_year, status
                FROM students WHERE username=?''',
             (username,),
         )
         student = cur.fetchone()
         if student:
+            student_status = student[9] or 'active'
             transfer_group_year = resolve_student_current_campaign_year(
                 conn, student[5], student[8], student[7]
             )
@@ -10544,6 +10636,7 @@ def edit_student(username):
             )
             transfer_campaigns = get_student_transfer_campaigns(conn, transfer_group_year)
         else:
+            student_status = 'active'
             transfer_group_year = get_active_campaign_year()
             transfer_groups = []
             transfer_campaigns = []
@@ -10562,14 +10655,16 @@ def edit_student(username):
             return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
                                    transfer_group_year=transfer_group_year,
                                    transfer_campaigns=transfer_campaigns,
-                                   transfer_orders=get_student_transfer_orders(username), email_warning=None)
+                                   transfer_orders=get_student_transfer_orders(username), email_warning=None,
+                                   student_status=student_status)
         if email_check.severity == 'warning' and request.form.get('email_warning_confirm') != '1':
             flash('Проверьте домен почты. Адрес не изменён.', 'warning')
             student = (username, password, email, firstname, lastname, student[5], student[6])
             return render_template('edit_student.html', student=student, transfer_groups=transfer_groups,
                                    transfer_group_year=transfer_group_year,
                                    transfer_campaigns=transfer_campaigns,
-                                   transfer_orders=get_student_transfer_orders(username), email_warning=email_check)
+                                   transfer_orders=get_student_transfer_orders(username), email_warning=email_check,
+                                   student_status=student_status)
         backup_path = create_database_backup('before_edit_student')
         cohort1 = student[5]
         cohort2 = student[6]
@@ -10584,7 +10679,7 @@ def edit_student(username):
                 conn
             )
         flash('Данные обновлены')
-        return redirect(url_for('students_list'))
+        return redirect(url_for('expelled_students') if student_status == 'expelled' else url_for('students_list'))
     return render_template(
         'edit_student.html',
         student=student,
@@ -10592,6 +10687,7 @@ def edit_student(username):
         transfer_group_year=transfer_group_year,
         transfer_campaigns=transfer_campaigns,
         transfer_orders=get_student_transfer_orders(username),
+        student_status=student_status,
         email_warning=None,
     )
 
@@ -10618,13 +10714,15 @@ def transfer_student_to_group(username, selected_group, *, actor_role, target_ca
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('BEGIN IMMEDIATE')
             student = conn.execute(
-                '''SELECT cohort1, cohort2, source_campaign_year, current_campaign_year,
-                          migrated_to_student_at
+                '''SELECT id, cohort1, cohort2, source_campaign_year, current_campaign_year,
+                          migrated_to_student_at, status
                    FROM students WHERE username=?''',
                 (username,)).fetchone()
             if not student:
                 raise StudentTransferError('student_not_found', 'Студент не найден.', 404)
-            old_cohort1, old_cohort2, source_year, stored_current_year, _migrated_at = student
+            student_id, old_cohort1, old_cohort2, source_year, stored_current_year, _migrated_at, student_status = student
+            if student_status != 'active':
+                raise StudentTransferError('invalid_status', 'Сначала восстановите отчисленного студента.')
             current_campaign_year = resolve_student_current_campaign_year(
                 conn, old_cohort1, stored_current_year, source_year
             )
@@ -10697,15 +10795,15 @@ def transfer_student_to_group(username, selected_group, *, actor_role, target_ca
             )
             conn.execute(
                 """INSERT INTO student_group_transfers
-                   (username, movement_type, old_campaign_year, new_campaign_year,
+                   (student_id, username, movement_type, old_campaign_year, new_campaign_year,
                     old_cohort1, old_cohort2, new_cohort1, new_cohort2,
                     order_source, order_filename, order_original_filename, order_mime_type,
-                    order_size, created_by)
-                   VALUES (?, 'transfer', ?, ?, ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?)""",
-                (username, current_campaign_year, target_campaign_year,
+                    order_size, comment, created_by)
+                   VALUES (?, ?, 'transfer', ?, ?, ?, ?, ?, ?, 'student_transfer', ?, ?, ?, ?, ?, ?)""",
+                (student_id, username, current_campaign_year, target_campaign_year,
                  old_cohort1, old_cohort2, selected_group, new_cohort2,
                  saved_file['filename'], saved_file['original_filename'], saved_file['mime_type'],
-                 saved_file['size'], session.get('user', '')))
+                 saved_file['size'], comment[:1000], session.get('user', '')))
             log_action('student_campaign_transferred' if campaign_changed else 'student_group_transferred',
                        'student', username,
                        f"old_campaign={current_campaign_year}; new_campaign={target_campaign_year}; "
@@ -10724,20 +10822,163 @@ def transfer_student_to_group(username, selected_group, *, actor_role, target_ca
         raise
 
 
+def change_student_lifecycle(username, operation_type, *, actor_role, target_campaign_year=None,
+                             selected_group='', order_file=None, capacity_override=False,
+                             expected_source=None, expected_campaign=None, preview=False, comment=''):
+    if actor_role != 'admin':
+        raise StudentTransferError('permission_denied', 'Операция доступна только администратору.', 403)
+    if operation_type not in {'expulsion', 'restoration'}:
+        raise StudentTransferError('invalid_operation', 'Неизвестная операция со студентом.', 400)
+    selected_group = normalize_group_name(selected_group)
+    saved_file = None
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            student = conn.execute(
+                '''SELECT id, firstname, lastname, cohort1, cohort2, source_campaign_year,
+                          current_campaign_year, migrated_to_student_at, status
+                   FROM students WHERE username=?''',
+                (username,),
+            ).fetchone()
+            if not student:
+                raise StudentTransferError('student_not_found', 'Студент не найден.', 404)
+            (student_id, firstname, lastname, old_cohort1, old_cohort2, source_year,
+             stored_current_year, _migrated_at, old_status) = student
+            required_status = 'active' if operation_type == 'expulsion' else 'expelled'
+            if old_status != required_status:
+                message = ('Студент уже отчислен.' if operation_type == 'expulsion'
+                           else 'Восстановление доступно только для отчисленного студента.')
+                raise StudentTransferError('invalid_status', message)
+            current_campaign_year = resolve_student_current_campaign_year(
+                conn, old_cohort1, stored_current_year, source_year
+            )
+            if expected_source is not None and expected_source != old_cohort1:
+                raise StudentTransferError('concurrent_update', 'Группа студента изменилась. Обновите карточку.')
+            if expected_campaign is not None and expected_campaign != current_campaign_year:
+                raise StudentTransferError('concurrent_update', 'Кампания студента изменилась. Обновите карточку.')
+
+            target_count = None
+            full = False
+            new_cohort1, new_cohort2 = old_cohort1, old_cohort2
+            new_campaign_year = current_campaign_year
+            fio = ' '.join(part for part in (lastname, firstname) if str(part or '').strip()).strip() or username
+            if operation_type == 'restoration':
+                try:
+                    new_campaign_year = require_campaign_year(target_campaign_year)
+                except ValueError as exc:
+                    raise StudentTransferError('target_campaign_not_found', str(exc), 400) from exc
+                target = conn.execute(
+                    'SELECT group_year, is_hidden FROM groups WHERE name=?', (selected_group,)
+                ).fetchone()
+                if not target or target[1]:
+                    raise StudentTransferError('target_group_not_found', 'Выберите группу восстановления из справочника.', 404)
+                if str(target[0]) != new_campaign_year:
+                    raise StudentTransferError('incompatible_campaign', 'Выбранная группа не относится к указанной приёмной кампании.')
+                new_cohort1 = selected_group
+                new_cohort2 = get_student_course_group(selected_group)
+                if are_course_groups_enabled() and not new_cohort2:
+                    raise StudentTransferError('incompatible_specialty', 'Для выбранной группы не удалось определить глобальную группу курса.')
+                target_count = get_group_student_count(conn, selected_group)
+                full = target_count >= MAX_GROUP_STUDENTS
+                message = (
+                    f'Восстановить студента {fio} в кампанию {new_campaign_year}, '
+                    f'группу {selected_group}. После восстановления: {target_count + 1}/{MAX_GROUP_STUDENTS}.'
+                )
+                result = dict(
+                    operation_type=operation_type, old_group=old_cohort1, new_group=new_cohort1,
+                    old_campaign=current_campaign_year, new_campaign=new_campaign_year,
+                    campaign_changed=current_campaign_year != new_campaign_year,
+                    target_count=target_count, capacity=MAX_GROUP_STUDENTS,
+                    capacity_exceeded=full, message=message,
+                )
+                if full and not capacity_override:
+                    raise StudentTransferError('capacity_exceeded', message, **{k: v for k, v in result.items() if k != 'message'})
+            else:
+                message = (
+                    f'Отчислить студента {fio}. Текущая кампания: {current_campaign_year}; '
+                    f'группа: {old_cohort1 or "без группы"}. Студент будет исключён из действующего '
+                    'контингента. Его карточка, история и данные сохранятся.'
+                )
+                result = dict(
+                    operation_type=operation_type, old_group=old_cohort1, new_group=old_cohort1,
+                    old_campaign=current_campaign_year, new_campaign=current_campaign_year,
+                    campaign_changed=False, capacity_exceeded=False, message=message,
+                )
+            if preview:
+                return result
+
+            backup_path = create_database_backup(f'before_student_{operation_type}')
+            saved_file = (save_student_transfer_order_file(username, order_file)
+                          if order_file and order_file.filename else
+                          dict(filename='', original_filename='', mime_type='', size=0))
+            history = conn.execute(
+                '''INSERT INTO student_group_transfers
+                   (student_id, username, movement_type, old_campaign_year, new_campaign_year,
+                    old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+                    order_source, order_filename, order_original_filename, order_mime_type,
+                    order_size, comment, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (student_id, username, operation_type, current_campaign_year, new_campaign_year,
+                 old_cohort1, old_cohort2, new_cohort1, new_cohort2,
+                 f'student_{operation_type}', saved_file['filename'], saved_file['original_filename'],
+                 saved_file['mime_type'], saved_file['size'], comment[:1000], session.get('user', '')),
+            )
+            new_status = 'expelled' if operation_type == 'expulsion' else 'active'
+            if operation_type == 'expulsion':
+                updated = conn.execute(
+                    "UPDATE students SET status='expelled' WHERE id=? AND status='active'",
+                    (student_id,),
+                )
+            else:
+                updated = conn.execute(
+                    '''UPDATE students SET status='active', cohort1=?, cohort2=?, current_campaign_year=?
+                       WHERE id=? AND status='expelled' ''',
+                    (new_cohort1, new_cohort2, new_campaign_year, student_id),
+                )
+            if updated.rowcount != 1:
+                raise StudentTransferError('concurrent_update', 'Статус студента изменился. Обновите карточку.')
+            log_action(
+                f'student_{operation_type}', 'student', student_id,
+                f'username={username}; history_event_id={history.lastrowid}; '
+                f'old_status={old_status}; new_status={new_status}; '
+                f'old_campaign={current_campaign_year}; new_campaign={new_campaign_year}; '
+                f'old_cohort1={old_cohort1}; new_cohort1={new_cohort1}; '
+                f'target_count={target_count if target_count is not None else ""}; '
+                f'capacity_override={bool(capacity_override)}; '
+                f'order={saved_file["original_filename"] or "not_attached"}; '
+                f'comment={comment[:1000]}; backup={os.path.basename(backup_path) if backup_path else ""}',
+                conn,
+            )
+        return result
+    except Exception:
+        if saved_file and saved_file.get('path') and os.path.exists(saved_file['path']):
+            os.remove(saved_file['path'])
+        raise
+
+
 @app.route('/edit_student/<username>/transfer_group', methods=['POST'])
 @login_required
 @role_required('admin')
 def transfer_student_group(username):
     wants_json = request.accept_mimetypes.best == 'application/json'
+    operation_type = request.form.get('operation_type', 'transfer')
     try:
-        result = transfer_student_to_group(
-            username, request.form.get('new_cohort1', ''), actor_role=session.get('role'),
-            target_campaign_year=request.form.get('target_campaign_year'),
+        operation_kwargs = dict(
+            actor_role=session.get('role'), target_campaign_year=request.form.get('target_campaign_year'),
             order_file=request.files.get('transfer_order_file'),
             capacity_override=request.form.get('capacity_override') == 'true',
-            expected_source=request.form.get('expected_source'),
-            expected_campaign=request.form.get('expected_campaign'),
-            preview=request.form.get('preview') == 'true', comment=request.form.get('comment', '').strip())
+            expected_source=request.form.get('expected_source'), expected_campaign=request.form.get('expected_campaign'),
+            preview=request.form.get('preview') == 'true', comment=request.form.get('comment', '').strip(),
+        )
+        if operation_type == 'transfer':
+            result = transfer_student_to_group(
+                username, request.form.get('new_cohort1', ''), **operation_kwargs
+            )
+        else:
+            result = change_student_lifecycle(
+                username, operation_type, selected_group=request.form.get('new_cohort1', ''),
+                **operation_kwargs,
+            )
         if request.form.get('preview') == 'true':
             return jsonify(result)
     except (StudentTransferError, UploadValidationError, sqlite3.Error, OSError) as exc:
@@ -10749,13 +10990,17 @@ def transfer_student_group(username):
             app.logger.exception('Student transfer failed')
             busy = isinstance(exc, sqlite3.OperationalError) and ('locked' in str(exc) or 'busy' in str(exc))
             code = 'concurrent_update' if busy else 'database_error'
-            message = 'Данные заняты другой операцией. Повторите перевод.' if busy else 'Не удалось сохранить перевод. Изменения отменены.'
+            message = 'Данные заняты другой операцией. Повторите действие.' if busy else 'Не удалось сохранить операцию. Изменения отменены.'
             status, details = 409 if busy else 500, {}
         if wants_json:
             return jsonify(code=code, message=message, **details), status
         flash(message, 'error')
         return redirect(url_for('edit_student', username=username))
-    if result['campaign_changed']:
+    if result.get('operation_type') == 'expulsion':
+        flash('Студент отчислен. Карточка и история сохранены.', 'success')
+    elif result.get('operation_type') == 'restoration':
+        flash(f"Студент восстановлен в группу {result['new_group']}.", 'success')
+    elif result['campaign_changed']:
         flash(
             f"Студент успешно перенесён в приёмную кампанию {result['new_campaign']}, "
             f"группа {result['new_group']}.",
@@ -10763,7 +11008,7 @@ def transfer_student_group(username):
         )
     else:
         flash(f"Студент переведён: {result['old_group']} → {result['new_group']}.", 'success')
-    if result['capacity_exceeded']:
+    if result.get('capacity_exceeded'):
         flash(f"Группа теперь переполнена: {result['target_count'] + 1}/{result['capacity']}.", 'warning')
     destination = url_for('edit_student', username=username)
     return jsonify(redirect=destination) if wants_json else redirect(destination)

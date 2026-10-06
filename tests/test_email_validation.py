@@ -88,6 +88,16 @@ class EmailValidationTests(unittest.TestCase):
                 if code in {'domain_not_found', 'domain_no_mail'}:
                     self.assertEqual(result.severity, 'warning')
 
+    def test_short_lived_resolvers_cannot_reuse_another_resolvers_cache_entry(self):
+        first = email_validation.validate_email(
+            'one@resolver-identity.test', resolver=FakeResolver({'MX': ['mx.example.test.']})
+        )
+        second = email_validation.validate_email(
+            'two@resolver-identity.test', resolver=FakeResolver({'MX': NXDOMAIN()})
+        )
+        self.assertEqual(first.code, 'domain_valid_mx')
+        self.assertEqual(second.code, 'domain_not_found')
+
     def test_dns_cache_avoids_second_lookup(self):
         with tempfile.TemporaryDirectory() as directory:
             database = str(Path(directory) / 'cache.db')

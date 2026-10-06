@@ -19,6 +19,14 @@ class FrontendKeyboardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipUnless(NODE, 'Node.js is required for row action regressions')
+    def test_row_actions(self):
+        result = subprocess.run(
+            [NODE, '--test', str(PROJECT_ROOT / 'tests/frontend/row_actions.test.cjs')],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, encoding='utf-8', timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(NODE, 'Node.js is required for updater UI regressions')
     def test_desktop_updater(self):
         result = subprocess.run(

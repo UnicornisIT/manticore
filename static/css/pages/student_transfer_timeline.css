@@ -64,6 +64,12 @@
     .student-movement-item:active {
         transform: translateY(1px);
     }
+    .student-movement-item.is-expulsion { border-color: var(--danger-border); }
+    .student-movement-item.is-expulsion .student-movement-dot { background: var(--danger); }
+    .student-movement-item.is-expulsion .student-movement-title { color: var(--danger); }
+    .student-movement-item.is-restoration { border-color: var(--success-border); }
+    .student-movement-item.is-restoration .student-movement-dot { background: var(--success); }
+    .student-movement-item.is-restoration .student-movement-title { color: var(--success); }
     .student-movement-date {
         display: inline-flex;
         align-items: center;

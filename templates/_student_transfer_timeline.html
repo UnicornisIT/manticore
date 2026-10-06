@@ -4,15 +4,16 @@
 <div class="student-movement-timeline" aria-label="История перемещений">
     <div class="student-movement-items">
         {% for order in transfer_orders|reverse %}
-        <button type="button" class="student-movement-item" data-student-movement-open="student-movement-modal-{{ order.id }}" aria-haspopup="dialog">
+        <button type="button" class="student-movement-item is-{{ order.movement_type }}" data-student-movement-open="student-movement-modal-{{ order.id }}" aria-haspopup="dialog">
             <span class="student-movement-date">
                 <span class="student-movement-dot" aria-hidden="true"></span>
                 {{ order.timeline_date_text }}
             </span>
-            <span class="student-movement-title">{{ order.to_group_text }}</span>
+            <span class="student-movement-title">{{ order.timeline_title }}</span>
             <span class="student-movement-subtitle">
                 {{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}
-                {% if order.campaign_changed %} · кампания {{ order.from_campaign_text }} → {{ order.to_campaign_text }}{% endif %}
+                {% if order.campaign_changed %} · кампания {{ order.from_campaign_text }} → {{ order.to_campaign_text }}
+                {% elif order.movement_type in ['expulsion', 'restoration'] %} · кампания {{ order.to_campaign_text }}{% endif %}
             </span>
         </button>
         {% endfor %}
@@ -23,7 +24,7 @@
 <div class="student-movement-modal" id="student-movement-modal-{{ order.id }}" role="dialog" aria-modal="true" aria-labelledby="student-movement-title-{{ order.id }}" hidden>
     <div class="student-movement-backdrop" data-student-movement-close></div>
     <div class="student-movement-panel" role="document">
-        <h4 id="student-movement-title-{{ order.id }}">{{ order.to_group_text }}</h4>
+        <h4 id="student-movement-title-{{ order.id }}">{{ order.timeline_title }}</h4>
         <dl class="student-movement-details">
             <div>
                 <dt>Дата перемещения:</dt>
@@ -67,6 +68,12 @@
                 <dt>Тип перемещения:</dt>
                 <dd>{{ order.movement_type_label }}</dd>
             </div>
+            {% if order.comment_text != '-' %}
+            <div>
+                <dt>Причина / комментарий:</dt>
+                <dd>{{ order.comment_text }}</dd>
+            </div>
+            {% endif %}
             <div>
                 <dt>Источник:</dt>
                 <dd>{{ order.movement_source_label }}</dd>

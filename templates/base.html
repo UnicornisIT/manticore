@@ -15,7 +15,7 @@
 </head>
 {% set reconciliation_page = request.blueprint == 'contingent' %}
 {% set data_page_endpoints = [
-    'abiturients', 'students', 'students_list', 'file_work', 'data_checks',
+    'abiturients', 'students', 'students_list', 'expelled_students', 'file_work', 'data_checks',
     'abiturients_to_students', 'duplicates', 'students_duplicates',
     'duplicates_abiturients', 'login_conflicts', 'enrollment_order_upload_detail',
     'enrollment_order_student_roster', 'add_group', 'campaigns', 'audit_logs',
@@ -25,7 +25,7 @@
     <div class="container">
         {% if session.get('user') %}
         {% set migration_nav_endpoints = ['migration_wizard', 'abiturients_to_students', 'duplicates', 'students_duplicates', 'duplicates_abiturients'] %}
-        {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list'] %}
+        {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list', 'expelled_students'] %}
         {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints + ([request.endpoint] if reconciliation_page else []) %}
         {% set file_work_nav_section = request.view_args.get('section') if request.view_args else None %}
         <ul class="main-nav">
@@ -46,6 +46,7 @@
                     <div class="nav-dropdown-panel">
                         <a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a>
                         <a href="{{ url_for('students_list') }}" {% if request.endpoint in ['students', 'students_list'] %}class="active"{% endif %}>Список студентов</a>
+                        <a href="{{ url_for('expelled_students') }}" {% if request.endpoint == 'expelled_students' %}class="active"{% endif %}>Отчисленные студенты</a>
                     </div>
                 </details>
             </li>
@@ -120,7 +121,7 @@
         </ul>
         {% set page_titles = {
             'index': 'Главная', 'abiturients': 'Абитуриенты', 'students': 'Студенты',
-            'students_list': 'Студенты', 'file_work': 'Работа с файлами',
+            'students_list': 'Студенты', 'expelled_students': 'Отчисленные студенты', 'file_work': 'Работа с файлами',
             'data_checks': 'Проверка данных', 'manual_create': 'Ручное создание',
             'migration_wizard': 'Мастер миграции', 'admin_panel': 'Администрирование',
             'campaigns': 'Кампании', 'search': 'Поиск', 'person_card': 'Карточка человека',
@@ -195,6 +196,7 @@
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/table-selection.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/row-actions.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/modern-ui.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/user-menu.js') }}" defer></script>
     {% if request.endpoint == 'login' %}

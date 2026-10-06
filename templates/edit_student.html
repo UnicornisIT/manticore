@@ -4,7 +4,12 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/edit_student.css') }}">
 {% endblock %}
 {% block content %}
-<h2 class="student-edit-title">Редактировать студента</h2>
+<div class="student-edit-heading">
+    <h2 class="student-edit-title">Редактировать студента</h2>
+    <span class="status-badge {{ 'status-danger' if student_status == 'expelled' else 'status-success' }}">
+        {{ 'Отчислен' if student_status == 'expelled' else 'Действующий' }}
+    </span>
+</div>
 <div class="student-edit-layout">
 <form method="post" class="student-edit-form">
     {% include "_csrf_field.html" %}
@@ -44,12 +49,12 @@
     {% endif %}
     <div class="student-edit-actions">
         <button type="submit" class="btn btn-success">Сохранить</button>
-        <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Назад</a>
+        <a href="{{ url_for('expelled_students') if student_status == 'expelled' else url_for('students_list') }}" class="btn btn-secondary">Назад</a>
     </div>
 </form>
 <div class="student-transfer-panel">
     <section class="student-transfer-card">
-        <h3>Перевод по приказу</h3>
+        <h3>{{ 'Восстановление студента' if student_status == 'expelled' else 'Перевод по приказу' }}</h3>
         <div class="student-transfer-current">
             <div><span>Текущая приёмная кампания:</span><strong>{{ transfer_group_year }}</strong></div>
             <div><span>Текущая группа:</span><strong>{{ student[5] or 'Без группы' }}</strong></div>
@@ -65,7 +70,16 @@
             data-student="{{ student[0] }}"
         >
             {% include "_csrf_field.html" %}
-            <div class="student-transfer-field">
+            {% if student_status == 'expelled' %}
+            <input type="hidden" name="operation_type" value="restoration">
+            {% else %}
+            <input type="hidden" name="operation_type" value="transfer" data-operation-type>
+            <label class="student-expulsion-toggle">
+                <input type="checkbox" data-expulsion-toggle>
+                <span><strong>Отчисление</strong><small>Исключить студента из действующего контингента, сохранив карточку и историю.</small></span>
+            </label>
+            {% endif %}
+            <div class="student-transfer-field" data-target-field>
                 <label for="target_campaign_year">Приёмная кампания назначения:</label>
                 <select name="target_campaign_year" id="target_campaign_year" required>
                     {% for campaign in transfer_campaigns %}
@@ -75,12 +89,12 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="student-transfer-field">
+            <div class="student-transfer-field" data-target-field>
                 <label for="new_cohort1">Новая академическая группа:</label>
                 <select name="new_cohort1" id="new_cohort1" required>
                     <option value="">Выберите группу</option>
                     {% for group in transfer_groups %}
-                    <option value="{{ group.name }}" data-cohort2="{{ group.cohort2 }}" data-count="{{ group.count }}" data-capacity="{{ group.capacity }}" {% if group.name == student[5] %}disabled{% endif %}>
+                    <option value="{{ group.name }}" data-cohort2="{{ group.cohort2 }}" data-count="{{ group.count }}" data-capacity="{{ group.capacity }}" {% if student_status == 'active' and group.name == student[5] %}disabled{% endif %}>
                         {{ group.name }} — {{ group.fill }}{% if group.is_over_capacity %} · переполнена{% elif group.is_full %} · заполнена{% endif %}{% if group.name == student[5] %} · текущая{% endif %}
                     </option>
                     {% endfor %}
@@ -92,7 +106,7 @@
             {% endif %}
             <div class="student-transfer-field">
                 <label for="transfer_order_file">Приказ PDF (необязательно):</label>
-                <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите PDF приказа о переводе">
+                <span class="file-picker" data-file-dropzone tabindex="0" role="button" aria-label="Выберите или перетащите PDF приказа">
                     <input type="file" id="transfer_order_file" name="transfer_order_file" accept=".pdf,application/pdf" data-file-name-target="transfer_order_file_name">
                     <label for="transfer_order_file" class="file-picker-button">Выберите файл</label>
                     <span class="file-picker-drop-text">или перетащите сюда PDF</span>
@@ -105,7 +119,7 @@
                 <input id="transfer-comment" name="comment" maxlength="1000">
             </div>
             <p id="transfer-error" role="alert" hidden></p>
-            <button type="submit" data-keep-enabled class="btn btn-success" {% if not transfer_groups %}disabled{% endif %}>Оформить перевод</button>
+            <button type="submit" data-keep-enabled class="btn btn-success" {% if not transfer_groups and student_status == 'expelled' %}disabled{% endif %}>{{ 'Восстановить студента' if student_status == 'expelled' else 'Оформить перевод' }}</button>
         </form>
     </section>
 

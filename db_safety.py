@@ -10,7 +10,15 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
+SCHEMA_INTRODUCED_IN = {
+    2: "0.0.9-alpha",
+    3: "0.1.0-alpha",
+    4: "0.1.1",
+}
+# Indexing deliberately fails during tests/builds if a schema bump is not
+# assigned a new application version at the same time.
+CURRENT_SCHEMA_MIN_APP_VERSION = SCHEMA_INTRODUCED_IN[CURRENT_SCHEMA_VERSION]
 MIGRATION_BACKUP_KEEP = 5
 LARGE_DATABASE_BYTES = 512 * 1024 * 1024
 
@@ -33,6 +41,14 @@ class DatabaseLockedError(DatabaseSafetyError):
 
 class InsufficientDiskSpaceError(DatabaseSafetyError):
     pass
+
+
+def schema_too_new_message(actual_version: int) -> str:
+    return (
+        "Эта база данных была обновлена более новой версией Manticore "
+        f"(схема БД: {int(actual_version)}, поддерживается: {CURRENT_SCHEMA_VERSION}). "
+        "Установите более новую версию программы."
+    )
 
 
 def ensure_free_space(directory: str | os.PathLike, required_bytes: int) -> None:
@@ -220,10 +236,7 @@ def migrate_database(database_path: str | os.PathLike, migration_callback) -> Pa
                 "База данных требует проверки. Изменения структуры не выполнялись. Исходный файл не изменён."
             )
     if current > CURRENT_SCHEMA_VERSION:
-        raise DatabaseSchemaTooNewError(
-            "Эта база данных была обновлена более новой версией Manticore. "
-            "Для защиты данных откройте её новой версией программы."
-        )
+        raise DatabaseSchemaTooNewError(schema_too_new_message(current))
 
     # Version zero is either a legacy Manticore database or a new empty file.
     needs_migration = not existed or current < CURRENT_SCHEMA_VERSION

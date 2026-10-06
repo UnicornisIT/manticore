@@ -10,7 +10,7 @@ from unittest import mock
 
 import desktop_releases as releases
 from desktop import windows_client as client
-from desktop.release_tools import validate_tag
+from desktop.release_tools import validate_schema_release_version, validate_tag
 
 
 def release(version='1.5.0', **overrides):
@@ -175,6 +175,11 @@ class UpdateChannelTests(unittest.TestCase):
 
 
 class DesktopUpdaterTests(unittest.TestCase):
+    def test_schema_change_requires_a_new_application_version(self):
+        validate_schema_release_version('0.1.1', schema_version=4, minimum_version='0.1.1')
+        with self.assertRaisesRegex(ValueError, 'Bump VERSION'):
+            validate_schema_release_version('0.1.0-alpha', schema_version=4, minimum_version='0.1.1')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

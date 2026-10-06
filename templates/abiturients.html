@@ -142,7 +142,7 @@
                 <td>{{ a['created_at'] }}</td>
                 {% if can_manage_rows %}
                 <td class="action-cell">
-                    <button type="button" class="row-action-trigger" popovertarget="abiturient-actions-{{ a['id'] }}" aria-label="Действия с {{ a['fio'] }}">
+                    <button type="button" class="row-action-trigger" popovertarget="abiturient-actions-{{ a['id'] }}" aria-haspopup="menu" aria-expanded="false" aria-label="Действия с {{ a['fio'] }}">
                         <span>Действия</span>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
                     </button>

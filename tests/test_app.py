@@ -3415,7 +3415,7 @@ class ManticoreAppTests(unittest.TestCase):
                        (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, updated_at TEXT)'''
                 )
                 conn.execute(
-                    'INSERT INTO schema_metadata (id, version, updated_at) VALUES (1, 2, datetime(\'now\'))'
+                    'INSERT INTO schema_metadata (id, version, updated_at) VALUES (1, 3, datetime(\'now\'))'
                 )
 
             manticore.init_db()
@@ -5045,6 +5045,220 @@ class ManticoreAppTests(unittest.TestCase):
             abiturient_count = conn.execute('SELECT COUNT(*) FROM abiturients WHERE login=?', ('student011',)).fetchone()[0]
         self.assertEqual(student_count, 1)
         self.assertEqual(abiturient_count, 0)
+
+    def seed_student_lifecycle(self, username='lifecycle-student'):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute('DELETE FROM groups')
+            conn.executemany(
+                'INSERT INTO groups (name, group_year) VALUES (?, ?)',
+                [('26ЛД-11-1', '2026'), ('27ФМ-11-1', '2027')],
+            )
+            conn.execute(
+                '''INSERT INTO students
+                   (username, password, email, firstname, lastname, cohort1, cohort2,
+                    source_campaign_year, current_campaign_year, migrated_to_student_at)
+                   VALUES (?, 'secret', ?, 'Иван Иванович', 'Иванов', '26ЛД-11-1', 'ЛД-11',
+                           '2026', '2026', '2026-08-28 10:00:00')''',
+                (username, f'{username}@example.test'),
+            )
+            return conn.execute(
+                'SELECT id, record_uuid FROM students WHERE username=?', (username,)
+            ).fetchone()
+
+    def test_student_status_migration_backfills_active_and_history_type(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = os.path.join(directory, 'legacy-status.db')
+            conn = sqlite3.connect(database)
+            try:
+                conn.execute('CREATE TABLE students (id INTEGER PRIMARY KEY, username TEXT, cohort1 TEXT)')
+                conn.execute("INSERT INTO students VALUES (7, 'legacy-active', '26ЛД-11-1')")
+                conn.execute(
+                    '''CREATE TABLE student_group_transfers
+                       (id INTEGER PRIMARY KEY, username TEXT, old_cohort1 TEXT,
+                        old_cohort2 TEXT, new_cohort1 TEXT NOT NULL, new_cohort2 TEXT,
+                        order_filename TEXT, order_original_filename TEXT,
+                        order_mime_type TEXT, order_size INTEGER, created_by TEXT, created_at TEXT)'''
+                )
+                conn.execute(
+                    "INSERT INTO student_group_transfers (username, new_cohort1) VALUES ('legacy-active', '26ЛД-11-1')"
+                )
+                manticore.ensure_students_origin_columns(conn)
+                manticore.create_student_group_transfers_table(conn)
+                self.assertEqual(
+                    conn.execute("SELECT id, username, status FROM students").fetchone(),
+                    (7, 'legacy-active', 'active'),
+                )
+                history = conn.execute(
+                    'SELECT movement_type FROM student_group_transfers'
+                ).fetchone()[0]
+                columns = manticore.get_table_columns(conn, 'student_group_transfers')
+                conn.commit()
+            finally:
+                conn.close()
+        self.assertEqual(history, 'transfer')
+        self.assertIn('student_id', columns)
+        self.assertIn('comment', columns)
+
+    def test_expulsion_preserves_student_and_moves_between_lists_and_exports(self):
+        original_id, original_uuid = self.seed_student_lifecycle()
+        client = manticore.app.test_client()
+        self.login_session(client)
+        page = client.get('/edit_student/lifecycle-student')
+        token = self.csrf_from_response(page)
+        response = client.post(
+            '/edit_student/lifecycle-student/transfer_group',
+            data={
+                'csrf_token': token, 'operation_type': 'expulsion',
+                'expected_source': '26ЛД-11-1', 'expected_campaign': '2026',
+                'comment': 'По собственному желанию',
+            },
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 200)
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                '''SELECT id, record_uuid, username, email, firstname, lastname, cohort1, cohort2,
+                          current_campaign_year, migrated_to_student_at, status
+                   FROM students WHERE username='lifecycle-student' ''',
+            ).fetchone()
+            event = conn.execute(
+                '''SELECT student_id, movement_type, old_cohort1, new_cohort1, old_campaign_year,
+                          new_campaign_year, comment FROM student_group_transfers'''
+            ).fetchone()
+            audit = conn.execute(
+                "SELECT action, entity_id, details FROM audit_logs WHERE action='student_expulsion'"
+            ).fetchone()
+            self.assertEqual(manticore.get_group_student_count(conn, '26ЛД-11-1'), 0)
+        self.assertEqual(student[0:2], (original_id, original_uuid))
+        self.assertEqual(student[2:], (
+            'lifecycle-student', 'lifecycle-student@example.test', 'Иван Иванович', 'Иванов',
+            '26ЛД-11-1', 'ЛД-11', '2026', '2026-08-28 10:00:00', 'expelled',
+        ))
+        self.assertEqual(event, (original_id, 'expulsion', '26ЛД-11-1', '26ЛД-11-1', '2026', '2026', 'По собственному желанию'))
+        self.assertEqual(audit[0:2], ('student_expulsion', str(original_id)))
+        self.assertIn('history_event_id=', audit[2])
+        active_body = client.get('/students_list?lastname=Иванов').get_data(as_text=True)
+        expelled_body = client.get('/students/expelled?lastname=Иванов').get_data(as_text=True)
+        edit_body = client.get('/edit_student/lifecycle-student').get_data(as_text=True)
+        self.assertNotIn('lifecycle-student', active_body)
+        self.assertIn('lifecycle-student', expelled_body)
+        self.assertIn('Отчислен', expelled_body)
+        self.assertIn('Восстановление студента', edit_body)
+        self.assertIn('name="operation_type" value="restoration"', edit_body)
+        self.assertIn('ОТЧИСЛЕНИЕ', edit_body)
+        self.assertIn('По собственному желанию', edit_body)
+        exported = pd.read_excel(io.BytesIO(client.get('/students/download').data))
+        expelled_export = pd.read_excel(io.BytesIO(client.get('/students/expelled/download').data))
+        self.assertNotIn('lifecycle-student', exported.get('username', pd.Series(dtype=str)).astype(str).tolist())
+        self.assertIn('lifecycle-student', expelled_export['username'].astype(str).tolist())
+
+    def test_repeated_expulsion_and_audit_failure_are_atomic(self):
+        self.seed_student_lifecycle()
+        with manticore.app.test_request_context('/'):
+            manticore.session['user'] = 'admin'
+            manticore.change_student_lifecycle('lifecycle-student', 'expulsion', actor_role='admin')
+            with self.assertRaises(manticore.StudentTransferError) as repeated:
+                manticore.change_student_lifecycle('lifecycle-student', 'expulsion', actor_role='admin')
+            self.assertEqual(repeated.exception.code, 'invalid_status')
+            with self.assertRaises(manticore.StudentTransferError) as transfer:
+                manticore.transfer_student_to_group(
+                    'lifecycle-student', '27ФМ-11-1', actor_role='admin', target_campaign_year='2027'
+                )
+            self.assertEqual(transfer.exception.code, 'invalid_status')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM student_group_transfers WHERE movement_type='expulsion'"
+            ).fetchone()[0], 1)
+
+        reset_database()
+        self.seed_student_lifecycle('rollback-expulsion')
+        with manticore.app.test_request_context('/'):
+            manticore.session['user'] = 'admin'
+            with mock.patch.object(manticore, 'log_action', side_effect=sqlite3.OperationalError('audit failure')):
+                with self.assertRaises(sqlite3.OperationalError):
+                    manticore.change_student_lifecycle('rollback-expulsion', 'expulsion', actor_role='admin')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT status FROM students WHERE username='rollback-expulsion'"
+            ).fetchone()[0], 'active')
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM student_group_transfers').fetchone()[0], 0)
+
+    def test_restoration_reuses_student_validates_campaign_and_preserves_migration_date(self):
+        original_id, original_uuid = self.seed_student_lifecycle()
+        with manticore.app.test_request_context('/'):
+            manticore.session['user'] = 'admin'
+            manticore.change_student_lifecycle('lifecycle-student', 'expulsion', actor_role='admin')
+            with self.assertRaises(manticore.StudentTransferError) as mismatch:
+                manticore.change_student_lifecycle(
+                    'lifecycle-student', 'restoration', actor_role='admin',
+                    target_campaign_year='2026', selected_group='27ФМ-11-1',
+                )
+            self.assertEqual(mismatch.exception.code, 'incompatible_campaign')
+            result = manticore.change_student_lifecycle(
+                'lifecycle-student', 'restoration', actor_role='admin',
+                target_campaign_year='2027', selected_group='27ФМ-11-1', comment='Восстановлен',
+            )
+        self.assertEqual(result['operation_type'], 'restoration')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                '''SELECT id, record_uuid, status, current_campaign_year, cohort1, cohort2,
+                          migrated_to_student_at FROM students WHERE username='lifecycle-student' ''',
+            ).fetchone()
+            events = conn.execute(
+                '''SELECT movement_type FROM student_group_transfers
+                   WHERE username='lifecycle-student' ORDER BY id'''
+            ).fetchall()
+            self.assertEqual(manticore.get_group_student_count(conn, '27ФМ-11-1'), 1)
+        self.assertEqual(student, (
+            original_id, original_uuid, 'active', '2027', '27ФМ-11-1', 'ФМ-11', '2026-08-28 10:00:00'
+        ))
+        self.assertEqual(events, [('expulsion',), ('restoration',)])
+        self.assertEqual(len(manticore.get_all_students(student_status='active')), 1)
+        self.assertEqual(len(manticore.get_all_students(student_status='expelled')), 0)
+
+    def test_restoration_audit_failure_rolls_back_status_group_and_history(self):
+        self.seed_student_lifecycle()
+        with manticore.app.test_request_context('/'):
+            manticore.session['user'] = 'admin'
+            manticore.change_student_lifecycle('lifecycle-student', 'expulsion', actor_role='admin')
+            with mock.patch.object(manticore, 'log_action', side_effect=sqlite3.OperationalError('audit failure')):
+                with self.assertRaises(sqlite3.OperationalError):
+                    manticore.change_student_lifecycle(
+                        'lifecycle-student', 'restoration', actor_role='admin',
+                        target_campaign_year='2027', selected_group='27ФМ-11-1',
+                    )
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            student = conn.execute(
+                "SELECT status, current_campaign_year, cohort1 FROM students WHERE username='lifecycle-student'"
+            ).fetchone()
+            events = conn.execute(
+                "SELECT movement_type FROM student_group_transfers ORDER BY id"
+            ).fetchall()
+        self.assertEqual(student, ('expelled', '2026', '26ЛД-11-1'))
+        self.assertEqual(events, [('expulsion',)])
+
+    def test_restoration_respects_capacity_and_requires_explicit_override(self):
+        self.seed_student_lifecycle()
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO students (username, cohort1, status) VALUES (?, '27ФМ-11-1', 'active')",
+                [(f'capacity-{index}',) for index in range(manticore.MAX_GROUP_STUDENTS)],
+            )
+        with manticore.app.test_request_context('/'):
+            manticore.session['user'] = 'admin'
+            manticore.change_student_lifecycle('lifecycle-student', 'expulsion', actor_role='admin')
+            with self.assertRaises(manticore.StudentTransferError) as capacity:
+                manticore.change_student_lifecycle(
+                    'lifecycle-student', 'restoration', actor_role='admin',
+                    target_campaign_year='2027', selected_group='27ФМ-11-1',
+                )
+            self.assertEqual(capacity.exception.code, 'capacity_exceeded')
+            manticore.change_student_lifecycle(
+                'lifecycle-student', 'restoration', actor_role='admin',
+                target_campaign_year='2027', selected_group='27ФМ-11-1', capacity_override=True,
+            )
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            self.assertEqual(manticore.get_group_student_count(conn, '27ФМ-11-1'), manticore.MAX_GROUP_STUDENTS + 1)
 
     def test_fallback_tracking_marks_writes_but_not_reads(self):
         original_path = manticore.DB_PATH

@@ -12,6 +12,9 @@ hidden_imports = [
     "openpyxl",
     "pypdf",
     "dns.resolver",
+    "PIL.IcoImagePlugin",
+    "pystray",
+    "pystray._win32",
     "xlrd",
 ]
 

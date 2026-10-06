@@ -111,7 +111,7 @@
             </td>
             {% if session.get('role') == 'admin' %}
             <td class="students-table-actions">
-                <button type="button" class="row-action-trigger" popovertarget="student-actions-{{ loop.index }}" aria-label="Действия со студентом {{ s['username'] }}">
+                <button type="button" class="row-action-trigger" popovertarget="student-actions-{{ loop.index }}" aria-haspopup="menu" aria-expanded="false" aria-label="Действия со студентом {{ s['username'] }}">
                     <span>Действия</span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
                 </button>
