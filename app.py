@@ -27,7 +27,7 @@ from time import time
 import update_app
 import desktop_releases
 from app_metadata import APP_METADATA
-from config import DEFAULT_BACKUP_RETENTION_DAYS, MOODLE_PASSWORD_PLACEHOLDER
+from config import MOODLE_PASSWORD_PLACEHOLDER, load_runtime_config, setting_bool
 from email_validation import ensure_dns_cache_table, validate_email
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
@@ -48,68 +48,33 @@ except ImportError:
 # Load environment variables from .env file
 load_dotenv()
 
-TRUTHY_ENV_VALUES = {'1', 'true', 'yes', 'on'}
-FALSY_SETTING_VALUES = {'0', 'false', 'no', 'off'}
-
-def env_bool(name, default=False):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.lower() in TRUTHY_ENV_VALUES
-
-def setting_bool(value, default=False):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    if value is None:
-        return default
-    normalized = str(value).strip().casefold()
-    if normalized in TRUTHY_ENV_VALUES:
-        return True
-    if normalized in FALSY_SETTING_VALUES:
-        return False
-    return default
-
-def env_int(name, default, minimum=None):
-    try:
-        value = int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        value = default
-    if minimum is not None:
-        value = max(minimum, value)
-    return value
-
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
-MAX_UPLOAD_SIZE_MB = env_int('MAX_UPLOAD_SIZE_MB', 16, minimum=1)
-MAX_UPLOAD_BYTES = env_int('MAX_CONTENT_LENGTH', MAX_UPLOAD_SIZE_MB * 1024 * 1024, minimum=1024)
+RUNTIME_CONFIG = load_runtime_config(desktop_releases.DEFAULT_GITHUB_REPOSITORY)
+app.secret_key = RUNTIME_CONFIG.secret_key
+MAX_UPLOAD_BYTES = RUNTIME_CONFIG.max_content_length
 app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE=os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax'),
-    SESSION_COOKIE_SECURE=env_bool('SESSION_COOKIE_SECURE', False),
+    SESSION_COOKIE_SAMESITE=RUNTIME_CONFIG.session_cookie_samesite,
+    SESSION_COOKIE_SECURE=RUNTIME_CONFIG.session_cookie_secure,
 )
-app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
+app.config['UPLOAD_FOLDER'] = RUNTIME_CONFIG.upload_folder
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
+DB_FILENAME = RUNTIME_CONFIG.db_filename
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
 APP_DIR = Path(__file__).resolve().parent
 try:
     APP_VERSION = (APP_DIR / 'VERSION').read_text(encoding='utf-8-sig').strip()
 except OSError:
     APP_VERSION = os.environ.get('APP_VERSION', 'unknown')
-APP_UPDATE_ENABLED = env_bool('APP_UPDATE_ENABLED', os.name != 'nt')
-APP_UPDATE_STALE_SECONDS = env_int('APP_UPDATE_STALE_SECONDS', 3600, minimum=60)
-DESKTOP_GITHUB_REPOSITORY = os.environ.get(
-    'DESKTOP_GITHUB_REPOSITORY',
-    desktop_releases.DEFAULT_GITHUB_REPOSITORY,
-).strip()
-ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
-HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
-HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
-HSTS_PRELOAD = env_bool('HSTS_PRELOAD', False)
+APP_UPDATE_ENABLED = RUNTIME_CONFIG.app_update_enabled
+APP_UPDATE_STALE_SECONDS = RUNTIME_CONFIG.app_update_stale_seconds
+DESKTOP_GITHUB_REPOSITORY = RUNTIME_CONFIG.desktop_github_repository
+ENABLE_HSTS = RUNTIME_CONFIG.enable_hsts
+HSTS_MAX_AGE = RUNTIME_CONFIG.hsts_max_age
+HSTS_INCLUDE_SUBDOMAINS = RUNTIME_CONFIG.hsts_include_subdomains
+HSTS_PRELOAD = RUNTIME_CONFIG.hsts_preload
 ABITURIENT_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 STUDENTS_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 ENROLLMENT_ORDER_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv', 'docx', 'pdf'}
@@ -129,11 +94,9 @@ PENDING_EMAIL_SOURCE_IMPORT_PREFIX = 'pending_email_source_'
 STUDENT_TRANSFER_ORDER_DIR = 'student_transfer_orders'
 ENROLLMENT_FIO_SUGGESTION_THRESHOLD = 0.86
 DB_BACKUP_PREFIX = 'baze_backup_'
-BACKUP_RETENTION_DAYS = env_int(
-    'BACKUP_RETENTION_DAYS', DEFAULT_BACKUP_RETENTION_DAYS, minimum=1
-)
-FALLBACK_SESSION_ID = os.environ.get('MANTICORE_FALLBACK_SESSION_ID', '').strip()
-FALLBACK_PRIMARY_ID = os.environ.get('MANTICORE_PRIMARY_SOURCE_ID', '').strip()
+BACKUP_RETENTION_DAYS = RUNTIME_CONFIG.backup_retention_days
+FALLBACK_SESSION_ID = RUNTIME_CONFIG.fallback_session_id
+FALLBACK_PRIMARY_ID = RUNTIME_CONFIG.fallback_primary_id
 ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
 ABITURIENT_RESULT_COLUMNS = [
     'campaign_year', 'ФИО', 'Договор', 'login', 'Фамилия',
