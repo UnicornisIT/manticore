@@ -1571,6 +1571,13 @@ LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '600'))
 CSRF_SESSION_KEY = 'csrf_token'
 CSRF_FORM_FIELD = 'csrf_token'
 
+
+def current_endpoint_name():
+    """Return the stable endpoint name without a Blueprint namespace."""
+    endpoint = request.endpoint or ''
+    return endpoint.rsplit('.', 1)[-1]
+
+
 @app.context_processor
 def inject_template_globals():
     def url_for_with_query(endpoint, **updates):
@@ -1594,6 +1601,7 @@ def inject_template_globals():
         'format_display_date': format_display_date,
         'course_groups_enabled': are_course_groups_enabled(),
         'is_withdrawn_login': is_withdrawn_login,
+        'current_endpoint': current_endpoint_name(),
     }
 
 def request_uses_https():
@@ -1682,13 +1690,13 @@ PASSWORD_CHANGE_ALLOWED_ENDPOINTS = {'static', 'logout', 'change_password'}
 def require_initial_password_change():
     if not session.get('user') or not session.get('must_change_password'):
         return None
-    if request.endpoint in PASSWORD_CHANGE_ALLOWED_ENDPOINTS:
+    if current_endpoint_name() in PASSWORD_CHANGE_ALLOWED_ENDPOINTS:
         return None
     return redirect(url_for('change_password'), code=303)
 
 @app.before_request
 def require_login_generation_setup():
-    if request.endpoint in SETUP_ALLOWED_ENDPOINTS or not session.get('user'):
+    if current_endpoint_name() in SETUP_ALLOWED_ENDPOINTS or not session.get('user'):
         return None
     if is_login_generation_setup_completed():
         return None
@@ -7547,7 +7555,6 @@ def vaanedain_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-@app.route('/set_campaign', methods=['POST'])
 @login_required
 def set_campaign():
     campaign_year = normalize_campaign_year(request.form.get('campaign_year'), DEFAULT_CAMPAIGN_YEAR)
@@ -7558,7 +7565,6 @@ def set_campaign():
         next_url = url_for('index')
     return redirect(next_url)
 
-@app.route('/approve_users', methods=['GET', 'POST'])
 @admin_required
 def approve_users():
     with sqlite3.connect(DB_PATH) as conn:
@@ -7972,7 +7978,6 @@ def build_abiturients_upload_response(file_storage, campaign_year):
         cleanup_temp_files(upload_path, result_path)
     return None
 
-@app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
     campaign_year = get_active_campaign_year()
@@ -7986,12 +7991,10 @@ def index():
     dashboard = get_dashboard_data(campaign_year)
     return render_template('index.html', dashboard=dashboard)
 
-@app.route('/documentation', methods=['GET'], provide_automatic_options=False)
 def documentation():
     """Render the public, read-only in-app user guide."""
     return render_template('documentation.html')
 
-@app.route('/desktop_settings')
 @login_required
 def desktop_settings():
     # No fragment: browsers preserve existing bookmarks such as #about.
@@ -8016,7 +8019,6 @@ def get_local_fallback_changes(limit=1000):
     return [dict(row) for row in rows]
 
 
-@app.route('/desktop/fallback-changes')
 @admin_required
 def desktop_fallback_changes():
     if not FALLBACK_SESSION_ID:
@@ -8025,7 +8027,6 @@ def desktop_fallback_changes():
     return render_template('fallback_changes.html', changes=get_local_fallback_changes())
 
 
-@app.route('/desktop/fallback-changes/export')
 @admin_required
 def export_desktop_fallback_changes():
     if not FALLBACK_SESSION_ID:
@@ -8048,12 +8049,10 @@ def export_desktop_fallback_changes():
     )
 
 
-@app.route('/management')
 @login_required
 def management():
     return render_template('management.html')
 
-@app.route('/search')
 @login_required
 def search():
     campaign_year = get_active_campaign_year()
@@ -8061,7 +8060,6 @@ def search():
     results = global_search_records(query, campaign_year) if query else []
     return render_template('search.html', query=query, results=results, campaign_year=campaign_year)
 
-@app.route('/search_overlay')
 @login_required
 def search_overlay():
     campaign_year = get_active_campaign_year()
@@ -8073,14 +8071,12 @@ def search_overlay():
         'results': results,
     })
 
-@app.route('/data_checks')
 @login_required
 def data_checks():
     campaign_year = get_active_campaign_year()
     report = get_data_quality_report(campaign_year)
     return render_template('data_checks.html', report=report)
 
-@app.route('/healthz')
 def healthz():
     try:
         with sqlite3.connect(DB_PATH, timeout=1) as conn:
@@ -8089,7 +8085,6 @@ def healthz():
     except sqlite3.Error:
         return jsonify({'status': 'unavailable'}), 503
 
-@app.route('/person/<kind>/<path:record_id>')
 @login_required
 def person_card(kind, record_id):
     record = get_person_record(kind, record_id)
@@ -8108,8 +8103,6 @@ def person_card(kind, record_id):
         transfer_orders=transfer_orders,
     )
 
-@app.route('/file_work', defaults={'section': None}, methods=['GET', 'POST'])
-@app.route('/file_work/<section>', methods=['GET', 'POST'])
 @login_required
 def file_work(section=None):
     if section is not None and normalize_file_work_section(section) is None:
@@ -8203,7 +8196,6 @@ def file_work(section=None):
         enrollment_order_uploads=get_enrollment_order_uploads(campaign_year)
     )
 
-@app.route('/file_work/abiturients/import-result')
 @login_required
 def download_abiturients_import_result():
     token = session.pop(ABITURIENTS_IMPORT_RESULT_SESSION_KEY, None)
@@ -8214,7 +8206,6 @@ def download_abiturients_import_result():
         return file_work_redirect('abiturients')
     return send_temp_download(result_path, 'abiturients_with_logins.xlsx', EXCEL_MIMETYPE)
 
-@app.route('/enrollment_order_upload', methods=['POST'])
 @login_required
 def enrollment_order_upload():
     target_section = request_file_work_section('orders')
@@ -8282,7 +8273,6 @@ def enrollment_order_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/enrollment_order_preview/fix_candidate_fio', methods=['POST'])
 @login_required
 def fix_enrollment_candidate_fio_from_order():
     target_section = request_file_work_section('orders')
@@ -8318,7 +8308,6 @@ def fix_enrollment_candidate_fio_from_order():
             pass
     return file_work_redirect(target_section)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>')
 @login_required
 def enrollment_order_upload_detail(upload_id):
     upload = get_enrollment_order_upload(upload_id)
@@ -8333,7 +8322,6 @@ def enrollment_order_upload_detail(upload_id):
         campaign_year=get_active_campaign_year()
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster')
 @login_required
 def enrollment_order_student_roster(upload_id):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8351,7 +8339,6 @@ def enrollment_order_student_roster(upload_id):
         moodle_password_placeholder=MOODLE_PASSWORD_PLACEHOLDER,
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>')
 @login_required
 def enrollment_order_student_roster_issue(upload_id, issue_code):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8374,7 +8361,6 @@ def enrollment_order_student_roster_issue(upload_id, issue_code):
         'download_url': url_for('download_enrollment_order_student_roster_issue', upload_id=upload_id, issue_code=issue_code),
     })
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>/download')
 @login_required
 def download_enrollment_order_student_roster_issue(upload_id, issue_code):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8388,7 +8374,6 @@ def download_enrollment_order_student_roster_issue(upload_id, issue_code):
     output = enrollment_order_roster_xlsx(rows, 'Проблемная выборка')
     return send_file(output, as_attachment=True, download_name=f'{order_name}_{issue["filename"]}.xlsx', mimetype=EXCEL_MIMETYPE)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/fio_review', methods=['POST'])
 @login_required
 def review_enrollment_order_student_roster_fio(upload_id):
     target_url = url_for('enrollment_order_student_roster', upload_id=upload_id)
@@ -8468,7 +8453,6 @@ def review_enrollment_order_student_roster_fio(upload_id):
         flash(f'Ошибка сверки ФИО: {exc}', 'error')
     return redirect(target_url, code=303)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/download')
 @login_required
 def download_enrollment_order_student_roster(upload_id):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8490,7 +8474,6 @@ def download_enrollment_order_student_roster(upload_id):
         mimetype=EXCEL_MIMETYPE,
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/download')
 @login_required
 def download_enrollment_order_upload(upload_id):
     upload = get_enrollment_order_upload(upload_id)
@@ -8507,7 +8490,6 @@ def download_enrollment_order_upload(upload_id):
         download_name=upload.get('original_filename') or os.path.basename(stored_path)
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/delete', methods=['POST'])
 @login_required
 def delete_enrollment_order_upload_route(upload_id):
     if session.get('role') not in {'admin', 'assistant', 'manager', 'operator'}:
@@ -8525,7 +8507,6 @@ def delete_enrollment_order_upload_route(upload_id):
         flash(f'Ошибка удаления приказа: {exc}', 'error')
     return file_work_redirect('orders')
 
-@app.route('/enrollment_order_template/download')
 @login_required
 def download_enrollment_order_template():
     return send_file(
@@ -8535,7 +8516,6 @@ def download_enrollment_order_template():
         mimetype=EXCEL_MIMETYPE
     )
 
-@app.route('/abiturients_updates_upload', methods=['POST'])
 @login_required
 def abiturients_updates_upload():
     target_section = request_file_work_section('updates')
@@ -8576,7 +8556,6 @@ def abiturients_updates_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/abiturients_email_source_upload', methods=['POST'])
 @login_required
 def abiturients_email_source_upload():
     target_section = request_file_work_section('updates')
@@ -8651,7 +8630,6 @@ def abiturients_email_source_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/abiturients_updates_template/download')
 @login_required
 def download_abiturients_updates_template():
     return send_file(
@@ -8661,7 +8639,6 @@ def download_abiturients_updates_template():
         mimetype=EXCEL_MIMETYPE
     )
 
-@app.route('/abiturients')
 @login_required
 def abiturients():
     campaign_year = get_active_campaign_year()
@@ -9067,7 +9044,6 @@ def reject_duplicate(dup_id, campaign_year=None):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('DELETE FROM pending_duplicates WHERE id=? AND campaign_year=?', (dup_id, campaign_year))
 
-@app.route('/duplicates', methods=['GET', 'POST'])
 @login_required
 def duplicates():
     return render_template('duplicates.html')
@@ -9108,7 +9084,6 @@ def unique_numeric_form_values(field_name):
         values.append(value)
     return values
 
-@app.route('/abiturients/bulk', methods=['POST'])
 @login_required
 @role_required('admin', 'assistant', 'operator')
 def bulk_abiturients():
@@ -9170,7 +9145,6 @@ def bulk_abiturients():
         )
     return redirect(url_for('abiturients'), code=303)
 
-@app.route('/duplicates_abiturients', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def duplicates_abiturients():
@@ -9191,7 +9165,6 @@ def duplicates_abiturients():
     duplicates = get_pending_duplicates(campaign_year)
     return render_template('duplicates_abiturients.html', duplicates=duplicates, campaign_year=campaign_year)
 
-@app.route('/delete_abiturient', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_abiturient():
@@ -9226,7 +9199,6 @@ def delete_abiturient():
             )
     return redirect(url_for('abiturients'))
 
-@app.route('/abiturients/withdraw-documents', methods=['POST'])
 @login_required
 @role_required('admin')
 def withdraw_abiturient_documents():
@@ -9285,7 +9257,6 @@ def withdraw_abiturient_documents():
     )
     return redirect(list_url, code=303)
 
-@app.route('/toggle_abiturient_paid', methods=['POST'])
 @login_required
 @role_required('admin')
 def toggle_abiturient_paid():
@@ -9314,7 +9285,6 @@ def toggle_abiturient_paid():
             log_action('abiturient_paid_changed', 'abiturient', abiturient_id, f"paid={paid}; campaign_year={campaign_year}", conn)
     return redirect(url_for('abiturients', **{k: v for k, v in query_params.items() if v}))
 
-@app.route('/abiturients/download')
 @login_required
 def download_abiturients():
     campaign_year = get_active_campaign_year()
@@ -9340,12 +9310,10 @@ def download_abiturients():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="abiturients_logins.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@app.route('/download_template')
 def download_template():
     template_path = os.path.join(app.static_folder, 'template.xlsx')
     return send_file(template_path, as_attachment=True, download_name='template.xlsx')
 
-@app.route('/login_conflicts')
 @login_required
 def login_conflicts():
     campaign_year = get_active_campaign_year()
@@ -9362,7 +9330,6 @@ def login_conflicts():
         conflicts = cur.fetchall()
     return render_template('login_conflicts.html', conflicts=conflicts, campaign_year=campaign_year)
 
-@app.route('/edit_conflict/<int:conflict_id>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_conflict(conflict_id):
@@ -9432,7 +9399,6 @@ def edit_conflict(conflict_id):
     
     return render_template('edit_conflict.html', conflict=conflict)
 
-@app.route('/delete_conflict/<int:conflict_id>', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_conflict(conflict_id):
@@ -9530,7 +9496,6 @@ def get_manual_create_collisions(fio, dogovor, login, campaign_year, rules=None)
                 add_record('Студенты', student_fio, source_dogovor, username, source_year)
     return result
 
-@app.route('/manual_create', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def manual_create():
@@ -9680,7 +9645,6 @@ def manual_create():
         campaign_year=campaign_year,
     )
 
-@app.route('/login', methods=['GET', 'POST'])
 def login():
     session.pop('user', None)
     session.pop('role', None)
@@ -9722,7 +9686,6 @@ def login():
     return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
 
 
-@app.route('/change-password', methods=['GET', 'POST'])
 @login_required
 def change_password():
     if request.method == 'POST':
@@ -9760,13 +9723,11 @@ def change_password():
                 return redirect(url_for(destination), code=303)
     return render_template('change_password.html')
 
-@app.route('/logout')
 def logout():
     session.clear()
     flash('Вы вышли из системы.', 'success')
     return redirect(url_for('login'))
 
-@app.route('/edit_abiturient/<login>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_abiturient(login):
@@ -9860,7 +9821,6 @@ def edit_abiturient(login):
 
     return render_template('edit_abiturient.html', email_warning=None, **edit_context)
 
-@app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
@@ -9879,7 +9839,6 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html')
 
-@app.route('/setup', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def login_generation_setup():
@@ -9895,13 +9854,11 @@ def login_generation_setup():
             flash(f'Не удалось сохранить правила: {exc}', 'error')
     return render_template('login_rules_setup.html', **get_login_rules_form_context())
 
-@app.route('/admin_panel')
 @admin_required
 def admin_panel():
     return redirect(url_for('management', _anchor='administration'))
 
 
-@app.route('/management/administration')
 @admin_required
 def administration_tools():
     with sqlite3.connect(DB_PATH) as conn:
@@ -9917,7 +9874,6 @@ def administration_tools():
     )
 
 
-@app.route('/api/desktop/releases/windows')
 def desktop_release_api():
     """Return the GitHub release approved by an administrator for desktop clients."""
     approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
@@ -9932,7 +9888,6 @@ def desktop_release_api():
     return response
 
 
-@app.route('/admin/desktop-release/status')
 @admin_required
 def desktop_release_status_api():
     approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
@@ -9953,7 +9908,6 @@ def desktop_release_status_api():
     return response
 
 
-@app.route('/admin/desktop-release/approve', methods=['POST'])
 @admin_required
 def approve_desktop_release():
     try:
@@ -10085,7 +10039,6 @@ def queue_app_update(requested_by):
         raise RuntimeError(f'Служба обновления не запущена: {error_text}')
 
 
-@app.route('/admin/app-update/status')
 @admin_required
 def app_update_status_api():
     status = get_app_update_status()
@@ -10127,7 +10080,6 @@ def app_update_status_api():
     return jsonify(result)
 
 
-@app.route('/admin/app-update/start', methods=['POST'])
 @admin_required
 def start_app_update():
     status = get_app_update_status()
@@ -10143,19 +10095,16 @@ def start_app_update():
         flash(f'Не удалось запустить обновление: {exc}', 'error')
     return redirect(url_for('admin_panel'), code=303)
 
-@app.route('/backups')
 @admin_required
 def backups():
     return render_template('backups.html', backups=list_database_backups())
 
-@app.route('/backups/download/<backup_name>')
 @admin_required
 def download_backup(backup_name):
     backup_path = get_backup_path(backup_name)
     log_action('database_backup_download', 'backup', backup_name)
     return send_file(backup_path, as_attachment=True, download_name=backup_name, mimetype='application/octet-stream')
 
-@app.route('/backups/restore', methods=['POST'])
 @admin_required
 def restore_backup():
     backup_name = request.form.get('backup_name')
@@ -10175,12 +10124,10 @@ def restore_backup():
         flash(f'Не удалось восстановить базу: {exc}', 'error')
     return redirect(url_for('backups'))
 
-@app.route('/audit_logs')
 @admin_required
 def audit_logs():
     return render_template('audit_logs.html', audit_logs=get_audit_logs())
 
-@app.route('/campaigns', methods=['GET', 'POST'])
 @admin_required
 def campaigns():
     if request.method == 'POST':
@@ -10316,7 +10263,6 @@ def campaigns():
         selected_default_campaign_year=pinned_campaign_year or get_latest_campaign_year(),
     )
 
-@app.route('/delete_user', methods=['POST'])
 @admin_required
 def delete_user():
     user_id = request.form.get('user_id')
@@ -10332,7 +10278,6 @@ def delete_user():
         )
     return redirect(url_for('admin_panel'))
 
-@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
 @admin_required
 def edit_user(user_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -10375,7 +10320,6 @@ def edit_user(user_id):
             return redirect(url_for('admin_panel'))
     return render_template('edit_user.html', user=user)
 
-@app.route('/add_user', methods=['GET', 'POST'])
 @admin_required
 def add_user():
     if request.method == 'POST':
@@ -10404,7 +10348,6 @@ def add_user():
         return redirect(url_for('admin_panel'))
     return render_template('add_user.html')
 
-@app.route('/clear_abiturients', methods=['POST'])
 @admin_required
 def clear_abiturients():
     campaign_year = get_active_campaign_year()
@@ -10426,7 +10369,6 @@ def clear_abiturients():
     flash(f'Абитуриенты, кандидаты, дубли и конфликты кампании {campaign_year} успешно очищены.', 'success')
     return redirect(url_for('admin_panel'))
 
-@app.route('/students_upload', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def students_upload():
@@ -10490,7 +10432,6 @@ def students_upload():
         return file_work_redirect(target_section)
     return render_template('students_upload.html', message=message)
 
-@app.route('/students')
 @login_required
 def students():
     lastname = request.args.get('lastname', '').strip()
@@ -10518,7 +10459,6 @@ def students():
         order_dir=order_dir
     )
 
-@app.route('/students_duplicates')
 @login_required
 @role_required('admin')
 def students_duplicates():
@@ -10527,7 +10467,6 @@ def students_duplicates():
         duplicates = cur.fetchall()
     return render_template('students_duplicates.html', duplicates=duplicates)
 
-@app.route('/students_list')
 @login_required
 def students_list():
     order_by = request.args.get('order_by', 'username')
@@ -10555,7 +10494,6 @@ def students_list():
         order_dir=order_dir
     )
 
-@app.route('/students/expelled')
 @login_required
 def expelled_students():
     order_by = request.args.get('order_by', 'lastname')
@@ -10582,7 +10520,6 @@ def expelled_students():
         campaigns=campaigns, order_by=order_by, order_dir=order_dir
     )
 
-@app.route('/api/students/migration-calendar')
 @login_required
 def students_migration_calendar():
     try:
@@ -10595,7 +10532,6 @@ def students_migration_calendar():
         return jsonify(error='Параметры year и month должны задавать корректный месяц.'), 400
     return jsonify(get_student_migration_calendar(year, month))
 
-@app.route('/students/download')
 @login_required
 def download_students():
     order_by = request.args.get('order_by', 'username')
@@ -10634,7 +10570,6 @@ def download_students():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="students.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@app.route('/students/expelled/download')
 @login_required
 def download_expelled_students():
     student_rows = get_all_students(
@@ -10661,7 +10596,6 @@ def download_expelled_students():
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
-@app.route('/api/student-transfer/groups')
 @login_required
 @role_required('admin')
 def student_transfer_campaign_groups():
@@ -10705,7 +10639,6 @@ def student_transfer_campaign_groups():
         ],
     )
 
-@app.route('/edit_student/<username>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_student(username):
@@ -11047,7 +10980,6 @@ def change_student_lifecycle(username, operation_type, *, actor_role, target_cam
         raise
 
 
-@app.route('/edit_student/<username>/transfer_group', methods=['POST'])
 @login_required
 @role_required('admin')
 def transfer_student_group(username):
@@ -11105,7 +11037,6 @@ def transfer_student_group(username):
     return jsonify(redirect=destination) if wants_json else redirect(destination)
 
 
-@app.route('/student_transfer_orders/<int:transfer_id>/download')
 @login_required
 @role_required('admin')
 def download_student_transfer_order(transfer_id):
@@ -11121,7 +11052,6 @@ def download_student_transfer_order(transfer_id):
         mimetype=order['mime_type']
     )
 
-@app.route('/delete_student', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_student():
@@ -11181,7 +11111,6 @@ def delete_student():
             flash('Студент удален')
     return redirect(url_for('students_list'))
 
-@app.route('/enrollment_candidates/sync', methods=['POST'])
 @login_required
 @role_required('admin', 'assistant')
 def enrollment_candidates_sync():
@@ -11212,7 +11141,6 @@ def enrollment_candidates_sync():
         flash(f"Уже есть в студентах: {len(summary['skipped_existing_students'])}", 'info')
     return redirect(url_for('abiturients_to_students', **target_args), code=303)
 
-@app.route('/abiturients_to_students', methods=['GET', 'POST'])
 @login_required
 @role_required('admin', 'assistant')
 def abiturients_to_students():
@@ -11568,7 +11496,6 @@ def abiturients_to_students():
         return redirect(url_for(target))
     return render_stage()
 
-@app.route('/migration_wizard')
 @login_required
 @role_required('admin', 'assistant')
 def migration_wizard():
@@ -11585,7 +11512,6 @@ def migration_wizard():
         group_years=get_group_years(group_year),
     )
 
-@app.route('/add_group', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def add_group():
@@ -11757,7 +11683,6 @@ def add_group():
         show_hidden=show_hidden,
     )
 
-@app.route('/groups_template/download')
 @login_required
 @role_required('admin')
 def download_groups_template():
@@ -11765,6 +11690,9 @@ def download_groups_template():
     output = io.BytesIO(build_groups_template_csv(group_year).encode('utf-8-sig'))
     output.seek(0)
     return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
+
+from routes import register_blueprints
+register_blueprints(app, globals())
 
 from contingent_web import register_contingent
 register_contingent(app, globals())
