@@ -45,6 +45,10 @@ class DatabaseSafetyTests(unittest.TestCase):
             self.assertEqual(db_safety.read_schema_version(path), db_safety.CURRENT_SCHEMA_VERSION)
             connection = sqlite3.connect(path)
             self.assertEqual(connection.execute('SELECT value FROM preserved').fetchone()[0], 'исходные данные')
+            migration_row = connection.execute(
+                'SELECT version, name FROM schema_version ORDER BY version DESC LIMIT 1'
+            ).fetchone()
+            self.assertEqual(migration_row[0], db_safety.CURRENT_SCHEMA_VERSION)
             connection.close()
 
     def test_failed_migration_rolls_back_and_restores_original(self):

@@ -11,15 +11,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from db.migrations import apply_schema_migrations, record_schema_version
 
-CURRENT_SCHEMA_VERSION = 5
+
+CURRENT_SCHEMA_VERSION = 6
 SCHEMA_INTRODUCED_IN = {
     2: "0.0.9-alpha",
     3: "0.1.0-alpha",
     4: "0.1.1",
     5: "0.1.3",
+    6: "0.1.3",
 }
-SCHEMA_VERSION_FLOOR = 5
+SCHEMA_VERSION_FLOOR = 6
 if CURRENT_SCHEMA_VERSION < SCHEMA_VERSION_FLOOR:
     raise RuntimeError("CURRENT_SCHEMA_VERSION must never be lower than the released schema floor.")
 if CURRENT_SCHEMA_VERSION != SCHEMA_VERSION_FLOOR:
@@ -264,6 +267,7 @@ def set_schema_version(connection: sqlite3.Connection, version: int) -> None:
         (version,),
     )
     connection.execute(f"PRAGMA user_version={int(version)}")
+    record_schema_version(connection, version, "schema_state")
 
 
 def read_schema_version(path: str | os.PathLike) -> int:
@@ -369,7 +373,7 @@ def migrate_database(database_path: str | os.PathLike, migration_callback) -> Pa
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("BEGIN IMMEDIATE")
-        migration_callback(connection)
+        apply_schema_migrations(connection, current, migration_callback)
         set_schema_version(connection, CURRENT_SCHEMA_VERSION)
         connection.execute("COMMIT")
         integrity_check(connection, full=True)
