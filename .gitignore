@@ -25,11 +25,17 @@ uploads/*
 !uploads/
 !uploads/.gitkeep
 *.db
-*.sqlite
-*.sqlite3
+*.sqlite*
 *.bak
 *.backup
 *.tmp
+desktop-config.json*
+fallback*
+baze_backup_*
+
+# Runtime data is private; keep only the versioned provider registry.
+data/*
+!data/email_providers.json
 
 # Generated office/data files
 *.xlsx
@@ -53,6 +59,9 @@ build/
 *.zip
 *.7z
 *.rar
+*.pfx
+*.pem
+*.key
 
 # IDE/editor files
 .vscode/
