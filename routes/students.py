@@ -13,7 +13,9 @@ ROUTES = (
     RouteSpec("/api/student-transfer/groups", "student_transfer_campaign_groups"),
     RouteSpec("/edit_student/<username>", "edit_student", ("GET", "POST")),
     RouteSpec("/edit_student/<username>/transfer_group", "transfer_student_group", ("POST",)),
-    RouteSpec("/student_transfer_orders/<int:transfer_id>/download", "download_student_transfer_order"),
+    RouteSpec(
+        "/student_transfer_orders/<int:transfer_id>/download", "download_student_transfer_order"
+    ),
     RouteSpec("/delete_student", "delete_student", ("POST",)),
 )
 

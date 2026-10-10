@@ -20,7 +20,8 @@ class BlueprintRouteTests(unittest.TestCase):
                     matching = [rule for rule in rules if rule.rule == spec.rule]
                     self.assertTrue(
                         any(
-                            rule.endpoint == f"{blueprint_name}.{spec.handler}" and not rule.build_only
+                            rule.endpoint == f"{blueprint_name}.{spec.handler}"
+                            and not rule.build_only
                             for rule in matching
                         )
                     )

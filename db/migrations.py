@@ -35,9 +35,7 @@ def create_schema_version_ledger(connection: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS = (
-    Migration(6, "create_schema_version_ledger", create_schema_version_ledger),
-)
+MIGRATIONS = (Migration(6, "create_schema_version_ledger", create_schema_version_ledger),)
 
 
 def record_schema_version(

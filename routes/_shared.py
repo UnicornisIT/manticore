@@ -17,7 +17,9 @@ class RouteSpec:
     provide_automatic_options: bool | None = None
 
 
-def create_blueprint(name: str, specs: tuple[RouteSpec, ...], handlers: dict[str, Any]) -> Blueprint:
+def create_blueprint(
+    name: str, specs: tuple[RouteSpec, ...], handlers: dict[str, Any]
+) -> Blueprint:
     blueprint = Blueprint(name, __name__)
     for spec in specs:
         options: dict[str, Any] = {

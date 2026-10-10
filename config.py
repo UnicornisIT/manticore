@@ -14,9 +14,7 @@ TRUSTED_GITHUB_REPOSITORY = "UnicornisIT/manticore"
 TRUSTED_RELEASE_API_URL = (
     f"https://api.github.com/repos/{TRUSTED_GITHUB_REPOSITORY}/releases/latest"
 )
-RELEASE_TAG_PATTERN = re.compile(
-    r"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?"
-)
+RELEASE_TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
 DEFAULT_BACKUP_RETENTION_DAYS = 30
 
 TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
