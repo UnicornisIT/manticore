@@ -74,7 +74,7 @@ fi
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 python3 -m pip install --upgrade pip
-pip install -r requirements-prod.txt
+pip install -r requirements-prod.lock
 
 mkdir -p "$APP_DIR/uploads"
 chown -R root:root "$APP_DIR"

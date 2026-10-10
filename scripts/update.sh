@@ -18,7 +18,7 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   if command -v python >/dev/null 2>&1; then
     PYTHON_BIN="python"
   else
-    echo "Python was not found. Install Python 3.10+ and run this script again."
+    echo "Python was not found. Install Python 3.11 and run this script again."
     exit 1
   fi
 fi
@@ -31,8 +31,8 @@ fi
 REQUIREMENTS="${REQUIREMENTS:-}"
 if [[ -z "$REQUIREMENTS" ]]; then
   REQUIREMENTS="requirements.txt"
-  if [[ "$EUID" -eq 0 && "$(uname -s)" == "Linux" && -f "$APP_DIR/requirements-prod.txt" ]]; then
-    REQUIREMENTS="requirements-prod.txt"
+  if [[ "$EUID" -eq 0 && "$(uname -s)" == "Linux" && -f "$APP_DIR/requirements-prod.lock" ]]; then
+    REQUIREMENTS="requirements-prod.lock"
   fi
 fi
 

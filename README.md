@@ -151,8 +151,11 @@ CONTRIBUTING.md                правила участия в разработ
 SECURITY.md                    политика безопасности
 LICENSE                        лицензия проекта
 requirements.txt               зависимости для локального запуска
-requirements-prod.txt          зависимости для Linux/prod-запуска через gunicorn
+requirements-prod.txt          совместимые диапазоны Linux/prod-зависимостей
+requirements-prod.lock         зафиксированное Linux/prod-окружение Python 3.11
 requirements-desktop.txt       зависимости для сборки Windows-клиента
+requirements-desktop.lock      зафиксированное Windows desktop-окружение Python 3.11
+pyproject.toml                 метаданные проекта и extras prod/desktop/dev
 .env.example                   пример локальных настроек
 .gitignore                     правила исключения локальных данных из Git
 scripts/                       канонические скрипты запуска, обновления и проверок репозитория
@@ -211,12 +214,17 @@ python-docx>=1.1
 pypdf>=5.0
 ```
 
-Дополнительно для продакшена из `requirements-prod.txt`:
+Дополнительно для продакшена описан совместимый диапазон в `requirements-prod.txt`:
 
 ```text
 -r requirements.txt
 gunicorn>=23.0
 ```
+
+Для воспроизводимого развертывания используйте `requirements-prod.lock`. Современная
+альтернатива для подготовки среды разработки — `python -m pip install -e ".[dev]"`;
+extras `prod`, `desktop` и `dev` определены в `pyproject.toml`. Поддерживаемая версия
+интерпретатора во всех окружениях — CPython 3.11.
 
 Почему нужен Python 3.11:
 
@@ -1228,7 +1236,7 @@ sudo bash deploy.sh /srv/manticore example.com
 2. Создает `.env`, если его нет.
 3. Генерирует `SECRET_KEY` и пароль администратора.
 4. Создает виртуальное окружение.
-5. Устанавливает `requirements-prod.txt`.
+5. Устанавливает зафиксированный набор `requirements-prod.lock`.
 6. Создает папку `uploads`.
 7. Настраивает владельца и права.
 8. Создает systemd-сервис `manticore`.
@@ -1365,7 +1373,7 @@ python -m unittest discover -s tests
 
 ```bash
 python -m pip install pip-audit
-pip-audit -r requirements-prod.txt
+pip-audit -r requirements-prod.lock
 ```
 
 В GitHub Actions уже есть workflow `pip-audit`.

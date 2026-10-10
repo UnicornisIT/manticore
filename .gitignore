@@ -51,6 +51,7 @@ logs/
 *.pid
 *.lock
 !requirements-desktop.lock
+!requirements-prod.lock
 
 # Local copies and temporary packaging output
 _clean_copy/

@@ -238,7 +238,7 @@ class SecurityHardeningTests(unittest.TestCase):
 
     def test_ci_audits_server_and_desktop_dependency_sets(self):
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "pip-audit.yml").read_text(encoding="utf-8")
-        self.assertIn("pip-audit -r requirements-prod.txt", workflow)
+        self.assertIn("pip-audit -r requirements-prod.lock", workflow)
         self.assertIn("pip-audit -r requirements-desktop.lock", workflow)
 
 
