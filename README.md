@@ -155,16 +155,13 @@ requirements-prod.txt          зависимости для Linux/prod-запу
 requirements-desktop.txt       зависимости для сборки Windows-клиента
 .env.example                   пример локальных настроек
 .gitignore                     правила исключения локальных данных из Git
-start_one_click.bat            запуск Windows-установщика двойным кликом
-install_and_run_windows.ps1    установка Python 3.11, окружения, зависимостей и запуск
-update_app.py                  безопасное обновление кода, зависимостей и бэкап базы для всех ОС
-update_windows.bat             Windows-обновление двойным кликом
-update_and_run_windows.bat     Windows-обновление и запуск приложения двойным кликом
-update_windows.ps1             PowerShell-обновление для Windows
+scripts/                       канонические скрипты запуска, обновления и проверок репозитория
+start_one_click.bat            совместимая обёртка для scripts/start_one_click.bat
+update_app.py                  единственная реализация обновления кода, зависимостей и бэкапа
 build_windows_desktop.ps1      сборка desktop EXE и Windows-установщика
 desktop/                       код Windows-клиента, PyInstaller spec и Inno Setup
 deploy.sh                      первичное Linux-развертывание
-update.sh                      Linux/macOS-обновление, на сервере также перезапускает сервис
+update.sh                      совместимая обёртка для scripts/update.sh
 deploy/                        примеры systemd и Nginx
 docs/images/                   изображения логотипа для README
 static/                        статические файлы и шаблоны импорта
@@ -224,7 +221,7 @@ gunicorn>=23.0
 Почему нужен Python 3.11:
 
 - текущие версии `pandas` и Excel-библиотек нормально поддерживаются на Python 3.11;
-- Windows-скрипт `start_one_click.bat` и `install_and_run_windows.ps1` рассчитаны именно на Python 3.11 x64;
+- Windows-скрипты `scripts/start_one_click.bat` и `scripts/install_and_run_windows.ps1` рассчитаны именно на Python 3.11 x64;
 - старые установки Python 3.7 часто ломают установку зависимостей.
 
 ## Быстрый запуск в Windows
@@ -236,7 +233,7 @@ gunicorn>=23.0
 3. Дважды нажмите:
 
 ```text
-start_one_click.bat
+scripts\start_one_click.bat
 ```
 
 Скрипт сделает следующее:
@@ -324,7 +321,7 @@ Windows использует системный WebView2; на актуальн�
 
 1. Установите Python 3.11 64-bit вручную: <https://www.python.org/downloads/windows/>.
 2. При установке включите `Add Python to PATH`.
-3. Снова запустите `start_one_click.bat`.
+3. Снова запустите `scripts\start_one_click.bat`.
 
 ## Ручная установка в Windows
 
@@ -1210,7 +1207,7 @@ baze_backup_<reason>_<timestamp>.db
 
 ```text
 deploy.sh
-update.sh
+scripts/update.sh
 deploy/manticore.service
 deploy/nginx.conf
 deploy/nginx-https.example.conf
@@ -1285,31 +1282,31 @@ sudo bash deploy.sh /srv/manticore ВАШ_ДОМЕН_ИЛИ_IP
 Перед обновлением закройте окно, в котором сейчас запущено приложение.
 
 ```powershell
-.\update_windows.bat
+.\scripts\update_windows.bat
 ```
 
 Если нужно сразу запустить приложение после обновления:
 
 ```powershell
-.\update_and_run_windows.bat
+.\scripts\update_and_run_windows.bat
 ```
 
 Для Linux-сервера с systemd:
 
 ```bash
-sudo bash update.sh /srv/manticore
+sudo bash scripts/update.sh /srv/manticore
 ```
 
 Чтобы из командной строки установить именно последний опубликованный релиз, а не обновить текущую ветку:
 
 ```bash
-sudo env UPDATE_LATEST_RELEASE=1 bash update.sh /srv/manticore
+sudo env UPDATE_LATEST_RELEASE=1 bash scripts/update.sh /srv/manticore
 ```
 
 Для локального Linux или macOS из папки проекта:
 
 ```bash
-bash update.sh
+bash scripts/update.sh
 ```
 
 Скрипты:

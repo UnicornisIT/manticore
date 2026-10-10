@@ -138,7 +138,7 @@ WorkingDirectory=%APP_DIR%
 EnvironmentFile=-%APP_DIR%/.env
 Environment="UPDATE_LATEST_RELEASE=1"
 Environment="UPDATE_STATUS_FILE=%APP_DIR%/uploads/app_update_status.json"
-ExecStart=%BASH_BIN% %APP_DIR%/update.sh %APP_DIR%
+ExecStart=%BASH_BIN% %APP_DIR%/scripts/update.sh %APP_DIR%
 TimeoutStartSec=30min
 UMask=0022
 EOF
