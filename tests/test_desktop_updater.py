@@ -306,7 +306,11 @@ class DesktopUpdaterTests(unittest.TestCase):
             path.write_text(json.dumps(payload))
             with self.assertRaises(ValueError): client.load_trust_policy()
             payload['allow_unsigned_updates'] = True; path.write_text(json.dumps(payload))
-            self.assertEqual(client.load_trust_policy()['signer_certificate_sha256'], '')
+            with self.assertLogs(level='WARNING') as captured:
+                policy = client.load_trust_policy()
+            self.assertEqual(policy['signer_certificate_sha256'], '')
+            self.assertEqual(policy['authentication'], 'checksum-only')
+            self.assertIn('integrity only', '\n'.join(captured.output))
             payload['github_repository'] = 'other/repo'; path.write_text(json.dumps(payload))
             with self.assertRaises(ValueError): client.load_trust_policy()
 

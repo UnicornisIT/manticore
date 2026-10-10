@@ -6,9 +6,10 @@ import json
 import secrets
 import tempfile
 import shutil
-import shlex
 import subprocess
 import difflib
+import ipaddress
+import logging
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context, jsonify
 from urllib.parse import urlparse
@@ -26,13 +27,16 @@ from time import time
 import update_app
 import desktop_releases
 from app_metadata import APP_METADATA
+from config import DEFAULT_BACKUP_RETENTION_DAYS, MOODLE_PASSWORD_PLACEHOLDER
 from email_validation import ensure_dns_cache_table, validate_email
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
     DatabaseIntegrityError,
     DatabaseSchemaTooNewError,
     migrate_database,
+    prune_backups_by_age,
     restore_sqlite_backup,
+    restrict_private_file,
     sqlite_backup,
 )
 try:
@@ -125,6 +129,9 @@ PENDING_EMAIL_SOURCE_IMPORT_PREFIX = 'pending_email_source_'
 STUDENT_TRANSFER_ORDER_DIR = 'student_transfer_orders'
 ENROLLMENT_FIO_SUGGESTION_THRESHOLD = 0.86
 DB_BACKUP_PREFIX = 'baze_backup_'
+BACKUP_RETENTION_DAYS = env_int(
+    'BACKUP_RETENTION_DAYS', DEFAULT_BACKUP_RETENTION_DAYS, minimum=1
+)
 FALLBACK_SESSION_ID = os.environ.get('MANTICORE_FALLBACK_SESSION_ID', '').strip()
 FALLBACK_PRIMARY_ID = os.environ.get('MANTICORE_PRIMARY_SOURCE_ID', '').strip()
 ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
@@ -1701,8 +1708,20 @@ def protect_post_requests_with_csrf():
     return redirect(get_safe_referrer(default_endpoint='index'), code=303)
 
 SETUP_ALLOWED_ENDPOINTS = {
-    'static', 'login', 'logout', 'register', 'login_generation_setup', 'documentation', 'desktop_settings', 'management'
+    'static', 'login', 'logout', 'register', 'change_password', 'login_generation_setup',
+    'documentation', 'desktop_settings', 'management'
 }
+
+PASSWORD_CHANGE_ALLOWED_ENDPOINTS = {'static', 'logout', 'change_password'}
+
+
+@app.before_request
+def require_initial_password_change():
+    if not session.get('user') or not session.get('must_change_password'):
+        return None
+    if request.endpoint in PASSWORD_CHANGE_ALLOWED_ENDPOINTS:
+        return None
+    return redirect(url_for('change_password'), code=303)
 
 @app.before_request
 def require_login_generation_setup():
@@ -1734,7 +1753,14 @@ def create_database_backup(reason='manual'):
     safe_reason = sanitize_backup_reason(reason)
     backup_name = f'{DB_BACKUP_PREFIX}{safe_reason}_{timestamp}.db'
     backup_path = os.path.join(app.config['UPLOAD_FOLDER'], backup_name)
-    return str(sqlite_backup(DB_PATH, backup_path))
+    created_path = sqlite_backup(DB_PATH, backup_path)
+    restrict_private_file(created_path)
+    prune_backups_by_age(
+        app.config['UPLOAD_FOLDER'],
+        f'{DB_BACKUP_PREFIX}*.db',
+        BACKUP_RETENTION_DAYS,
+    )
+    return str(created_path)
 
 def list_database_backups():
     upload_folder = app.config['UPLOAD_FOLDER']
@@ -2679,7 +2705,7 @@ PERSON_FIELD_LABELS = {
     'dogovor': 'Номер договора',
     'login': 'Логин Moodle',
     'username': 'Логин Moodle',
-    'password': 'Пароль Moodle',
+    'password': 'Служебное поле Moodle',
     'campaign_year': 'Приемная кампания',
     'source_campaign_year': 'Кампания поступления',
     'current_campaign_year': 'Текущая приемная кампания',
@@ -2705,7 +2731,7 @@ PERSON_FIELD_HELP = {
     'dogovor': 'Номер договора, по нему удобнее всего отличать тезок.',
     'login': 'Учетная запись, с которой человек входит в Moodle.',
     'username': 'Учетная запись, с которой человек входит в Moodle.',
-    'password': 'Пароль к учетной записи Moodle.',
+    'password': 'Фиксированная заглушка cron для импорта; реальный пароль не хранится.',
     'campaign_year': 'Год приемной кампании, к которой относится запись.',
     'source_campaign_year': 'Год приемной кампании, из которой пришел студент.',
     'current_campaign_year': 'Кампания, к которой студент относится сейчас.',
@@ -2773,6 +2799,8 @@ def format_person_field_value(key, value):
         return 'Договор оплачен' if is_paid_person_value(value) else 'Договор не оплачен'
     if key == 'password' and value == '******':
         return 'Скрыт для безопасности'
+    if key == 'password' and value == MOODLE_PASSWORD_PLACEHOLDER:
+        return 'Служебная заглушка cron'
     if key == 'status':
         return 'Отчислен' if value == 'expelled' else 'Действующий'
     if key == 'email' and is_blank_person_value(value):
@@ -3653,6 +3681,66 @@ def migrate_user_passwords(conn):
                 (hash_user_password(password), user_id)
             )
 
+
+def ensure_user_must_change_password_column(conn):
+    if 'must_change_password' not in get_table_columns(conn, 'users'):
+        conn.execute(
+            'ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0'
+        )
+        # Existing deployments cannot prove that the bootstrap credential was
+        # rotated, so the original local admin gets one mandatory rotation.
+        conn.execute(
+            "UPDATE users SET must_change_password=1 WHERE username='admin'"
+        )
+
+
+def normalize_student_password_placeholders(conn):
+    """Permanently discard imported student secrets; Moodle receives a placeholder."""
+    for table_name in ('students', 'students_duplicates'):
+        if table_exists(conn, table_name) and 'password' in get_table_columns(conn, table_name):
+            conn.execute(
+                f'UPDATE {table_name} SET password=? WHERE password IS NULL OR password<>?',
+                (MOODLE_PASSWORD_PLACEHOLDER, MOODLE_PASSWORD_PLACEHOLDER),
+            )
+
+
+def create_student_password_guards(conn):
+    """Reject real student secrets before SQLite can write them to a table or WAL."""
+    placeholder = MOODLE_PASSWORD_PLACEHOLDER.replace("'", "''")
+    for table_name in ('students', 'students_duplicates'):
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_insert
+            BEFORE INSERT ON {table_name}
+            WHEN NEW.password IS NOT NULL AND NEW.password <> '{placeholder}'
+            BEGIN
+                SELECT RAISE(ABORT, 'student password must use the Moodle placeholder');
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_update
+            BEFORE UPDATE OF password ON {table_name}
+            WHEN NEW.password IS NOT NULL AND NEW.password <> '{placeholder}'
+            BEGIN
+                SELECT RAISE(ABORT, 'student password must use the Moodle placeholder');
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_insert_null
+            AFTER INSERT ON {table_name}
+            WHEN NEW.password IS NULL
+            BEGIN
+                UPDATE {table_name} SET password='{placeholder}' WHERE rowid=NEW.rowid;
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_update_null
+            AFTER UPDATE OF password ON {table_name}
+            WHEN NEW.password IS NULL
+            BEGIN
+                UPDATE {table_name} SET password='{placeholder}' WHERE rowid=NEW.rowid;
+            END
+        ''')
+
 def init_db():
     def migration(conn):
         create_abiturients_table(conn)
@@ -3691,7 +3779,8 @@ def init_db():
                 fio TEXT,
                 position TEXT,
                 role TEXT,
-                approved INTEGER DEFAULT 0
+                approved INTEGER DEFAULT 0,
+                must_change_password INTEGER NOT NULL DEFAULT 0
             )
         ''')
         conn.execute('''
@@ -3702,12 +3791,13 @@ def init_db():
                 attempted_at REAL NOT NULL
             )
         ''')
+        ensure_user_must_change_password_column(conn)
         migrate_user_passwords(conn)
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE,
-                password TEXT,
+                password TEXT NOT NULL DEFAULT '{MOODLE_PASSWORD_PLACEHOLDER}',
                 email TEXT,
                 firstname TEXT,
                 lastname TEXT,
@@ -3719,11 +3809,11 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'active'
             )
         ''')
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS students_duplicates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT,
-                password TEXT,
+                password TEXT NOT NULL DEFAULT '{MOODLE_PASSWORD_PLACEHOLDER}',
                 email TEXT,
                 firstname TEXT,
                 lastname TEXT,
@@ -3731,6 +3821,8 @@ def init_db():
                 cohort2 TEXT
             )
         ''')
+        normalize_student_password_placeholders(conn)
+        create_student_password_guards(conn)
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3786,8 +3878,10 @@ with sqlite3.connect(DB_PATH) as conn:
                 "and set a strong local admin password before first launch."
             )
         conn.execute(
-            "INSERT INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
-            ("admin", hash_user_password(_default_admin_password), "admin", 1)
+            """INSERT INTO users
+                   (username, password, role, approved, must_change_password)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("admin", hash_user_password(_default_admin_password), "admin", 1, 1)
         )
 
 def get_campaign_years():
@@ -4609,6 +4703,9 @@ def build_students_import_plan(file_path):
     df['_row_number'] = range(2, len(df) + 2)
     for column in STUDENT_UPLOAD_REQUIRED_COLUMNS:
         df[column] = df[column].apply(clean_upload_text)
+    # The Moodle import column is retained for file compatibility, but uploaded
+    # values are never trusted or persisted as student passwords.
+    df['password'] = MOODLE_PASSWORD_PLACEHOLDER
     df['cohort1'] = df['cohort1'].apply(normalize_group_name)
     if 'cohort2' not in df.columns:
         df['cohort2'] = ''
@@ -4787,7 +4884,7 @@ def apply_students_import(file_path):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
                     (
-                        row["username"], row["password"], row["email"],
+                        row["username"], MOODLE_PASSWORD_PLACEHOLDER, row["email"],
                         row["firstname"], row["lastname"], row["cohort1"], row["cohort2"],
                         row["source_campaign_year"], row["source_campaign_year"],
                         row["source_dogovor"], row["source_fio"]
@@ -4798,7 +4895,7 @@ def apply_students_import(file_path):
                     '''INSERT INTO students_duplicates (username, password, email, firstname, lastname, cohort1, cohort2)
                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
                     (
-                        row["username"], row["password"], row["email"],
+                        row["username"], MOODLE_PASSWORD_PLACEHOLDER, row["email"],
                         row["firstname"], row["lastname"], row["cohort1"], row["cohort2"]
                     )
                 )
@@ -6226,7 +6323,7 @@ def enrollment_order_roster_export_rows(roster):
     return [
         {
             'username': row['login'],
-            'password': 'cron',
+            'password': MOODLE_PASSWORD_PLACEHOLDER,
             'email': row['email'],
             'firstname': row['firstname'],
             'lastname': row['lastname'],
@@ -8288,6 +8385,7 @@ def enrollment_order_student_roster(upload_id):
         summary=roster['summary'],
         issue_types=roster['issue_types'],
         max_group_students=MAX_GROUP_STUDENTS,
+        moodle_password_placeholder=MOODLE_PASSWORD_PLACEHOLDER,
     )
 
 @app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>')
@@ -9623,6 +9721,7 @@ def manual_create():
 def login():
     session.pop('user', None)
     session.pop('role', None)
+    session.pop('must_change_password', None)
     username = ''
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
@@ -9637,7 +9736,8 @@ def login():
             return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
-                'SELECT id, password, role, approved FROM users WHERE username=?',
+                '''SELECT id, password, role, approved, must_change_password
+                   FROM users WHERE username=?''',
                 (username,)
             )
             user = cur.fetchone()
@@ -9649,13 +9749,53 @@ def login():
                 session.clear()
                 session['user'] = username
                 session['role'] = user[2]
-                return redirect(url_for('index'))
+                session['must_change_password'] = bool(user[4])
+                return redirect(url_for('change_password' if user[4] else 'index'))
             elif password_ok and user[3] == 0:
                 flash('Ожидайте одобрения администратора.', 'error')
             else:
                 record_login_failure(username)
                 flash('Неверный логин или пароль.', 'error')
     return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
+
+
+@app.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    if request.method == 'POST':
+        current_password = request.form.get('current_password') or ''
+        new_password = request.form.get('new_password') or ''
+        confirmation = request.form.get('confirm_password') or ''
+        with sqlite3.connect(DB_PATH) as conn:
+            user = conn.execute(
+                'SELECT id, password FROM users WHERE username=?',
+                (session.get('user'),),
+            ).fetchone()
+            if not user or not verify_user_password(user[1], current_password):
+                flash('Текущий пароль указан неверно.', 'error')
+            elif len(new_password) < 12:
+                flash('Новый пароль должен содержать не менее 12 символов.', 'error')
+            elif new_password != confirmation:
+                flash('Подтверждение нового пароля не совпадает.', 'error')
+            elif verify_user_password(user[1], new_password):
+                flash('Новый пароль должен отличаться от текущего.', 'error')
+            else:
+                conn.execute(
+                    'UPDATE users SET password=?, must_change_password=0 WHERE id=?',
+                    (hash_user_password(new_password), user[0]),
+                )
+                log_action(
+                    'user_password_changed',
+                    'user',
+                    session.get('user', ''),
+                    'initial_change_completed=true',
+                    conn,
+                )
+                session['must_change_password'] = False
+                flash('Пароль изменён.', 'success')
+                destination = 'index' if is_login_generation_setup_completed() else 'login_generation_setup'
+                return redirect(url_for(destination), code=303)
+    return render_template('change_password.html')
 
 @app.route('/logout')
 def logout():
@@ -9908,18 +10048,6 @@ def app_update_is_active(status):
 
 
 def build_app_update_command():
-    configured_command = (os.environ.get('APP_UPDATE_COMMAND') or '').strip()
-    if configured_command:
-        try:
-            parsed = json.loads(configured_command)
-        except json.JSONDecodeError:
-            parsed = shlex.split(configured_command, posix=os.name != 'nt')
-        if isinstance(parsed, str):
-            parsed = shlex.split(parsed, posix=os.name != 'nt')
-        if not isinstance(parsed, list) or not parsed or not all(isinstance(part, str) and part for part in parsed):
-            raise RuntimeError('APP_UPDATE_COMMAND должен содержать команду или JSON-массив аргументов.')
-        return parsed
-
     if os.name == 'nt':
         raise RuntimeError('Обновление из админки предназначено для Linux-сервера с systemd.')
     sudo_path = shutil.which('sudo') or next(
@@ -10644,7 +10772,7 @@ def edit_student(username):
         flash('Студент не найден')
         return redirect(url_for('students_list'))
     if request.method == 'POST':
-        password = request.form.get('password', '').strip()
+        password = MOODLE_PASSWORD_PLACEHOLDER
         email = request.form.get('email', '').strip()
         firstname = request.form.get('firstname', '').strip()
         lastname = request.form.get('lastname', '').strip()
@@ -10670,7 +10798,7 @@ def edit_student(username):
         cohort2 = student[6]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('UPDATE students SET password=?, email=?, firstname=?, lastname=? WHERE username=?',
-                         (password, email, firstname, lastname, username))
+                         (MOODLE_PASSWORD_PLACEHOLDER, email, firstname, lastname, username))
             log_action(
                 'student_updated',
                 'student',
@@ -11239,7 +11367,7 @@ def abiturients_to_students():
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                         ''',
                         (
-                            plan_row['login'], 'cron', plan_row['email'],
+                            plan_row['login'], MOODLE_PASSWORD_PLACEHOLDER, plan_row['email'],
                             plan_row['firstname'], plan_row['lastname'], target_group, target_cohort2,
                             campaign_year, campaign_year, plan_row['dogovor'], plan_row['fio']
                         )
@@ -11409,7 +11537,7 @@ def abiturients_to_students():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                     ''',
                     (
-                        candidate['username'], 'cron', candidate['email'],
+                        candidate['username'], MOODLE_PASSWORD_PLACEHOLDER, candidate['email'],
                         candidate['firstname'], candidate['lastname'], target_group, target_cohort2,
                         campaign_year, campaign_year, candidate['dogovor'], candidate['fio']
                     )
@@ -11678,8 +11806,31 @@ def download_groups_template():
 from contingent_web import register_contingent
 register_contingent(app, globals())
 
+
+def is_loopback_bind_host(host):
+    normalized = str(host or '').strip().strip('[]').casefold()
+    if normalized == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def warn_if_insecure_network_binding(host):
+    if is_loopback_bind_host(host):
+        return False
+    logging.getLogger(__name__).warning(
+        'Manticore is bound to %s. Direct HTTP on a network can expose credentials and '
+        'personal data; require an HTTPS reverse proxy or a trusted VPN.',
+        host,
+    )
+    return True
+
+
 if __name__ == "__main__":
     app_host = os.environ.get("APP_HOST", "127.0.0.1")
     app_port = int(os.environ.get("APP_PORT", "5000"))
     app_debug = os.environ.get("APP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    warn_if_insecure_network_binding(app_host)
     app.run(host=app_host, port=app_port, debug=app_debug)

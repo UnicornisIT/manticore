@@ -32,9 +32,7 @@ function Write-Step {
     Write-Host "== $Message ==" -ForegroundColor Cyan
 }
 
-function Write-AdminPasswordNotice {
-    param([string]$Password)
-
+function Read-InitialAdminPassword {
     $restartTranscript = $false
     if ($script:TranscriptStarted) {
         Stop-Transcript | Out-Null
@@ -42,23 +40,42 @@ function Write-AdminPasswordNotice {
         $restartTranscript = $true
     }
 
-    Write-Host ""
-    Write-Host "============================================================" -ForegroundColor Yellow
-    Write-Host "ВАЖНО / IMPORTANT" -ForegroundColor Red
-    Write-Host "Локальный администратор: admin" -ForegroundColor Yellow
-    Write-Host "Admin password: $Password" -ForegroundColor Green
-    Write-Host "RU: Сохраните этот пароль. При первом входе обязательно смените пароль администратора." -ForegroundColor Yellow
-    Write-Host "EN: Save this password. You must change the admin password after the first login." -ForegroundColor Yellow
-    Write-Host "============================================================" -ForegroundColor Yellow
-    Write-Host ""
-
-    if ($restartTranscript) {
-        try {
-            Start-Transcript -Path $LogPath -Append | Out-Null
-            $script:TranscriptStarted = $true
+    try {
+        while ($true) {
+            Write-Host ""
+            Write-Host "Create the initial password for local administrator 'admin'." -ForegroundColor Yellow
+            $firstSecure = Read-Host "Initial password (at least 12 characters)" -AsSecureString
+            $secondSecure = Read-Host "Repeat the initial password" -AsSecureString
+            $firstPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($firstSecure)
+            $secondPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secondSecure)
+            try {
+                $first = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($firstPointer)
+                $second = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secondPointer)
+                if ($first.Length -lt 12) {
+                    Write-Host "The password must contain at least 12 characters." -ForegroundColor Red
+                    continue
+                }
+                if ($first -cne $second) {
+                    Write-Host "The passwords do not match." -ForegroundColor Red
+                    continue
+                }
+                return $first
+            }
+            finally {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($firstPointer)
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secondPointer)
+            }
         }
-        catch {
-            $script:TranscriptStarted = $false
+    }
+    finally {
+        if ($restartTranscript) {
+            try {
+                Start-Transcript -Path $LogPath -Append | Out-Null
+                $script:TranscriptStarted = $true
+            }
+            catch {
+                $script:TranscriptStarted = $false
+            }
         }
     }
 }
@@ -216,7 +233,7 @@ if (-not (Test-Path -LiteralPath "uploads")) {
 if (-not (Test-Path -LiteralPath ".env")) {
     $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".ToCharArray()
     $secret = -join (1..48 | ForEach-Object { $chars | Get-Random })
-    $adminPassword = -join (1..20 | ForEach-Object { $chars | Get-Random })
+    $adminPassword = Read-InitialAdminPassword
     @(
         "SECRET_KEY=$secret",
         "ADMIN_DEFAULT_PASSWORD=$adminPassword",
@@ -229,8 +246,7 @@ if (-not (Test-Path -LiteralPath ".env")) {
         "APP_PORT=5000",
         "APP_DEBUG=false"
     ) | Set-Content -Path ".env" -Encoding UTF8
-    Write-Host "Generated local admin password and saved it in .env." -ForegroundColor Yellow
-    Write-AdminPasswordNotice -Password $adminPassword
+    Write-Host "Initial admin credentials were saved in .env. The password was not written to the log." -ForegroundColor Yellow
 }
 
 $lanIp = $null
@@ -247,6 +263,7 @@ Write-Step "Starting manticore"
 Write-Host "This computer: http://127.0.0.1:5000" -ForegroundColor Green
 if ($lanIp) {
     Write-Host "Local network: http://${lanIp}:5000" -ForegroundColor Green
+    Write-Host "WARNING: plain HTTP does not protect credentials or personal data. Use this address only behind a trusted VPN, or configure HTTPS." -ForegroundColor Red
 }
 Write-Host "If Windows Firewall asks, allow access for private networks." -ForegroundColor Yellow
 Write-Host ""

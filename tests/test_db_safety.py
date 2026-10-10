@@ -1,6 +1,8 @@
 import hashlib
+import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -141,6 +143,30 @@ class DatabaseSafetyTests(unittest.TestCase):
             db_safety.retain_migration_backups(database)
             remaining = sorted(Path(directory).glob('base.backup-before-migration-*.db'))
             self.assertEqual(len(remaining), 5)
+
+    def test_sqlite_backup_is_owner_only_where_posix_modes_apply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.make_legacy_database(directory)
+            backup = db_safety.sqlite_backup(source, Path(directory) / 'private-backup.db')
+            if os.name != 'nt':
+                self.assertEqual(backup.stat().st_mode & 0o077, 0)
+
+    def test_age_retention_removes_only_expired_matching_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / 'baze_backup_old.db'
+            recent = root / 'baze_backup_recent.db'
+            unrelated = root / 'keep.db'
+            for path in (old, recent, unrelated):
+                path.write_bytes(b'backup')
+            now = time.time()
+            os.utime(old, (now - 31 * 86400, now - 31 * 86400))
+            os.utime(recent, (now - 2 * 86400, now - 2 * 86400))
+            removed = db_safety.prune_backups_by_age(root, 'baze_backup_*.db', 30, now=now)
+            self.assertEqual(removed, [old])
+            self.assertFalse(old.exists())
+            self.assertTrue(recent.exists())
+            self.assertTrue(unrelated.exists())
 
 
 if __name__ == '__main__':

@@ -40,9 +40,6 @@ EXTRA_ARGS=()
 if [[ "${UPDATE_LATEST_RELEASE:-0}" == "1" ]]; then
   EXTRA_ARGS+=(--latest-release)
 fi
-if [[ -n "${UPDATE_RELEASE_API_URL:-}" ]]; then
-  EXTRA_ARGS+=(--release-api-url "$UPDATE_RELEASE_API_URL")
-fi
 if [[ -n "${UPDATE_STATUS_FILE:-}" ]]; then
   EXTRA_ARGS+=(--status-file "$UPDATE_STATUS_FILE")
 fi

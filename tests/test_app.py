@@ -549,14 +549,14 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(audit_count, 1)
         os.remove(result_path)
 
-    def test_students_list_hides_password_for_non_admin(self):
+    def test_students_list_hides_moodle_placeholder_for_non_admin(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             conn.execute(
                 '''
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                ('student001', 'visible-secret', 'student@example.test', 'Петр', 'Петров', '26ФМ-11-1')
+                ('student001', 'cron', 'student@example.test', 'Петр', 'Петров', '26ФМ-11-1')
             )
 
         client = manticore.app.test_client()
@@ -568,7 +568,7 @@ class ManticoreAppTests(unittest.TestCase):
         body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn('visible-secret', body)
+        self.assertNotIn('>cron<', body)
         self.assertIn('••••••', body)
 
     def test_documentation_is_public_read_only_and_keeps_private_routes_protected(self):
@@ -909,7 +909,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                (f'del2_{original_login}', 'secret', 'student@example.test', 'Занятый', 'Второй', '26СД-11-1')
+                (f'del2_{original_login}', 'cron', 'student@example.test', 'Занятый', 'Второй', '26СД-11-1')
             )
             manticore.sync_enrollment_candidates_for_abiturients(conn, [abiturient_id], '2026')
             candidate_count = conn.execute(
@@ -1018,14 +1018,14 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_p', 'secret', 'p@example.test', 'Петр', 'Петров', '26ФМ-11-1')
+                ('student_p', 'cron', 'p@example.test', 'Петр', 'Петров', '26ФМ-11-1')
             )
             conn.execute(
                 '''
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_i', 'secret', 'i@example.test', 'Иван', 'Иванов', '26СД-9-1')
+                ('student_i', 'cron', 'i@example.test', 'Иван', 'Иванов', '26СД-9-1')
             )
 
         client = manticore.app.test_client()
@@ -1049,7 +1049,7 @@ class ManticoreAppTests(unittest.TestCase):
                 conn.execute(
                     '''
                     INSERT INTO students (username, password, email, firstname, lastname, cohort1)
-                    VALUES (?, 'secret', ?, ?, ?, '26ФМ-11-1')
+                    VALUES (?, 'cron', ?, ?, ?, '26ФМ-11-1')
                     ''',
                     (username, f'{username}@example.test', firstname, lastname)
                 )
@@ -1135,7 +1135,7 @@ class ManticoreAppTests(unittest.TestCase):
                 conn.execute(
                     '''INSERT INTO students
                        (username, password, email, firstname, lastname, cohort1, migrated_to_student_at)
-                       VALUES (?, 'secret', ?, 'Имя', 'Фамилия', '26ФМ-11-1', ?)''',
+                       VALUES (?, 'cron', ?, 'Имя', 'Фамилия', '26ФМ-11-1', ?)''',
                     (username, f'{username}@example.test', migrated_at),
                 )
         selected = manticore.get_all_students(migrated_from='2026-09-01', migrated_to='2026-09-30')
@@ -1348,7 +1348,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students
                     (username, password, email, firstname, lastname, cohort1,
                      source_campaign_year, source_dogovor, source_fio)
-                VALUES (?, 'secret', ?, ?, ?, ?, '2026', ?, ?)
+                VALUES (?, 'cron', ?, ?, ?, ?, '2026', ?, ?)
                 ''',
                 (
                     'student_from_old_version', 'archive@example.test', 'Алексей Алексеевич',
@@ -1951,7 +1951,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, source_campaign_year, source_dogovor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student020', 'secret', 'wrong-mail', 'Анна', 'Кривец', '', '2026', '')
+                ('student020', 'cron', 'wrong-mail', 'Анна', 'Кривец', '', '2026', '')
             )
             conn.execute(
                 '''
@@ -3924,7 +3924,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_existing', 'secret', 'old@example.test', 'Старый', 'Студент', '26ФМ-11-1')
+                ('student_existing', 'cron', 'old@example.test', 'Старый', 'Студент', '26ФМ-11-1')
             )
 
         client = manticore.app.test_client()
@@ -4419,7 +4419,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student010', 'secret-pass', 'student010@example.test', 'Петр', 'Петров', '26ФМ-11-1', 'ФМ-11', '2026')
+                ('student010', 'cron', 'student010@example.test', 'Петр', 'Петров', '26ФМ-11-1', 'ФМ-11', '2026')
             )
 
         client = manticore.app.test_client()
@@ -4429,7 +4429,7 @@ class ManticoreAppTests(unittest.TestCase):
 
         self.assertEqual(card_response.status_code, 200)
         card_body = card_response.get_data(as_text=True)
-        self.assertNotIn('secret-pass', card_body)
+        self.assertNotIn('>cron<', card_body)
         self.assertIn('Скрыт для безопасности', card_body)
         self.assertIn('Глобальная группа курса', card_body)
         self.assertIn('ФМ-11', card_body)
@@ -4456,7 +4456,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_transfer', 'secret-pass', 'student_transfer@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
+                ('student_transfer', 'cron', 'student_transfer@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
             )
 
         client = manticore.app.test_client()
@@ -4542,7 +4542,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_transfer_without_pdf', 'secret-pass', 'student_transfer_without_pdf@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
+                ('student_transfer_without_pdf', 'cron', 'student_transfer_without_pdf@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
             )
 
         client = manticore.app.test_client()
@@ -4607,7 +4607,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_transfer_no_course_group', 'secret-pass', 'student_transfer_no_course_group@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
+                ('student_transfer_no_course_group', 'cron', 'student_transfer_no_course_group@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
             )
 
         client = manticore.app.test_client()
@@ -4664,7 +4664,7 @@ class ManticoreAppTests(unittest.TestCase):
                 INSERT INTO students (username, password, email, firstname, lastname, cohort1, cohort2, source_campaign_year)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                ('student_full_transfer', 'secret-pass', 'student_full_transfer@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
+                ('student_full_transfer', 'cron', 'student_full_transfer@example.test', 'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026')
             )
             for index in range(manticore.MAX_GROUP_STUDENTS):
                 conn.execute(
@@ -4673,7 +4673,7 @@ class ManticoreAppTests(unittest.TestCase):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
                     (
-                        f'filled_fm_transfer_{index:03d}', 'secret-pass',
+                        f'filled_fm_transfer_{index:03d}', 'cron',
                         f'filled_fm_transfer_{index:03d}@example.test',
                         'Имя', 'Фамилия', '26ФМ-11-1', 'ФМ-11', '2026'
                     )
@@ -4748,7 +4748,7 @@ class ManticoreAppTests(unittest.TestCase):
                     migrated_to_student_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
-                    'moving-campaign', 'unchanged-secret', 'moving-campaign@example.test',
+                    'moving-campaign', 'cron', 'moving-campaign@example.test',
                     'Анна', 'Андреева', '26ЛД-11-1', 'ЛД-11', '2026', '2026',
                     '2026-001', 'Андреева Анна', migrated_at,
                 ),
@@ -5058,7 +5058,7 @@ class ManticoreAppTests(unittest.TestCase):
                 '''INSERT INTO students
                    (username, password, email, firstname, lastname, cohort1, cohort2,
                     source_campaign_year, current_campaign_year, migrated_to_student_at)
-                   VALUES (?, 'secret', ?, 'Иван Иванович', 'Иванов', '26ЛД-11-1', 'ЛД-11',
+                   VALUES (?, 'cron', ?, 'Иван Иванович', 'Иванов', '26ЛД-11-1', 'ЛД-11',
                            '2026', '2026', '2026-08-28 10:00:00')''',
                 (username, f'{username}@example.test'),
             )

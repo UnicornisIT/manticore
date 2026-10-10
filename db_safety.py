@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import shutil
 import sqlite3
 import time
@@ -11,13 +12,14 @@ from datetime import datetime
 from pathlib import Path
 
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 SCHEMA_INTRODUCED_IN = {
     2: "0.0.9-alpha",
     3: "0.1.0-alpha",
     4: "0.1.1",
+    5: "0.1.3",
 }
-SCHEMA_VERSION_FLOOR = 4
+SCHEMA_VERSION_FLOOR = 5
 if CURRENT_SCHEMA_VERSION < SCHEMA_VERSION_FLOOR:
     raise RuntimeError("CURRENT_SCHEMA_VERSION must never be lower than the released schema floor.")
 if CURRENT_SCHEMA_VERSION != SCHEMA_VERSION_FLOOR:
@@ -31,6 +33,7 @@ if set(SCHEMA_INTRODUCED_IN) != set(range(2, CURRENT_SCHEMA_VERSION + 1)):
 CURRENT_SCHEMA_MIN_APP_VERSION = SCHEMA_INTRODUCED_IN[CURRENT_SCHEMA_VERSION]
 MIGRATION_BACKUP_KEEP = 5
 LARGE_DATABASE_BYTES = 512 * 1024 * 1024
+PRIVATE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
 
 
 class DatabaseSafetyError(RuntimeError):
@@ -103,6 +106,42 @@ def ensure_free_space(directory: str | os.PathLike, required_bytes: int) -> None
         )
 
 
+def restrict_private_file(path: str | os.PathLike) -> Path:
+    """Apply the strictest portable owner-only mode available to a private file."""
+    path = Path(path).resolve()
+    try:
+        os.chmod(path, PRIVATE_FILE_MODE)
+    except OSError:
+        # Some network filesystems and Windows ACL configurations do not expose
+        # POSIX modes. The caller still owns the file and should enforce ACLs at
+        # the deployment/storage boundary.
+        pass
+    return path
+
+
+def prune_backups_by_age(
+    directory: str | os.PathLike,
+    pattern: str,
+    retention_days: int,
+    *,
+    now: float | None = None,
+) -> list[Path]:
+    """Remove matching regular backup files older than the configured horizon."""
+    directory = Path(directory).resolve()
+    cutoff = (time.time() if now is None else float(now)) - max(1, int(retention_days)) * 86400
+    removed: list[Path] = []
+    if not directory.is_dir():
+        return removed
+    for candidate in directory.glob(pattern):
+        try:
+            if candidate.is_file() and candidate.stat().st_mtime < cutoff:
+                candidate.unlink()
+                removed.append(candidate)
+        except OSError:
+            continue
+    return removed
+
+
 def integrity_check(connection: sqlite3.Connection, *, full: bool = True) -> None:
     pragma = "integrity_check" if full else "quick_check"
     rows = connection.execute(f"PRAGMA {pragma}").fetchall()
@@ -162,6 +201,7 @@ def sqlite_backup(source_path: str | os.PathLike, destination_path: str | os.Pat
     else:
         destination.close()
         source.close()
+    restrict_private_file(destination_path)
     return destination_path
 
 

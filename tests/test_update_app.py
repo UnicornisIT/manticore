@@ -58,6 +58,23 @@ class UpdateAppTests(unittest.TestCase):
 
         self.assertEqual(release['tag_name'], 'v1.2.0')
 
+    def test_release_source_rejects_untrusted_url_and_origin(self):
+        with self.assertRaises(update_app.UpdateError):
+            update_app.get_release_api_url(
+                Path('.'),
+                'https://api.github.com/repos/example/other/releases/latest',
+            )
+        remote = mock.Mock(returncode=0, stdout='https://github.com/example/other.git\n')
+        with mock.patch.object(update_app, 'run_command_capture', return_value=remote):
+            with self.assertRaises(update_app.UpdateError):
+                update_app.get_release_api_url(Path('.'))
+
+    def test_release_tag_requires_semantic_version(self):
+        self.assertIsNotNone(update_app.RELEASE_TAG_PATTERN.fullmatch('v1.2.3-rc.1'))
+        for value in ('latest', 'release-1.2.3', 'v1.2', 'v1.2.3;touch-pwned'):
+            with self.subTest(value=value):
+                self.assertIsNone(update_app.RELEASE_TAG_PATTERN.fullmatch(value))
+
     def test_update_status_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             status_path = Path(tmp_dir) / 'status.json'

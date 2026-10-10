@@ -18,8 +18,9 @@
         <div class="student-edit-readonly">{{ student[0] }}</div>
     </div>
     <div class="student-edit-field">
-        <label for="password">Пароль:</label>
-        <input type="password" id="password" name="password" value="{{ student[1] }}" class="form-control" autocomplete="new-password">
+        <label>Поле Moodle password:</label>
+        <div class="student-edit-readonly">{{ student[1] }}</div>
+        <small>Manticore хранит только служебную заглушку и никогда не принимает реальный пароль студента.</small>
     </div>
     <div class="student-edit-field">
         <label for="email">Email:</label>
