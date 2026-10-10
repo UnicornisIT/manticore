@@ -29,6 +29,13 @@ import desktop_releases
 from app_metadata import APP_METADATA
 from config import MOODLE_PASSWORD_PLACEHOLDER, load_runtime_config, setting_bool
 from email_validation import ensure_dns_cache_table, validate_email
+from services.imports import (
+    clean_upload_text,
+    find_dataframe_column_casefold,
+    find_row_value_casefold,
+    read_csv_dataframe,
+    read_tabular_upload,
+)
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
     DatabaseIntegrityError,
@@ -244,26 +251,6 @@ def send_temp_download(file_path, download_name, mimetype):
     output.seek(0)
     cleanup_temp_files(file_path)
     return send_file(output, as_attachment=True, download_name=download_name, mimetype=mimetype)
-
-def read_csv_dataframe(file_path):
-    last_error = None
-    for encoding in ('utf-8-sig', 'cp1251', 'utf-8'):
-        try:
-            return pd.read_csv(file_path, sep=None, engine='python', encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-            continue
-    if last_error:
-        raise ValueError('Не удалось прочитать CSV в кодировке UTF-8 или Windows-1251')
-    raise ValueError('Не удалось прочитать CSV-файл')
-
-def read_tabular_upload(file_path):
-    extension = os.path.splitext(file_path)[1].lower()
-    if extension == '.csv':
-        return read_csv_dataframe(file_path)
-    if extension == '.xls':
-        return pd.read_excel(file_path)
-    return pd.read_excel(file_path, engine="openpyxl")
 
 _campaign_year_re = re.compile(r'^20\d{2}$')
 _dogovor_year_re = re.compile(r'20\d{2}')
@@ -3009,21 +2996,6 @@ def sync_enrollment_candidates_for_abiturients(conn, abiturient_ids, campaign_ye
     refresh_enrollment_candidate_statuses(conn, campaign_year)
     return summary
 
-def find_row_value_casefold(row, aliases):
-    normalized = {str(key).strip().casefold(): key for key in row.index}
-    for alias in aliases:
-        key = normalized.get(alias.casefold())
-        if key is not None:
-            return row.get(key)
-    return None
-
-def find_dataframe_column_casefold(columns, aliases):
-    normalized_aliases = {str(alias).strip().casefold() for alias in aliases}
-    for column in columns:
-        if str(column).strip().casefold() in normalized_aliases:
-            return column
-    return None
-
 def normalize_email_source_fio_key(value):
     return normalize_fio_key(value).replace('ё', 'е')
 
@@ -4070,11 +4042,6 @@ def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
             (fio, dogovor, login, campaign_year, fam, imotch)
         )
         conn.commit()
-
-def clean_upload_text(value):
-    if pd.isna(value):
-        return ''
-    return str(value).strip()
 
 def normalize_fio_key(value):
     return ' '.join(str(value or '').split()).casefold()
