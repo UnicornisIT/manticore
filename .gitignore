@@ -31,6 +31,7 @@ uploads/*
 *.tmp
 desktop-config.json*
 fallback*
+!templates/fallback_changes.html
 baze_backup_*
 
 # Runtime data is private; keep only the versioned provider registry.
@@ -57,6 +58,7 @@ logs/
 _clean_copy/
 dist/
 build/
+*.egg-info/
 *.zip
 *.7z
 *.rar

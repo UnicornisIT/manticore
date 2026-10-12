@@ -473,7 +473,7 @@ base_codes = {
     "2НМ": "inm", "2М": "im",
     "НМ": "nm", "М": "im",
     "11И": "11i", "9И": "9i",
-    "11": "11", "9": "9", 
+    "11": "11", "9": "9",
 }
 
 LOGIN_GROUP_SPECIALTY_CODES = {
@@ -9348,14 +9348,14 @@ def edit_conflict(conflict_id):
         if not new_login:
             flash('Логин не может быть пустым')
             return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-        
+
         backup_path = create_database_backup('before_resolve_login_conflict')
         with sqlite3.connect(DB_PATH) as conn:
             # Проверяем уникальность логина
             if is_login_exists(new_login, campaign_year):
                 flash(f'Логин {new_login} уже используется!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-            
+
             # Получаем данные конфликта
             cur = conn.execute(
                 'SELECT fio, dogovor, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
@@ -9365,9 +9365,9 @@ def edit_conflict(conflict_id):
             if not conflict:
                 flash('Запись не найдена')
                 return redirect(url_for('login_conflicts'))
-            
+
             fio, dogovor, fam, imotch, row_campaign_year = conflict
-            
+
             # Сохраняем в основную таблицу абитуриентов
             try:
                 conn.execute(
@@ -9392,18 +9392,18 @@ def edit_conflict(conflict_id):
             except sqlite3.IntegrityError:
                 flash(f'Логин {new_login} уже существует!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-    
+
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
             'SELECT id, fio, dogovor, login, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
             (conflict_id, campaign_year)
         )
         conflict = cur.fetchone()
-    
+
     if not conflict:
         flash('Запись не найдена')
         return redirect(url_for('login_conflicts'))
-    
+
     return render_template('edit_conflict.html', conflict=conflict)
 
 @login_required

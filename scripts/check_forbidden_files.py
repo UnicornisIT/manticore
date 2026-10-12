@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 ALLOWED_PATHS = {
     ".env.example",
     "static/template.xlsx",
+    "templates/fallback_changes.html",
 }
 
 
@@ -44,4 +45,3 @@ def main(paths: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
