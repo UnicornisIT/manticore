@@ -7755,6 +7755,46 @@ def ensure_student_list_enrollment_movements(conn):
             course_groups_enabled=course_groups_enabled,
         )
 
+def student_movement_event_date(order):
+    movement_type = order.get('movement_type') or 'transfer'
+    if movement_type == 'enrollment' and str(order.get('order_date') or '').strip():
+        return order.get('order_date')
+    return order.get('created_at')
+
+def student_movement_event_sort_key(order):
+    text = str(student_movement_event_date(order) or '').strip()
+    parsed = None
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+        except ValueError:
+            for date_format in ('%d.%m.%Y %H:%M:%S', '%d.%m.%Y'):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    pass
+    if parsed is not None:
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        date_key = (
+            1,
+            parsed.year,
+            parsed.month,
+            parsed.day,
+            parsed.hour,
+            parsed.minute,
+            parsed.second,
+            parsed.microsecond,
+        )
+    else:
+        date_key = (0, 0, 0, 0, 0, 0, 0, 0)
+    try:
+        movement_id = int(order.get('id') or 0)
+    except (TypeError, ValueError):
+        movement_id = 0
+    return (*date_key, movement_id)
+
 def get_student_transfer_orders(username):
     with sqlite3.connect(DB_PATH) as conn:
         ensure_student_enrollment_movement(conn, username)
@@ -7767,7 +7807,6 @@ def get_student_transfer_orders(username):
                    comment, created_by, created_at
             FROM student_group_transfers
             WHERE username=?
-            ORDER BY created_at DESC, id DESC
             ''',
             (username,)
         )
@@ -7854,6 +7893,7 @@ def get_student_transfer_orders(username):
             elif order['has_enrollment_order_file']:
                 order['download_url'] = url_for('download_enrollment_order_upload', upload_id=upload_key)
                 order['download_label'] = 'Скачать приказ'
+    orders.sort(key=student_movement_event_sort_key, reverse=True)
     return orders
 
 def record_student_enrollment_movement(conn, username, target_group, target_cohort2, order_match=None, created_by=''):

@@ -4422,6 +4422,116 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertIn('cohort2', exported.columns)
         self.assertEqual(exported.loc[0, 'cohort2'], 'ФМ-11')
 
+    def test_student_movement_history_handles_empty_and_single_event(self):
+        self.assertEqual(manticore.get_student_transfer_orders('history-empty'), [])
+
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.execute(
+                '''
+                INSERT INTO student_group_transfers
+                    (id, username, movement_type, old_cohort1, new_cohort1, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (201, 'history-single', 'transfer', '26ФМ-9-1', '26СД-9-1', '2026-10-09 10:00:00')
+            )
+
+        orders = manticore.get_student_transfer_orders('history-single')
+
+        self.assertEqual([order['id'] for order in orders], [201])
+        self.assertEqual(orders[0]['timeline_date_text'], '09.10.2026')
+        self.assertEqual(orders[0]['timeline_title'], '26СД-9-1')
+
+    def test_student_movement_history_sorts_actual_event_dates_desc_and_keeps_data(self):
+        rows = [
+            (101, 'history-order', 'enrollment', 'Абитуриенты', '26ФМ-9-1', '2026-08-18', '2026-10-20 09:00:00'),
+            (102, 'history-order', 'transfer', '26ФМ-9-1', '26СД-9-1', '', '2026-10-09 09:00:00'),
+            (103, 'history-order', 'expulsion', '26СД-9-1', '26СД-9-1', '', '2026-09-01 09:00:00'),
+            (104, 'history-order', 'restoration', '26СД-9-1', '26СД-9-1', '', '2026-09-15 09:00:00'),
+            (105, 'history-order', 'transfer', '26СД-9-1', '26ИС-9-1', '', '2026-09-20 09:00:00'),
+            (106, 'history-order', 'transfer', '26ИС-9-1', '26ЛД-9-1', '', '2026-09-20 09:00:00'),
+        ]
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.executemany(
+                '''
+                INSERT INTO student_group_transfers
+                    (id, username, movement_type, old_cohort1, new_cohort1, order_date, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''',
+                rows
+            )
+            before = conn.execute(
+                '''
+                SELECT id, movement_type, old_cohort1, new_cohort1, order_date, created_at
+                FROM student_group_transfers
+                WHERE username=?
+                ORDER BY id
+                ''',
+                ('history-order',)
+            ).fetchall()
+
+        orders = manticore.get_student_transfer_orders('history-order')
+
+        self.assertEqual([order['id'] for order in orders], [102, 106, 105, 104, 103, 101])
+        self.assertEqual(
+            [order['movement_type_label'] for order in orders],
+            ['Перевод', 'Перевод', 'Перевод', 'Восстановление', 'Отчисление', 'Зачислен']
+        )
+        self.assertEqual(orders[-1]['timeline_date_text'], '18.08.2026')
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            after = conn.execute(
+                '''
+                SELECT id, movement_type, old_cohort1, new_cohort1, order_date, created_at
+                FROM student_group_transfers
+                WHERE username=?
+                ORDER BY id
+                ''',
+                ('history-order',)
+            ).fetchall()
+        self.assertEqual(after, before)
+
+    def test_student_movement_timeline_renders_newest_first_with_svg_and_scroll_contract(self):
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            conn.executemany(
+                '''
+                INSERT INTO student_group_transfers
+                    (id, username, movement_type, old_cohort1, new_cohort1, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                [
+                    (301, 'history-template', 'transfer', '26ФМ-9-1', '26ИС-9-1', '2026-08-18 09:00:00'),
+                    (302, 'history-template', 'transfer', '26ИС-9-1', '26СД-9-1', '2026-10-09 09:00:00'),
+                ]
+            )
+        orders = manticore.get_student_transfer_orders('history-template')
+
+        with manticore.app.test_request_context('/'):
+            body = manticore.render_template(
+                '_student_transfer_timeline.html',
+                transfer_orders=orders,
+                course_groups_enabled=True,
+            )
+
+        cards = re.findall(
+            r'<button[^>]+data-student-movement-open="student-movement-modal-(\d+)"[^>]*>',
+            body,
+        )
+        self.assertEqual(cards, ['302', '301'])
+        self.assertIn('class="student-movement-arrow"', body)
+        self.assertIn('<svg viewBox="0 0 32 32"', body)
+        self.assertIn('class="student-movement-scroll" tabindex="0"', body)
+        self.assertLess(body.index('student-movement-items'), body.index('student-movement-arrow'))
+        self.assertLess(body.index('student-movement-arrow'), body.index('student-movement-item is-'))
+
+        timeline_css = (Path(PROJECT_ROOT) / 'static' / 'css' / 'pages' / 'student_transfer_timeline.css').read_text(encoding='utf-8')
+        self.assertIn('overflow-x: auto', timeline_css)
+        self.assertIn('contain: inline-size', timeline_css)
+        self.assertIn('touch-action: pan-x pan-y', timeline_css)
+        self.assertIn('.student-movement-items::before', timeline_css)
+        self.assertIn('background: var(--student-movement-track-color)', timeline_css)
+        self.assertIn('color: var(--student-movement-track-color)', timeline_css)
+        self.assertIn('stroke-width: 2', timeline_css)
+        self.assertIn('@media (max-width: 720px)', timeline_css)
+
     def test_student_group_transfer_uploads_pdf_and_updates_groups(self):
         pdf_bytes = b'%PDF-1.4\ntransfer order\n%%EOF'
         with sqlite3.connect(manticore.DB_PATH) as conn:

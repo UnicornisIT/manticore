@@ -1,22 +1,29 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/student_transfer_timeline.css') }}">
 
 {% if transfer_orders %}
-<div class="student-movement-timeline" aria-label="История перемещений">
-    <div class="student-movement-items">
-        {% for order in transfer_orders|reverse %}
-        <button type="button" class="student-movement-item is-{{ order.movement_type }}" data-student-movement-open="student-movement-modal-{{ order.id }}" aria-haspopup="dialog">
-            <span class="student-movement-date">
-                <span class="student-movement-dot" aria-hidden="true"></span>
-                {{ order.timeline_date_text }}
+<div class="student-movement-timeline" role="region" aria-label="История перемещений">
+    <div class="student-movement-scroll" tabindex="0" aria-label="События от новых к старым">
+        <div class="student-movement-items">
+            <span class="student-movement-arrow" aria-hidden="true">
+                <svg viewBox="0 0 32 32" focusable="false">
+                    <path d="M11 7.5 2.5 16l8.5 8.5M3 16h28"></path>
+                </svg>
             </span>
-            <span class="student-movement-title">{{ order.timeline_title }}</span>
-            <span class="student-movement-subtitle">
-                {{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}
-                {% if order.campaign_changed %} · кампания {{ order.from_campaign_text }} → {{ order.to_campaign_text }}
-                {% elif order.movement_type in ['expulsion', 'restoration'] %} · кампания {{ order.to_campaign_text }}{% endif %}
-            </span>
-        </button>
-        {% endfor %}
+            {% for order in transfer_orders %}
+            <button type="button" class="student-movement-item is-{{ order.movement_type }}" data-student-movement-open="student-movement-modal-{{ order.id }}" aria-haspopup="dialog">
+                <span class="student-movement-date">
+                    <span class="student-movement-dot" aria-hidden="true"></span>
+                    {{ order.timeline_date_text }}
+                </span>
+                <span class="student-movement-title">{{ order.timeline_title }}</span>
+                <span class="student-movement-subtitle">
+                    {{ order.movement_type_label }}{% if order.from_group_text %} · из {{ order.from_group_text }}{% endif %}
+                    {% if order.campaign_changed %} · кампания {{ order.from_campaign_text }} → {{ order.to_campaign_text }}
+                    {% elif order.movement_type in ['expulsion', 'restoration'] %} · кампания {{ order.to_campaign_text }}{% endif %}
+                </span>
+            </button>
+            {% endfor %}
+        </div>
     </div>
 </div>
 
