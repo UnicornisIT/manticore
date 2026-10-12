@@ -33,7 +33,7 @@ def main():
             conn.execute(
                 'INSERT INTO students (username,password,email,firstname,lastname,cohort1) '
                 'VALUES (?,?,?,?,?,?)',
-                ('layout-fixture', 'fixture', 'fixture@example.test', 'Тест', 'Макет', '26ФМ-11-1'),
+                ('layout-fixture', app.MOODLE_PASSWORD_PLACEHOLDER, 'fixture@example.test', 'Тест', 'Макет', '26ФМ-11-1'),
             )
         conn.close()
 

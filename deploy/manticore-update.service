@@ -11,6 +11,6 @@ WorkingDirectory=/srv/manticore
 EnvironmentFile=-/srv/manticore/.env
 Environment="UPDATE_LATEST_RELEASE=1"
 Environment="UPDATE_STATUS_FILE=/srv/manticore/uploads/app_update_status.json"
-ExecStart=/usr/bin/bash /srv/manticore/update.sh /srv/manticore
+ExecStart=/usr/bin/bash /srv/manticore/scripts/update.sh /srv/manticore
 TimeoutStartSec=30min
 UMask=0022

@@ -17,13 +17,19 @@ import venv
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config import (
+    DEFAULT_BACKUP_RETENTION_DAYS,
+    RELEASE_TAG_PATTERN,
+    TRUSTED_GITHUB_REPOSITORY,
+    TRUSTED_RELEASE_API_URL,
+)
+from db_safety import prune_backups_by_age, restrict_private_file
+
 
 DEFAULT_UPLOAD_FOLDER = "uploads"
 DEFAULT_DB_FILENAME = "baze.db"
 DB_BACKUP_PREFIX = "baze_backup_"
 DEFAULT_UPDATE_STATUS_FILENAME = "app_update_status.json"
-GITHUB_API_ROOT = "https://api.github.com"
-RELEASE_TAG_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}")
 
 
 class UpdateError(RuntimeError):
@@ -115,6 +121,15 @@ def backup_database(app_dir: Path) -> Path | None:
             source.close()
 
     quick_check_sqlite(backup_path)
+    restrict_private_file(backup_path)
+    try:
+        retention_days = max(
+            1,
+            int(env_values.get("BACKUP_RETENTION_DAYS") or DEFAULT_BACKUP_RETENTION_DAYS),
+        )
+    except (TypeError, ValueError):
+        retention_days = DEFAULT_BACKUP_RETENTION_DAYS
+    prune_backups_by_age(upload_folder, f"{DB_BACKUP_PREFIX}*.db", retention_days)
     print(f"Database backup created: {backup_path}")
     return backup_path
 
@@ -173,8 +188,8 @@ def github_repository_from_remote(remote_url: str) -> str | None:
 
 
 def get_release_api_url(app_dir: Path, configured_url: str | None = None) -> str:
-    if configured_url:
-        return configured_url
+    if configured_url and configured_url.strip() != TRUSTED_RELEASE_API_URL:
+        raise UpdateError("The configured release API URL is not the trusted Manticore repository.")
     if not (app_dir / ".git").exists() or not shutil.which("git"):
         raise UpdateError("Git repository was not found, so the release source cannot be determined.")
     remote = run_command_capture(git_command(app_dir, "remote", "get-url", "origin"), app_dir)
@@ -183,7 +198,9 @@ def get_release_api_url(app_dir: Path, configured_url: str | None = None) -> str
     repository = github_repository_from_remote(remote.stdout)
     if not repository:
         raise UpdateError("The origin remote is not a supported GitHub repository.")
-    return f"{GITHUB_API_ROOT}/repos/{repository}/releases/latest"
+    if repository.casefold() != TRUSTED_GITHUB_REPOSITORY.casefold():
+        raise UpdateError("The origin remote is not the trusted Manticore repository.")
+    return TRUSTED_RELEASE_API_URL
 
 
 def fetch_latest_release(
@@ -191,7 +208,7 @@ def fetch_latest_release(
     api_url: str | None = None,
     timeout: float = 5.0,
 ) -> dict[str, str]:
-    release_url = get_release_api_url(app_dir, api_url or os.environ.get("APP_UPDATE_RELEASE_API_URL"))
+    release_url = get_release_api_url(app_dir, api_url)
     request = urllib.request.Request(
         release_url,
         headers={
@@ -376,7 +393,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--service-name", default="manticore")
     parser.add_argument("--reload-nginx", action="store_true")
     parser.add_argument("--latest-release", action="store_true")
-    parser.add_argument("--release-api-url")
     parser.add_argument("--status-file")
     return parser.parse_args()
 
@@ -404,7 +420,7 @@ def main() -> int:
             )
 
         if args.latest_release:
-            release = fetch_latest_release(app_dir, api_url=args.release_api_url)
+            release = fetch_latest_release(app_dir)
             print(f"Latest release: {release['tag_name']}")
 
         if not args.skip_backup:

@@ -6,9 +6,10 @@ import json
 import secrets
 import tempfile
 import shutil
-import shlex
 import subprocess
 import difflib
+import ipaddress
+import logging
 import pandas as pd
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash, has_request_context, jsonify
 from urllib.parse import urlparse
@@ -26,13 +27,23 @@ from time import time
 import update_app
 import desktop_releases
 from app_metadata import APP_METADATA
+from config import MOODLE_PASSWORD_PLACEHOLDER, load_runtime_config, setting_bool
 from email_validation import ensure_dns_cache_table, validate_email
+from services.imports import (
+    clean_upload_text,
+    find_dataframe_column_casefold,
+    find_row_value_casefold,
+    read_csv_dataframe,
+    read_tabular_upload,
+)
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
     DatabaseIntegrityError,
     DatabaseSchemaTooNewError,
     migrate_database,
+    prune_backups_by_age,
     restore_sqlite_backup,
+    restrict_private_file,
     sqlite_backup,
 )
 try:
@@ -44,68 +55,33 @@ except ImportError:
 # Load environment variables from .env file
 load_dotenv()
 
-TRUTHY_ENV_VALUES = {'1', 'true', 'yes', 'on'}
-FALSY_SETTING_VALUES = {'0', 'false', 'no', 'off'}
-
-def env_bool(name, default=False):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.lower() in TRUTHY_ENV_VALUES
-
-def setting_bool(value, default=False):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    if value is None:
-        return default
-    normalized = str(value).strip().casefold()
-    if normalized in TRUTHY_ENV_VALUES:
-        return True
-    if normalized in FALSY_SETTING_VALUES:
-        return False
-    return default
-
-def env_int(name, default, minimum=None):
-    try:
-        value = int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        value = default
-    if minimum is not None:
-        value = max(minimum, value)
-    return value
-
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
-MAX_UPLOAD_SIZE_MB = env_int('MAX_UPLOAD_SIZE_MB', 16, minimum=1)
-MAX_UPLOAD_BYTES = env_int('MAX_CONTENT_LENGTH', MAX_UPLOAD_SIZE_MB * 1024 * 1024, minimum=1024)
+RUNTIME_CONFIG = load_runtime_config(desktop_releases.DEFAULT_GITHUB_REPOSITORY)
+app.secret_key = RUNTIME_CONFIG.secret_key
+MAX_UPLOAD_BYTES = RUNTIME_CONFIG.max_content_length
 app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE=os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax'),
-    SESSION_COOKIE_SECURE=env_bool('SESSION_COOKIE_SECURE', False),
+    SESSION_COOKIE_SAMESITE=RUNTIME_CONFIG.session_cookie_samesite,
+    SESSION_COOKIE_SECURE=RUNTIME_CONFIG.session_cookie_secure,
 )
-app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
+app.config['UPLOAD_FOLDER'] = RUNTIME_CONFIG.upload_folder
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-DB_FILENAME = os.environ.get('DB_FILENAME', 'baze.db')
+DB_FILENAME = RUNTIME_CONFIG.db_filename
 DB_PATH = os.path.join(app.config['UPLOAD_FOLDER'], DB_FILENAME)
 APP_DIR = Path(__file__).resolve().parent
 try:
     APP_VERSION = (APP_DIR / 'VERSION').read_text(encoding='utf-8-sig').strip()
 except OSError:
     APP_VERSION = os.environ.get('APP_VERSION', 'unknown')
-APP_UPDATE_ENABLED = env_bool('APP_UPDATE_ENABLED', os.name != 'nt')
-APP_UPDATE_STALE_SECONDS = env_int('APP_UPDATE_STALE_SECONDS', 3600, minimum=60)
-DESKTOP_GITHUB_REPOSITORY = os.environ.get(
-    'DESKTOP_GITHUB_REPOSITORY',
-    desktop_releases.DEFAULT_GITHUB_REPOSITORY,
-).strip()
-ENABLE_HSTS = env_bool('ENABLE_HSTS', False)
-HSTS_MAX_AGE = env_int('HSTS_MAX_AGE', 31536000, minimum=0)
-HSTS_INCLUDE_SUBDOMAINS = env_bool('HSTS_INCLUDE_SUBDOMAINS', False)
-HSTS_PRELOAD = env_bool('HSTS_PRELOAD', False)
+APP_UPDATE_ENABLED = RUNTIME_CONFIG.app_update_enabled
+APP_UPDATE_STALE_SECONDS = RUNTIME_CONFIG.app_update_stale_seconds
+DESKTOP_GITHUB_REPOSITORY = RUNTIME_CONFIG.desktop_github_repository
+ENABLE_HSTS = RUNTIME_CONFIG.enable_hsts
+HSTS_MAX_AGE = RUNTIME_CONFIG.hsts_max_age
+HSTS_INCLUDE_SUBDOMAINS = RUNTIME_CONFIG.hsts_include_subdomains
+HSTS_PRELOAD = RUNTIME_CONFIG.hsts_preload
 ABITURIENT_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 STUDENTS_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 ENROLLMENT_ORDER_UPLOAD_EXTENSIONS = {'xlsx', 'xls', 'csv', 'docx', 'pdf'}
@@ -125,8 +101,9 @@ PENDING_EMAIL_SOURCE_IMPORT_PREFIX = 'pending_email_source_'
 STUDENT_TRANSFER_ORDER_DIR = 'student_transfer_orders'
 ENROLLMENT_FIO_SUGGESTION_THRESHOLD = 0.86
 DB_BACKUP_PREFIX = 'baze_backup_'
-FALLBACK_SESSION_ID = os.environ.get('MANTICORE_FALLBACK_SESSION_ID', '').strip()
-FALLBACK_PRIMARY_ID = os.environ.get('MANTICORE_PRIMARY_SOURCE_ID', '').strip()
+BACKUP_RETENTION_DAYS = RUNTIME_CONFIG.backup_retention_days
+FALLBACK_SESSION_ID = RUNTIME_CONFIG.fallback_session_id
+FALLBACK_PRIMARY_ID = RUNTIME_CONFIG.fallback_primary_id
 ABITURIENT_REQUIRED_COLUMNS = {'ФИО', 'Договор'}
 ABITURIENT_RESULT_COLUMNS = [
     'campaign_year', 'ФИО', 'Договор', 'login', 'Фамилия',
@@ -274,26 +251,6 @@ def send_temp_download(file_path, download_name, mimetype):
     output.seek(0)
     cleanup_temp_files(file_path)
     return send_file(output, as_attachment=True, download_name=download_name, mimetype=mimetype)
-
-def read_csv_dataframe(file_path):
-    last_error = None
-    for encoding in ('utf-8-sig', 'cp1251', 'utf-8'):
-        try:
-            return pd.read_csv(file_path, sep=None, engine='python', encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-            continue
-    if last_error:
-        raise ValueError('Не удалось прочитать CSV в кодировке UTF-8 или Windows-1251')
-    raise ValueError('Не удалось прочитать CSV-файл')
-
-def read_tabular_upload(file_path):
-    extension = os.path.splitext(file_path)[1].lower()
-    if extension == '.csv':
-        return read_csv_dataframe(file_path)
-    if extension == '.xls':
-        return pd.read_excel(file_path)
-    return pd.read_excel(file_path, engine="openpyxl")
 
 _campaign_year_re = re.compile(r'^20\d{2}$')
 _dogovor_year_re = re.compile(r'20\d{2}')
@@ -516,7 +473,7 @@ base_codes = {
     "2НМ": "inm", "2М": "im",
     "НМ": "nm", "М": "im",
     "11И": "11i", "9И": "9i",
-    "11": "11", "9": "9", 
+    "11": "11", "9": "9",
 }
 
 LOGIN_GROUP_SPECIALTY_CODES = {
@@ -1601,6 +1558,13 @@ LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', '600'))
 CSRF_SESSION_KEY = 'csrf_token'
 CSRF_FORM_FIELD = 'csrf_token'
 
+
+def current_endpoint_name():
+    """Return the stable endpoint name without a Blueprint namespace."""
+    endpoint = request.endpoint or ''
+    return endpoint.rsplit('.', 1)[-1]
+
+
 @app.context_processor
 def inject_template_globals():
     def url_for_with_query(endpoint, **updates):
@@ -1624,6 +1588,7 @@ def inject_template_globals():
         'format_display_date': format_display_date,
         'course_groups_enabled': are_course_groups_enabled(),
         'is_withdrawn_login': is_withdrawn_login,
+        'current_endpoint': current_endpoint_name(),
     }
 
 def request_uses_https():
@@ -1701,12 +1666,24 @@ def protect_post_requests_with_csrf():
     return redirect(get_safe_referrer(default_endpoint='index'), code=303)
 
 SETUP_ALLOWED_ENDPOINTS = {
-    'static', 'login', 'logout', 'register', 'login_generation_setup', 'documentation', 'desktop_settings', 'management'
+    'static', 'login', 'logout', 'register', 'change_password', 'login_generation_setup',
+    'documentation', 'desktop_settings', 'management'
 }
+
+PASSWORD_CHANGE_ALLOWED_ENDPOINTS = {'static', 'logout', 'change_password'}
+
+
+@app.before_request
+def require_initial_password_change():
+    if not session.get('user') or not session.get('must_change_password'):
+        return None
+    if current_endpoint_name() in PASSWORD_CHANGE_ALLOWED_ENDPOINTS:
+        return None
+    return redirect(url_for('change_password'), code=303)
 
 @app.before_request
 def require_login_generation_setup():
-    if request.endpoint in SETUP_ALLOWED_ENDPOINTS or not session.get('user'):
+    if current_endpoint_name() in SETUP_ALLOWED_ENDPOINTS or not session.get('user'):
         return None
     if is_login_generation_setup_completed():
         return None
@@ -1734,7 +1711,14 @@ def create_database_backup(reason='manual'):
     safe_reason = sanitize_backup_reason(reason)
     backup_name = f'{DB_BACKUP_PREFIX}{safe_reason}_{timestamp}.db'
     backup_path = os.path.join(app.config['UPLOAD_FOLDER'], backup_name)
-    return str(sqlite_backup(DB_PATH, backup_path))
+    created_path = sqlite_backup(DB_PATH, backup_path)
+    restrict_private_file(created_path)
+    prune_backups_by_age(
+        app.config['UPLOAD_FOLDER'],
+        f'{DB_BACKUP_PREFIX}*.db',
+        BACKUP_RETENTION_DAYS,
+    )
+    return str(created_path)
 
 def list_database_backups():
     upload_folder = app.config['UPLOAD_FOLDER']
@@ -2679,7 +2663,7 @@ PERSON_FIELD_LABELS = {
     'dogovor': 'Номер договора',
     'login': 'Логин Moodle',
     'username': 'Логин Moodle',
-    'password': 'Пароль Moodle',
+    'password': 'Служебное поле Moodle',
     'campaign_year': 'Приемная кампания',
     'source_campaign_year': 'Кампания поступления',
     'current_campaign_year': 'Текущая приемная кампания',
@@ -2705,7 +2689,7 @@ PERSON_FIELD_HELP = {
     'dogovor': 'Номер договора, по нему удобнее всего отличать тезок.',
     'login': 'Учетная запись, с которой человек входит в Moodle.',
     'username': 'Учетная запись, с которой человек входит в Moodle.',
-    'password': 'Пароль к учетной записи Moodle.',
+    'password': 'Фиксированная заглушка cron для импорта; реальный пароль не хранится.',
     'campaign_year': 'Год приемной кампании, к которой относится запись.',
     'source_campaign_year': 'Год приемной кампании, из которой пришел студент.',
     'current_campaign_year': 'Кампания, к которой студент относится сейчас.',
@@ -2773,6 +2757,8 @@ def format_person_field_value(key, value):
         return 'Договор оплачен' if is_paid_person_value(value) else 'Договор не оплачен'
     if key == 'password' and value == '******':
         return 'Скрыт для безопасности'
+    if key == 'password' and value == MOODLE_PASSWORD_PLACEHOLDER:
+        return 'Служебная заглушка cron'
     if key == 'status':
         return 'Отчислен' if value == 'expelled' else 'Действующий'
     if key == 'email' and is_blank_person_value(value):
@@ -3009,21 +2995,6 @@ def sync_enrollment_candidates_for_abiturients(conn, abiturient_ids, campaign_ye
             summary['removed'] += result.get('removed', 0)
     refresh_enrollment_candidate_statuses(conn, campaign_year)
     return summary
-
-def find_row_value_casefold(row, aliases):
-    normalized = {str(key).strip().casefold(): key for key in row.index}
-    for alias in aliases:
-        key = normalized.get(alias.casefold())
-        if key is not None:
-            return row.get(key)
-    return None
-
-def find_dataframe_column_casefold(columns, aliases):
-    normalized_aliases = {str(alias).strip().casefold() for alias in aliases}
-    for column in columns:
-        if str(column).strip().casefold() in normalized_aliases:
-            return column
-    return None
 
 def normalize_email_source_fio_key(value):
     return normalize_fio_key(value).replace('ё', 'е')
@@ -3653,6 +3624,66 @@ def migrate_user_passwords(conn):
                 (hash_user_password(password), user_id)
             )
 
+
+def ensure_user_must_change_password_column(conn):
+    if 'must_change_password' not in get_table_columns(conn, 'users'):
+        conn.execute(
+            'ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0'
+        )
+        # Existing deployments cannot prove that the bootstrap credential was
+        # rotated, so the original local admin gets one mandatory rotation.
+        conn.execute(
+            "UPDATE users SET must_change_password=1 WHERE username='admin'"
+        )
+
+
+def normalize_student_password_placeholders(conn):
+    """Permanently discard imported student secrets; Moodle receives a placeholder."""
+    for table_name in ('students', 'students_duplicates'):
+        if table_exists(conn, table_name) and 'password' in get_table_columns(conn, table_name):
+            conn.execute(
+                f'UPDATE {table_name} SET password=? WHERE password IS NULL OR password<>?',
+                (MOODLE_PASSWORD_PLACEHOLDER, MOODLE_PASSWORD_PLACEHOLDER),
+            )
+
+
+def create_student_password_guards(conn):
+    """Reject real student secrets before SQLite can write them to a table or WAL."""
+    placeholder = MOODLE_PASSWORD_PLACEHOLDER.replace("'", "''")
+    for table_name in ('students', 'students_duplicates'):
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_insert
+            BEFORE INSERT ON {table_name}
+            WHEN NEW.password IS NOT NULL AND NEW.password <> '{placeholder}'
+            BEGIN
+                SELECT RAISE(ABORT, 'student password must use the Moodle placeholder');
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_update
+            BEFORE UPDATE OF password ON {table_name}
+            WHEN NEW.password IS NOT NULL AND NEW.password <> '{placeholder}'
+            BEGIN
+                SELECT RAISE(ABORT, 'student password must use the Moodle placeholder');
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_insert_null
+            AFTER INSERT ON {table_name}
+            WHEN NEW.password IS NULL
+            BEGIN
+                UPDATE {table_name} SET password='{placeholder}' WHERE rowid=NEW.rowid;
+            END
+        ''')
+        conn.execute(f'''
+            CREATE TRIGGER IF NOT EXISTS trg_{table_name}_password_update_null
+            AFTER UPDATE OF password ON {table_name}
+            WHEN NEW.password IS NULL
+            BEGIN
+                UPDATE {table_name} SET password='{placeholder}' WHERE rowid=NEW.rowid;
+            END
+        ''')
+
 def init_db():
     def migration(conn):
         create_abiturients_table(conn)
@@ -3691,7 +3722,8 @@ def init_db():
                 fio TEXT,
                 position TEXT,
                 role TEXT,
-                approved INTEGER DEFAULT 0
+                approved INTEGER DEFAULT 0,
+                must_change_password INTEGER NOT NULL DEFAULT 0
             )
         ''')
         conn.execute('''
@@ -3702,12 +3734,13 @@ def init_db():
                 attempted_at REAL NOT NULL
             )
         ''')
+        ensure_user_must_change_password_column(conn)
         migrate_user_passwords(conn)
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE,
-                password TEXT,
+                password TEXT NOT NULL DEFAULT '{MOODLE_PASSWORD_PLACEHOLDER}',
                 email TEXT,
                 firstname TEXT,
                 lastname TEXT,
@@ -3719,11 +3752,11 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'active'
             )
         ''')
-        conn.execute('''
+        conn.execute(f'''
             CREATE TABLE IF NOT EXISTS students_duplicates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT,
-                password TEXT,
+                password TEXT NOT NULL DEFAULT '{MOODLE_PASSWORD_PLACEHOLDER}',
                 email TEXT,
                 firstname TEXT,
                 lastname TEXT,
@@ -3731,6 +3764,8 @@ def init_db():
                 cohort2 TEXT
             )
         ''')
+        normalize_student_password_placeholders(conn)
+        create_student_password_guards(conn)
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3786,8 +3821,10 @@ with sqlite3.connect(DB_PATH) as conn:
                 "and set a strong local admin password before first launch."
             )
         conn.execute(
-            "INSERT INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
-            ("admin", hash_user_password(_default_admin_password), "admin", 1)
+            """INSERT INTO users
+                   (username, password, role, approved, must_change_password)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("admin", hash_user_password(_default_admin_password), "admin", 1, 1)
         )
 
 def get_campaign_years():
@@ -4005,11 +4042,6 @@ def save_login_conflict(fio, dogovor, login, fam, imotch, campaign_year=None):
             (fio, dogovor, login, campaign_year, fam, imotch)
         )
         conn.commit()
-
-def clean_upload_text(value):
-    if pd.isna(value):
-        return ''
-    return str(value).strip()
 
 def normalize_fio_key(value):
     return ' '.join(str(value or '').split()).casefold()
@@ -4609,6 +4641,9 @@ def build_students_import_plan(file_path):
     df['_row_number'] = range(2, len(df) + 2)
     for column in STUDENT_UPLOAD_REQUIRED_COLUMNS:
         df[column] = df[column].apply(clean_upload_text)
+    # The Moodle import column is retained for file compatibility, but uploaded
+    # values are never trusted or persisted as student passwords.
+    df['password'] = MOODLE_PASSWORD_PLACEHOLDER
     df['cohort1'] = df['cohort1'].apply(normalize_group_name)
     if 'cohort2' not in df.columns:
         df['cohort2'] = ''
@@ -4787,7 +4822,7 @@ def apply_students_import(file_path):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''',
                     (
-                        row["username"], row["password"], row["email"],
+                        row["username"], MOODLE_PASSWORD_PLACEHOLDER, row["email"],
                         row["firstname"], row["lastname"], row["cohort1"], row["cohort2"],
                         row["source_campaign_year"], row["source_campaign_year"],
                         row["source_dogovor"], row["source_fio"]
@@ -4798,7 +4833,7 @@ def apply_students_import(file_path):
                     '''INSERT INTO students_duplicates (username, password, email, firstname, lastname, cohort1, cohort2)
                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
                     (
-                        row["username"], row["password"], row["email"],
+                        row["username"], MOODLE_PASSWORD_PLACEHOLDER, row["email"],
                         row["firstname"], row["lastname"], row["cohort1"], row["cohort2"]
                     )
                 )
@@ -6226,7 +6261,7 @@ def enrollment_order_roster_export_rows(roster):
     return [
         {
             'username': row['login'],
-            'password': 'cron',
+            'password': MOODLE_PASSWORD_PLACEHOLDER,
             'email': row['email'],
             'firstname': row['firstname'],
             'lastname': row['lastname'],
@@ -7487,7 +7522,6 @@ def vaanedain_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-@app.route('/set_campaign', methods=['POST'])
 @login_required
 def set_campaign():
     campaign_year = normalize_campaign_year(request.form.get('campaign_year'), DEFAULT_CAMPAIGN_YEAR)
@@ -7498,7 +7532,6 @@ def set_campaign():
         next_url = url_for('index')
     return redirect(next_url)
 
-@app.route('/approve_users', methods=['GET', 'POST'])
 @admin_required
 def approve_users():
     with sqlite3.connect(DB_PATH) as conn:
@@ -7722,6 +7755,46 @@ def ensure_student_list_enrollment_movements(conn):
             course_groups_enabled=course_groups_enabled,
         )
 
+def student_movement_event_date(order):
+    movement_type = order.get('movement_type') or 'transfer'
+    if movement_type == 'enrollment' and str(order.get('order_date') or '').strip():
+        return order.get('order_date')
+    return order.get('created_at')
+
+def student_movement_event_sort_key(order):
+    text = str(student_movement_event_date(order) or '').strip()
+    parsed = None
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text.replace('Z', '+00:00'))
+        except ValueError:
+            for date_format in ('%d.%m.%Y %H:%M:%S', '%d.%m.%Y'):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    pass
+    if parsed is not None:
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        date_key = (
+            1,
+            parsed.year,
+            parsed.month,
+            parsed.day,
+            parsed.hour,
+            parsed.minute,
+            parsed.second,
+            parsed.microsecond,
+        )
+    else:
+        date_key = (0, 0, 0, 0, 0, 0, 0, 0)
+    try:
+        movement_id = int(order.get('id') or 0)
+    except (TypeError, ValueError):
+        movement_id = 0
+    return (*date_key, movement_id)
+
 def get_student_transfer_orders(username):
     with sqlite3.connect(DB_PATH) as conn:
         ensure_student_enrollment_movement(conn, username)
@@ -7734,7 +7807,6 @@ def get_student_transfer_orders(username):
                    comment, created_by, created_at
             FROM student_group_transfers
             WHERE username=?
-            ORDER BY created_at DESC, id DESC
             ''',
             (username,)
         )
@@ -7821,6 +7893,7 @@ def get_student_transfer_orders(username):
             elif order['has_enrollment_order_file']:
                 order['download_url'] = url_for('download_enrollment_order_upload', upload_id=upload_key)
                 order['download_label'] = 'Скачать приказ'
+    orders.sort(key=student_movement_event_sort_key, reverse=True)
     return orders
 
 def record_student_enrollment_movement(conn, username, target_group, target_cohort2, order_match=None, created_by=''):
@@ -7912,7 +7985,6 @@ def build_abiturients_upload_response(file_storage, campaign_year):
         cleanup_temp_files(upload_path, result_path)
     return None
 
-@app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
     campaign_year = get_active_campaign_year()
@@ -7926,12 +7998,10 @@ def index():
     dashboard = get_dashboard_data(campaign_year)
     return render_template('index.html', dashboard=dashboard)
 
-@app.route('/documentation', methods=['GET'], provide_automatic_options=False)
 def documentation():
     """Render the public, read-only in-app user guide."""
     return render_template('documentation.html')
 
-@app.route('/desktop_settings')
 @login_required
 def desktop_settings():
     # No fragment: browsers preserve existing bookmarks such as #about.
@@ -7956,7 +8026,6 @@ def get_local_fallback_changes(limit=1000):
     return [dict(row) for row in rows]
 
 
-@app.route('/desktop/fallback-changes')
 @admin_required
 def desktop_fallback_changes():
     if not FALLBACK_SESSION_ID:
@@ -7965,7 +8034,6 @@ def desktop_fallback_changes():
     return render_template('fallback_changes.html', changes=get_local_fallback_changes())
 
 
-@app.route('/desktop/fallback-changes/export')
 @admin_required
 def export_desktop_fallback_changes():
     if not FALLBACK_SESSION_ID:
@@ -7988,12 +8056,10 @@ def export_desktop_fallback_changes():
     )
 
 
-@app.route('/management')
 @login_required
 def management():
     return render_template('management.html')
 
-@app.route('/search')
 @login_required
 def search():
     campaign_year = get_active_campaign_year()
@@ -8001,7 +8067,6 @@ def search():
     results = global_search_records(query, campaign_year) if query else []
     return render_template('search.html', query=query, results=results, campaign_year=campaign_year)
 
-@app.route('/search_overlay')
 @login_required
 def search_overlay():
     campaign_year = get_active_campaign_year()
@@ -8013,14 +8078,12 @@ def search_overlay():
         'results': results,
     })
 
-@app.route('/data_checks')
 @login_required
 def data_checks():
     campaign_year = get_active_campaign_year()
     report = get_data_quality_report(campaign_year)
     return render_template('data_checks.html', report=report)
 
-@app.route('/healthz')
 def healthz():
     try:
         with sqlite3.connect(DB_PATH, timeout=1) as conn:
@@ -8029,7 +8092,6 @@ def healthz():
     except sqlite3.Error:
         return jsonify({'status': 'unavailable'}), 503
 
-@app.route('/person/<kind>/<path:record_id>')
 @login_required
 def person_card(kind, record_id):
     record = get_person_record(kind, record_id)
@@ -8048,8 +8110,6 @@ def person_card(kind, record_id):
         transfer_orders=transfer_orders,
     )
 
-@app.route('/file_work', defaults={'section': None}, methods=['GET', 'POST'])
-@app.route('/file_work/<section>', methods=['GET', 'POST'])
 @login_required
 def file_work(section=None):
     if section is not None and normalize_file_work_section(section) is None:
@@ -8143,7 +8203,6 @@ def file_work(section=None):
         enrollment_order_uploads=get_enrollment_order_uploads(campaign_year)
     )
 
-@app.route('/file_work/abiturients/import-result')
 @login_required
 def download_abiturients_import_result():
     token = session.pop(ABITURIENTS_IMPORT_RESULT_SESSION_KEY, None)
@@ -8154,7 +8213,6 @@ def download_abiturients_import_result():
         return file_work_redirect('abiturients')
     return send_temp_download(result_path, 'abiturients_with_logins.xlsx', EXCEL_MIMETYPE)
 
-@app.route('/enrollment_order_upload', methods=['POST'])
 @login_required
 def enrollment_order_upload():
     target_section = request_file_work_section('orders')
@@ -8222,7 +8280,6 @@ def enrollment_order_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/enrollment_order_preview/fix_candidate_fio', methods=['POST'])
 @login_required
 def fix_enrollment_candidate_fio_from_order():
     target_section = request_file_work_section('orders')
@@ -8258,7 +8315,6 @@ def fix_enrollment_candidate_fio_from_order():
             pass
     return file_work_redirect(target_section)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>')
 @login_required
 def enrollment_order_upload_detail(upload_id):
     upload = get_enrollment_order_upload(upload_id)
@@ -8273,7 +8329,6 @@ def enrollment_order_upload_detail(upload_id):
         campaign_year=get_active_campaign_year()
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster')
 @login_required
 def enrollment_order_student_roster(upload_id):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8288,9 +8343,9 @@ def enrollment_order_student_roster(upload_id):
         summary=roster['summary'],
         issue_types=roster['issue_types'],
         max_group_students=MAX_GROUP_STUDENTS,
+        moodle_password_placeholder=MOODLE_PASSWORD_PLACEHOLDER,
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>')
 @login_required
 def enrollment_order_student_roster_issue(upload_id, issue_code):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8313,7 +8368,6 @@ def enrollment_order_student_roster_issue(upload_id, issue_code):
         'download_url': url_for('download_enrollment_order_student_roster_issue', upload_id=upload_id, issue_code=issue_code),
     })
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/issues/<issue_code>/download')
 @login_required
 def download_enrollment_order_student_roster_issue(upload_id, issue_code):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8327,7 +8381,6 @@ def download_enrollment_order_student_roster_issue(upload_id, issue_code):
     output = enrollment_order_roster_xlsx(rows, 'Проблемная выборка')
     return send_file(output, as_attachment=True, download_name=f'{order_name}_{issue["filename"]}.xlsx', mimetype=EXCEL_MIMETYPE)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/fio_review', methods=['POST'])
 @login_required
 def review_enrollment_order_student_roster_fio(upload_id):
     target_url = url_for('enrollment_order_student_roster', upload_id=upload_id)
@@ -8407,7 +8460,6 @@ def review_enrollment_order_student_roster_fio(upload_id):
         flash(f'Ошибка сверки ФИО: {exc}', 'error')
     return redirect(target_url, code=303)
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/student_roster/download')
 @login_required
 def download_enrollment_order_student_roster(upload_id):
     roster = build_enrollment_order_student_roster(upload_id)
@@ -8429,7 +8481,6 @@ def download_enrollment_order_student_roster(upload_id):
         mimetype=EXCEL_MIMETYPE,
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/download')
 @login_required
 def download_enrollment_order_upload(upload_id):
     upload = get_enrollment_order_upload(upload_id)
@@ -8446,7 +8497,6 @@ def download_enrollment_order_upload(upload_id):
         download_name=upload.get('original_filename') or os.path.basename(stored_path)
     )
 
-@app.route('/enrollment_order_uploads/<int:upload_id>/delete', methods=['POST'])
 @login_required
 def delete_enrollment_order_upload_route(upload_id):
     if session.get('role') not in {'admin', 'assistant', 'manager', 'operator'}:
@@ -8464,7 +8514,6 @@ def delete_enrollment_order_upload_route(upload_id):
         flash(f'Ошибка удаления приказа: {exc}', 'error')
     return file_work_redirect('orders')
 
-@app.route('/enrollment_order_template/download')
 @login_required
 def download_enrollment_order_template():
     return send_file(
@@ -8474,7 +8523,6 @@ def download_enrollment_order_template():
         mimetype=EXCEL_MIMETYPE
     )
 
-@app.route('/abiturients_updates_upload', methods=['POST'])
 @login_required
 def abiturients_updates_upload():
     target_section = request_file_work_section('updates')
@@ -8515,7 +8563,6 @@ def abiturients_updates_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/abiturients_email_source_upload', methods=['POST'])
 @login_required
 def abiturients_email_source_upload():
     target_section = request_file_work_section('updates')
@@ -8590,7 +8637,6 @@ def abiturients_email_source_upload():
         cleanup_temp_files(filepath)
     return file_work_redirect(target_section)
 
-@app.route('/abiturients_updates_template/download')
 @login_required
 def download_abiturients_updates_template():
     return send_file(
@@ -8600,7 +8646,6 @@ def download_abiturients_updates_template():
         mimetype=EXCEL_MIMETYPE
     )
 
-@app.route('/abiturients')
 @login_required
 def abiturients():
     campaign_year = get_active_campaign_year()
@@ -9006,7 +9051,6 @@ def reject_duplicate(dup_id, campaign_year=None):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('DELETE FROM pending_duplicates WHERE id=? AND campaign_year=?', (dup_id, campaign_year))
 
-@app.route('/duplicates', methods=['GET', 'POST'])
 @login_required
 def duplicates():
     return render_template('duplicates.html')
@@ -9047,7 +9091,6 @@ def unique_numeric_form_values(field_name):
         values.append(value)
     return values
 
-@app.route('/abiturients/bulk', methods=['POST'])
 @login_required
 @role_required('admin', 'assistant', 'operator')
 def bulk_abiturients():
@@ -9109,7 +9152,6 @@ def bulk_abiturients():
         )
     return redirect(url_for('abiturients'), code=303)
 
-@app.route('/duplicates_abiturients', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def duplicates_abiturients():
@@ -9130,7 +9172,6 @@ def duplicates_abiturients():
     duplicates = get_pending_duplicates(campaign_year)
     return render_template('duplicates_abiturients.html', duplicates=duplicates, campaign_year=campaign_year)
 
-@app.route('/delete_abiturient', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_abiturient():
@@ -9165,7 +9206,6 @@ def delete_abiturient():
             )
     return redirect(url_for('abiturients'))
 
-@app.route('/abiturients/withdraw-documents', methods=['POST'])
 @login_required
 @role_required('admin')
 def withdraw_abiturient_documents():
@@ -9224,7 +9264,6 @@ def withdraw_abiturient_documents():
     )
     return redirect(list_url, code=303)
 
-@app.route('/toggle_abiturient_paid', methods=['POST'])
 @login_required
 @role_required('admin')
 def toggle_abiturient_paid():
@@ -9253,7 +9292,6 @@ def toggle_abiturient_paid():
             log_action('abiturient_paid_changed', 'abiturient', abiturient_id, f"paid={paid}; campaign_year={campaign_year}", conn)
     return redirect(url_for('abiturients', **{k: v for k, v in query_params.items() if v}))
 
-@app.route('/abiturients/download')
 @login_required
 def download_abiturients():
     campaign_year = get_active_campaign_year()
@@ -9279,12 +9317,10 @@ def download_abiturients():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="abiturients_logins.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@app.route('/download_template')
 def download_template():
     template_path = os.path.join(app.static_folder, 'template.xlsx')
     return send_file(template_path, as_attachment=True, download_name='template.xlsx')
 
-@app.route('/login_conflicts')
 @login_required
 def login_conflicts():
     campaign_year = get_active_campaign_year()
@@ -9301,7 +9337,6 @@ def login_conflicts():
         conflicts = cur.fetchall()
     return render_template('login_conflicts.html', conflicts=conflicts, campaign_year=campaign_year)
 
-@app.route('/edit_conflict/<int:conflict_id>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_conflict(conflict_id):
@@ -9313,14 +9348,14 @@ def edit_conflict(conflict_id):
         if not new_login:
             flash('Логин не может быть пустым')
             return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-        
+
         backup_path = create_database_backup('before_resolve_login_conflict')
         with sqlite3.connect(DB_PATH) as conn:
             # Проверяем уникальность логина
             if is_login_exists(new_login, campaign_year):
                 flash(f'Логин {new_login} уже используется!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-            
+
             # Получаем данные конфликта
             cur = conn.execute(
                 'SELECT fio, dogovor, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
@@ -9330,9 +9365,9 @@ def edit_conflict(conflict_id):
             if not conflict:
                 flash('Запись не найдена')
                 return redirect(url_for('login_conflicts'))
-            
+
             fio, dogovor, fam, imotch, row_campaign_year = conflict
-            
+
             # Сохраняем в основную таблицу абитуриентов
             try:
                 conn.execute(
@@ -9357,21 +9392,20 @@ def edit_conflict(conflict_id):
             except sqlite3.IntegrityError:
                 flash(f'Логин {new_login} уже существует!')
                 return redirect(url_for('edit_conflict', conflict_id=conflict_id))
-    
+
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
             'SELECT id, fio, dogovor, login, fam, imotch, campaign_year FROM login_conflicts WHERE id=? AND campaign_year=?',
             (conflict_id, campaign_year)
         )
         conflict = cur.fetchone()
-    
+
     if not conflict:
         flash('Запись не найдена')
         return redirect(url_for('login_conflicts'))
-    
+
     return render_template('edit_conflict.html', conflict=conflict)
 
-@app.route('/delete_conflict/<int:conflict_id>', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_conflict(conflict_id):
@@ -9469,7 +9503,6 @@ def get_manual_create_collisions(fio, dogovor, login, campaign_year, rules=None)
                 add_record('Студенты', student_fio, source_dogovor, username, source_year)
     return result
 
-@app.route('/manual_create', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def manual_create():
@@ -9619,10 +9652,10 @@ def manual_create():
         campaign_year=campaign_year,
     )
 
-@app.route('/login', methods=['GET', 'POST'])
 def login():
     session.pop('user', None)
     session.pop('role', None)
+    session.pop('must_change_password', None)
     username = ''
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
@@ -9637,7 +9670,8 @@ def login():
             return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
-                'SELECT id, password, role, approved FROM users WHERE username=?',
+                '''SELECT id, password, role, approved, must_change_password
+                   FROM users WHERE username=?''',
                 (username,)
             )
             user = cur.fetchone()
@@ -9649,7 +9683,8 @@ def login():
                 session.clear()
                 session['user'] = username
                 session['role'] = user[2]
-                return redirect(url_for('index'))
+                session['must_change_password'] = bool(user[4])
+                return redirect(url_for('change_password' if user[4] else 'index'))
             elif password_ok and user[3] == 0:
                 flash('Ожидайте одобрения администратора.', 'error')
             else:
@@ -9657,13 +9692,49 @@ def login():
                 flash('Неверный логин или пароль.', 'error')
     return render_template('login.html', login_csrf_token=get_login_csrf_token(), username=username)
 
-@app.route('/logout')
+
+@login_required
+def change_password():
+    if request.method == 'POST':
+        current_password = request.form.get('current_password') or ''
+        new_password = request.form.get('new_password') or ''
+        confirmation = request.form.get('confirm_password') or ''
+        with sqlite3.connect(DB_PATH) as conn:
+            user = conn.execute(
+                'SELECT id, password FROM users WHERE username=?',
+                (session.get('user'),),
+            ).fetchone()
+            if not user or not verify_user_password(user[1], current_password):
+                flash('Текущий пароль указан неверно.', 'error')
+            elif len(new_password) < 12:
+                flash('Новый пароль должен содержать не менее 12 символов.', 'error')
+            elif new_password != confirmation:
+                flash('Подтверждение нового пароля не совпадает.', 'error')
+            elif verify_user_password(user[1], new_password):
+                flash('Новый пароль должен отличаться от текущего.', 'error')
+            else:
+                conn.execute(
+                    'UPDATE users SET password=?, must_change_password=0 WHERE id=?',
+                    (hash_user_password(new_password), user[0]),
+                )
+                log_action(
+                    'user_password_changed',
+                    'user',
+                    session.get('user', ''),
+                    'initial_change_completed=true',
+                    conn,
+                )
+                session['must_change_password'] = False
+                flash('Пароль изменён.', 'success')
+                destination = 'index' if is_login_generation_setup_completed() else 'login_generation_setup'
+                return redirect(url_for(destination), code=303)
+    return render_template('change_password.html')
+
 def logout():
     session.clear()
     flash('Вы вышли из системы.', 'success')
     return redirect(url_for('login'))
 
-@app.route('/edit_abiturient/<login>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_abiturient(login):
@@ -9757,7 +9828,6 @@ def edit_abiturient(login):
 
     return render_template('edit_abiturient.html', email_warning=None, **edit_context)
 
-@app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
@@ -9776,7 +9846,6 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html')
 
-@app.route('/setup', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def login_generation_setup():
@@ -9792,13 +9861,11 @@ def login_generation_setup():
             flash(f'Не удалось сохранить правила: {exc}', 'error')
     return render_template('login_rules_setup.html', **get_login_rules_form_context())
 
-@app.route('/admin_panel')
 @admin_required
 def admin_panel():
     return redirect(url_for('management', _anchor='administration'))
 
 
-@app.route('/management/administration')
 @admin_required
 def administration_tools():
     with sqlite3.connect(DB_PATH) as conn:
@@ -9814,7 +9881,6 @@ def administration_tools():
     )
 
 
-@app.route('/api/desktop/releases/windows')
 def desktop_release_api():
     """Return the GitHub release approved by an administrator for desktop clients."""
     approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
@@ -9829,7 +9895,6 @@ def desktop_release_api():
     return response
 
 
-@app.route('/admin/desktop-release/status')
 @admin_required
 def desktop_release_status_api():
     approval = desktop_releases.load_approval(app.config['UPLOAD_FOLDER'])
@@ -9850,7 +9915,6 @@ def desktop_release_status_api():
     return response
 
 
-@app.route('/admin/desktop-release/approve', methods=['POST'])
 @admin_required
 def approve_desktop_release():
     try:
@@ -9908,18 +9972,6 @@ def app_update_is_active(status):
 
 
 def build_app_update_command():
-    configured_command = (os.environ.get('APP_UPDATE_COMMAND') or '').strip()
-    if configured_command:
-        try:
-            parsed = json.loads(configured_command)
-        except json.JSONDecodeError:
-            parsed = shlex.split(configured_command, posix=os.name != 'nt')
-        if isinstance(parsed, str):
-            parsed = shlex.split(parsed, posix=os.name != 'nt')
-        if not isinstance(parsed, list) or not parsed or not all(isinstance(part, str) and part for part in parsed):
-            raise RuntimeError('APP_UPDATE_COMMAND должен содержать команду или JSON-массив аргументов.')
-        return parsed
-
     if os.name == 'nt':
         raise RuntimeError('Обновление из админки предназначено для Linux-сервера с systemd.')
     sudo_path = shutil.which('sudo') or next(
@@ -9994,7 +10046,6 @@ def queue_app_update(requested_by):
         raise RuntimeError(f'Служба обновления не запущена: {error_text}')
 
 
-@app.route('/admin/app-update/status')
 @admin_required
 def app_update_status_api():
     status = get_app_update_status()
@@ -10036,7 +10087,6 @@ def app_update_status_api():
     return jsonify(result)
 
 
-@app.route('/admin/app-update/start', methods=['POST'])
 @admin_required
 def start_app_update():
     status = get_app_update_status()
@@ -10052,19 +10102,16 @@ def start_app_update():
         flash(f'Не удалось запустить обновление: {exc}', 'error')
     return redirect(url_for('admin_panel'), code=303)
 
-@app.route('/backups')
 @admin_required
 def backups():
     return render_template('backups.html', backups=list_database_backups())
 
-@app.route('/backups/download/<backup_name>')
 @admin_required
 def download_backup(backup_name):
     backup_path = get_backup_path(backup_name)
     log_action('database_backup_download', 'backup', backup_name)
     return send_file(backup_path, as_attachment=True, download_name=backup_name, mimetype='application/octet-stream')
 
-@app.route('/backups/restore', methods=['POST'])
 @admin_required
 def restore_backup():
     backup_name = request.form.get('backup_name')
@@ -10084,12 +10131,10 @@ def restore_backup():
         flash(f'Не удалось восстановить базу: {exc}', 'error')
     return redirect(url_for('backups'))
 
-@app.route('/audit_logs')
 @admin_required
 def audit_logs():
     return render_template('audit_logs.html', audit_logs=get_audit_logs())
 
-@app.route('/campaigns', methods=['GET', 'POST'])
 @admin_required
 def campaigns():
     if request.method == 'POST':
@@ -10225,7 +10270,6 @@ def campaigns():
         selected_default_campaign_year=pinned_campaign_year or get_latest_campaign_year(),
     )
 
-@app.route('/delete_user', methods=['POST'])
 @admin_required
 def delete_user():
     user_id = request.form.get('user_id')
@@ -10241,7 +10285,6 @@ def delete_user():
         )
     return redirect(url_for('admin_panel'))
 
-@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
 @admin_required
 def edit_user(user_id):
     with sqlite3.connect(DB_PATH) as conn:
@@ -10284,7 +10327,6 @@ def edit_user(user_id):
             return redirect(url_for('admin_panel'))
     return render_template('edit_user.html', user=user)
 
-@app.route('/add_user', methods=['GET', 'POST'])
 @admin_required
 def add_user():
     if request.method == 'POST':
@@ -10313,7 +10355,6 @@ def add_user():
         return redirect(url_for('admin_panel'))
     return render_template('add_user.html')
 
-@app.route('/clear_abiturients', methods=['POST'])
 @admin_required
 def clear_abiturients():
     campaign_year = get_active_campaign_year()
@@ -10335,7 +10376,6 @@ def clear_abiturients():
     flash(f'Абитуриенты, кандидаты, дубли и конфликты кампании {campaign_year} успешно очищены.', 'success')
     return redirect(url_for('admin_panel'))
 
-@app.route('/students_upload', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def students_upload():
@@ -10399,7 +10439,6 @@ def students_upload():
         return file_work_redirect(target_section)
     return render_template('students_upload.html', message=message)
 
-@app.route('/students')
 @login_required
 def students():
     lastname = request.args.get('lastname', '').strip()
@@ -10427,7 +10466,6 @@ def students():
         order_dir=order_dir
     )
 
-@app.route('/students_duplicates')
 @login_required
 @role_required('admin')
 def students_duplicates():
@@ -10436,7 +10474,6 @@ def students_duplicates():
         duplicates = cur.fetchall()
     return render_template('students_duplicates.html', duplicates=duplicates)
 
-@app.route('/students_list')
 @login_required
 def students_list():
     order_by = request.args.get('order_by', 'username')
@@ -10464,7 +10501,6 @@ def students_list():
         order_dir=order_dir
     )
 
-@app.route('/students/expelled')
 @login_required
 def expelled_students():
     order_by = request.args.get('order_by', 'lastname')
@@ -10491,7 +10527,6 @@ def expelled_students():
         campaigns=campaigns, order_by=order_by, order_dir=order_dir
     )
 
-@app.route('/api/students/migration-calendar')
 @login_required
 def students_migration_calendar():
     try:
@@ -10504,7 +10539,6 @@ def students_migration_calendar():
         return jsonify(error='Параметры year и month должны задавать корректный месяц.'), 400
     return jsonify(get_student_migration_calendar(year, month))
 
-@app.route('/students/download')
 @login_required
 def download_students():
     order_by = request.args.get('order_by', 'username')
@@ -10543,7 +10577,6 @@ def download_students():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name="students.xlsx", mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@app.route('/students/expelled/download')
 @login_required
 def download_expelled_students():
     student_rows = get_all_students(
@@ -10570,7 +10603,6 @@ def download_expelled_students():
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
-@app.route('/api/student-transfer/groups')
 @login_required
 @role_required('admin')
 def student_transfer_campaign_groups():
@@ -10614,7 +10646,6 @@ def student_transfer_campaign_groups():
         ],
     )
 
-@app.route('/edit_student/<username>', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def edit_student(username):
@@ -10644,7 +10675,7 @@ def edit_student(username):
         flash('Студент не найден')
         return redirect(url_for('students_list'))
     if request.method == 'POST':
-        password = request.form.get('password', '').strip()
+        password = MOODLE_PASSWORD_PLACEHOLDER
         email = request.form.get('email', '').strip()
         firstname = request.form.get('firstname', '').strip()
         lastname = request.form.get('lastname', '').strip()
@@ -10670,7 +10701,7 @@ def edit_student(username):
         cohort2 = student[6]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute('UPDATE students SET password=?, email=?, firstname=?, lastname=? WHERE username=?',
-                         (password, email, firstname, lastname, username))
+                         (MOODLE_PASSWORD_PLACEHOLDER, email, firstname, lastname, username))
             log_action(
                 'student_updated',
                 'student',
@@ -10956,7 +10987,6 @@ def change_student_lifecycle(username, operation_type, *, actor_role, target_cam
         raise
 
 
-@app.route('/edit_student/<username>/transfer_group', methods=['POST'])
 @login_required
 @role_required('admin')
 def transfer_student_group(username):
@@ -11014,7 +11044,6 @@ def transfer_student_group(username):
     return jsonify(redirect=destination) if wants_json else redirect(destination)
 
 
-@app.route('/student_transfer_orders/<int:transfer_id>/download')
 @login_required
 @role_required('admin')
 def download_student_transfer_order(transfer_id):
@@ -11030,7 +11059,6 @@ def download_student_transfer_order(transfer_id):
         mimetype=order['mime_type']
     )
 
-@app.route('/delete_student', methods=['POST'])
 @login_required
 @role_required('admin')
 def delete_student():
@@ -11090,7 +11118,6 @@ def delete_student():
             flash('Студент удален')
     return redirect(url_for('students_list'))
 
-@app.route('/enrollment_candidates/sync', methods=['POST'])
 @login_required
 @role_required('admin', 'assistant')
 def enrollment_candidates_sync():
@@ -11121,7 +11148,6 @@ def enrollment_candidates_sync():
         flash(f"Уже есть в студентах: {len(summary['skipped_existing_students'])}", 'info')
     return redirect(url_for('abiturients_to_students', **target_args), code=303)
 
-@app.route('/abiturients_to_students', methods=['GET', 'POST'])
 @login_required
 @role_required('admin', 'assistant')
 def abiturients_to_students():
@@ -11239,7 +11265,7 @@ def abiturients_to_students():
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                         ''',
                         (
-                            plan_row['login'], 'cron', plan_row['email'],
+                            plan_row['login'], MOODLE_PASSWORD_PLACEHOLDER, plan_row['email'],
                             plan_row['firstname'], plan_row['lastname'], target_group, target_cohort2,
                             campaign_year, campaign_year, plan_row['dogovor'], plan_row['fio']
                         )
@@ -11409,7 +11435,7 @@ def abiturients_to_students():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                     ''',
                     (
-                        candidate['username'], 'cron', candidate['email'],
+                        candidate['username'], MOODLE_PASSWORD_PLACEHOLDER, candidate['email'],
                         candidate['firstname'], candidate['lastname'], target_group, target_cohort2,
                         campaign_year, campaign_year, candidate['dogovor'], candidate['fio']
                     )
@@ -11477,7 +11503,6 @@ def abiturients_to_students():
         return redirect(url_for(target))
     return render_stage()
 
-@app.route('/migration_wizard')
 @login_required
 @role_required('admin', 'assistant')
 def migration_wizard():
@@ -11494,7 +11519,6 @@ def migration_wizard():
         group_years=get_group_years(group_year),
     )
 
-@app.route('/add_group', methods=['GET', 'POST'])
 @login_required
 @role_required('admin')
 def add_group():
@@ -11666,7 +11690,6 @@ def add_group():
         show_hidden=show_hidden,
     )
 
-@app.route('/groups_template/download')
 @login_required
 @role_required('admin')
 def download_groups_template():
@@ -11675,11 +11698,37 @@ def download_groups_template():
     output.seek(0)
     return send_file(output, as_attachment=True, download_name='groups_template.csv', mimetype='text/csv')
 
+from routes import register_blueprints
+register_blueprints(app, globals())
+
 from contingent_web import register_contingent
 register_contingent(app, globals())
+
+
+def is_loopback_bind_host(host):
+    normalized = str(host or '').strip().strip('[]').casefold()
+    if normalized == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def warn_if_insecure_network_binding(host):
+    if is_loopback_bind_host(host):
+        return False
+    logging.getLogger(__name__).warning(
+        'Manticore is bound to %s. Direct HTTP on a network can expose credentials and '
+        'personal data; require an HTTPS reverse proxy or a trusted VPN.',
+        host,
+    )
+    return True
+
 
 if __name__ == "__main__":
     app_host = os.environ.get("APP_HOST", "127.0.0.1")
     app_port = int(os.environ.get("APP_PORT", "5000"))
     app_debug = os.environ.get("APP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    warn_if_insecure_network_binding(app_host)
     app.run(host=app_host, port=app_port, debug=app_debug)

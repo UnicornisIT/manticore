@@ -1,0 +1,27 @@
+name: Предложение
+description: Новая возможность или улучшение существующей.
+title: "[Предложение]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу нужно решить
+      description: Опишите рабочую ситуацию, в которой сейчас неудобно или невозможно.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Рассмотренные альтернативы
+  - type: textarea
+    id: context
+    attributes:
+      label: Дополнительный контекст
+      description: Примеры файлов только с синтетическими данными, макеты, ссылки.

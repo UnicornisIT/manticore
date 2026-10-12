@@ -1,24 +1,21 @@
-# Pull Request
+## Что изменено
 
-## Description
-Brief description of what this PR does.
+<!-- Кратко: что и зачем. -->
 
-## Type of Change
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Documentation update
+## Тип изменения
 
-## Related Issues
-Closes #(issue number)
+- [ ] Исправление ошибки
+- [ ] Новая возможность
+- [ ] Изменение схемы БД (новая миграция в `db/`)
+- [ ] Документация, CI или инфраструктура
 
-## How Has This Been Tested?
-Describe the tests you ran and how to reproduce them.
+## Связанные задачи
 
-## Checklist
-- [ ] My code follows the style guidelines of this project
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] No new linting errors were introduced
+<!-- Closes #… -->
+
+## Проверки
+
+- [ ] `python -m unittest discover -s tests` проходит
+- [ ] `ruff check .` и `mypy` без ошибок
+- [ ] Документация и `CHANGELOG.md` обновлены, если поведение изменилось
+- [ ] В коммитах нет реальных персональных данных, баз, логов и секретов

@@ -336,6 +336,14 @@ class WindowsClientTests(unittest.TestCase):
         with self.assertRaises(windows_client.AmbiguousSourceError):
             windows_client.normalize_server_url('192.168.30.10')
 
+    def test_source_classifier_accepts_posix_paths_only_on_posix_hosts(self):
+        path = "/tmp/manticore/base.sqlite"
+        with mock.patch.object(windows_client.os, "name", "posix"):
+            self.assertEqual(windows_client.classify_source_value(path), "filesystem_path")
+        with mock.patch.object(windows_client.os, "name", "nt"):
+            with self.assertRaises(windows_client.AmbiguousSourceError):
+                windows_client.classify_source_value(path)
+
     def test_legacy_unc_database_path_migrates_to_database_source(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             windows_client, 'application_data_directory', return_value=Path(directory)
@@ -515,7 +523,10 @@ class WindowsClientTests(unittest.TestCase):
             storage_path=str(data_directory / 'webview'),
             icon=str(bundle_directory / windows_client.WINDOW_ICON_PATH),
         )
-        self.assertTrue(str(webview.create_window.call_args.args[1]).endswith('desktop\\ui\\startup.html'))
+        self.assertEqual(
+            Path(webview.create_window.call_args.args[1]),
+            bundle_directory / "desktop" / "ui" / "startup.html",
+        )
         with mock.patch('desktop.windows_client.check_server_connection', return_value=''):
             start_callback()
         window.load_url.assert_called_once_with('https://manticore.example.test')

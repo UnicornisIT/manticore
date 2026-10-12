@@ -1,2 +1,15 @@
-# Auto detect text files and perform LF normalization
+# Normalize text files to LF in the repository.
 * text=auto
+
+# Windows scripts must keep CRLF in checkouts and source archives.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# POSIX scripts must keep LF on every platform.
+*.sh text eol=lf
+
+*.png binary
+*.ico binary
+*.xlsx binary
+*.docx binary

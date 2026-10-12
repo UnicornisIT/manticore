@@ -1,7 +1,3 @@
 @echo off
-setlocal
-cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0update_windows.ps1" -StartAfterUpdate
-echo.
-echo Press any key to close this window.
-pause >nul
+call "%~dp0scripts\update_and_run_windows.bat" %*
+exit /b %errorlevel%

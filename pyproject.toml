@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unicornisit-manticore"
+dynamic = ["version"]
+description = "Admissions and student records application for Moodle workflows"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+authors = [{ name = "UnicornisIT" }]
+keywords = ["admissions", "flask", "moodle", "sqlite", "student-information-system"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Flask",
+    "Intended Audience :: Education",
+    "Natural Language :: Russian",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "Flask>=3.1.3,<4.0",
+    "Werkzeug>=3.1.9,<4.0",
+    "pandas>=2.0",
+    "openpyxl>=3.0",
+    "xlrd>=2.0",
+    "python-dotenv>=1.0",
+    "python-docx>=1.1",
+    "pypdf>=6.19.0,<7.0",
+    "dnspython>=2.6,<3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/UnicornisIT/manticore"
+Documentation = "https://github.com/UnicornisIT/manticore/tree/main/docs"
+Changelog = "https://github.com/UnicornisIT/manticore/blob/main/CHANGELOG.md"
+Issues = "https://github.com/UnicornisIT/manticore/issues"
+
+[project.optional-dependencies]
+prod = [
+    "gunicorn>=23.0,<24.0",
+]
+desktop = [
+    "pywebview>=5.0,<7.0",
+    "pystray>=0.19.5,<0.20",
+    "Pillow>=12.3.0,<13.0",
+    "pyinstaller>=6.0,<7.0",
+]
+dev = [
+    "mypy>=1.14,<2.0",
+    "pip-audit>=2.7,<3.0",
+    "pre-commit>=4.0,<5.0",
+    "ruff>=0.11,<1.0",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    ".venv-desktop",
+    "build",
+    "dist",
+    "uploads",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["config.py", "db", "routes", "services"]
+ignore_missing_imports = true
+follow_imports = "skip"
+check_untyped_defs = false
+allow_untyped_defs = true
+allow_untyped_globals = true
+warn_unused_configs = true
+show_error_codes = true

@@ -14,21 +14,6 @@ UPDATE_SUDOERS_FILE="/etc/sudoers.d/$UPDATE_SERVICE_NAME"
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_USER=${DEPLOY_USER:-www-data}
 
-show_admin_password_notice() {
-  local password="$1"
-  cat <<EOF
-
-============================================================
-ВАЖНО / IMPORTANT
-Локальный администратор: admin
-Admin password: $password
-RU: Сохраните этот пароль. При первом входе обязательно смените пароль администратора.
-EN: Save this password. You must change the admin password after the first login.
-============================================================
-
-EOF
-}
-
 generate_secret_key() {
   python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 }
@@ -82,14 +67,14 @@ APP_UPDATE_ENABLED=true
 APP_UPDATE_SERVICE=$UPDATE_SERVICE_NAME.service
 EOF
   chmod 640 "$APP_DIR/.env"
-  echo "Generated local admin password and saved it in $APP_DIR/.env."
-  show_admin_password_notice "$ADMIN_PASSWORD"
+  echo "Generated initial admin credentials in the protected $APP_DIR/.env file."
+  echo "The password is not printed or logged; retrieve it as root for the first login."
 fi
 
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 python3 -m pip install --upgrade pip
-pip install -r requirements-prod.txt
+pip install -r requirements-prod.lock
 
 mkdir -p "$APP_DIR/uploads"
 chown -R root:root "$APP_DIR"
@@ -138,7 +123,7 @@ WorkingDirectory=%APP_DIR%
 EnvironmentFile=-%APP_DIR%/.env
 Environment="UPDATE_LATEST_RELEASE=1"
 Environment="UPDATE_STATUS_FILE=%APP_DIR%/uploads/app_update_status.json"
-ExecStart=%BASH_BIN% %APP_DIR%/update.sh %APP_DIR%
+ExecStart=%BASH_BIN% %APP_DIR%/scripts/update.sh %APP_DIR%
 TimeoutStartSec=30min
 UMask=0022
 EOF
@@ -190,4 +175,5 @@ if nginx -t; then
   systemctl restart nginx
 fi
 
-echo "Deploy завершен. Откройте http://$DOMAIN или http://<IP>:80"
+echo "Deploy завершен. HTTP предназначен только для первичной проверки."
+echo "Для сетевого доступа настройте HTTPS или доверенный VPN: http://$DOMAIN"

@@ -1,40 +1,43 @@
-# Security Policy
+# Политика безопасности
 
-## Reporting Security Vulnerabilities
+## Поддерживаемые версии
 
-If you discover a security vulnerability, please email the maintainers instead of using the issue tracker.
+Текущая линия `0.1.x` имеет статус alpha. Исправления безопасности вносятся в
+последнюю доступную версию; более старые сборки могут не получать обновления.
+До production-внедрения организация обязана проверить собственные правила
+доступа, резервного копирования, восстановления и обработки персональных данных.
 
-**Do not publicly disclose the vulnerability until it has been addressed.**
+## Как сообщить об уязвимости
 
-## Security Considerations
+Отправьте приватное письмо на [dev-eva@outlook.com](mailto:dev-eva@outlook.com)
+с темой `Manticore security report`. Не создавайте публичный issue и не
+прикладывайте реальные персональные данные, секреты или production-базу.
 
-### Default Credentials
-- Change the default admin password immediately after first login
-- Do not use default credentials in production environments
+Укажите:
 
-### Environment Variables
-- Always set `SECRET_KEY` to a strong, random value in production
-- Use environment variables for sensitive configuration
-- Never commit `.env` files to version control (only `.env.example`)
+- затронутую версию/commit и среду;
+- минимальные шаги воспроизведения на синтетических данных;
+- ожидаемое и фактическое поведение;
+- возможное влияние и уже принятые меры;
+- безопасный способ обратной связи.
 
-### Database
-- The SQLite database file (`baze.db`) contains sensitive user and student data
-- Ensure proper file system permissions on the database file
-- Regular backups are recommended
+Команда подтвердит получение, проверит воспроизводимость и согласует оценку,
+исправление и публикацию. Срок зависит от критичности и полноты отчёта. До
+координированного раскрытия не публикуйте детали и не проверяйте проблему на
+чужих системах.
 
-### Deployment
-- Use HTTPS in production
-- Configure proper CORS settings
-- Implement rate limiting
-- Keep dependencies updated
+## Границы защиты
 
-## Dependency Updates
+- сетевой доступ требует HTTPS reverse proxy или доверенного VPN;
+- `.env`, SQLite, загрузки и бэкапы не должны попадать в Git;
+- поле Moodle `password` содержит только служебную заглушку `cron`;
+- бэкапы защищены правами и сроком хранения, но не шифруются приложением;
+- серверный updater закрепляет репозиторий и SemVer, но пока не требует
+  криптографически подписанного Git-тега;
+- unsigned Desktop asset нельзя считать аутентифицированным только по SHA-256
+  из того же GitHub Release.
 
-Run `pip install --upgrade -r requirements.txt` regularly to get security updates.
-
-The repository includes a `pip-audit` GitHub Actions workflow for pull requests and pushes to the main branch. For a local check, run:
-
-```bash
-python -m pip install pip-audit
-pip-audit -r requirements-prod.txt
-```
+Технические меры и остаточные риски подробно описаны в
+[docs/security.md](docs/security.md). Зависимости проверяются в CI командой
+`pip-audit` отдельно по `requirements-prod.lock` и
+`requirements-desktop.lock`.

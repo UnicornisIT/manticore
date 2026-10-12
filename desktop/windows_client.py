@@ -26,6 +26,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import desktop_releases
+from config import DEFAULT_BACKUP_RETENTION_DAYS
 from db_safety import (
     CURRENT_SCHEMA_VERSION,
     DatabaseSafetyError,
@@ -35,7 +36,9 @@ from db_safety import (
     DatabaseSchemaTooNewError,
     InsufficientDiskSpaceError,
     ensure_free_space,
+    prune_backups_by_age,
     read_schema_state,
+    restrict_private_file,
     schema_mismatch_message,
     schema_too_new_message,
     sqlite_backup,
@@ -53,6 +56,10 @@ WINDOW_ICON_PATH = Path("desktop") / "manticore.ico"
 UNINSTALL_REGISTRY_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{815471B3-D4A7-49C8-9F25-BEACF00E37B8}_is1"
 WINTRUST_SUCCESS = 0x00000000
 WINTRUST_UNTRUSTED_ROOT = 0x800B0109
+UNSIGNED_UPDATE_WARNING = (
+    "Unsigned desktop update policy is active: a SHA-256 value published with the "
+    "same GitHub release proves integrity only, not publisher authenticity."
+)
 _INSTANCE_MUTEX = None
 _INSTANCE_ACTIVATION_EVENT = None
 _INSTANCE_LISTENER_STOP = threading.Event()
@@ -105,6 +112,11 @@ def classify_source_value(value: str) -> str:
     lowered = value.casefold()
     if value.startswith(("\\\\", "//")) or re.match(r"^[a-zA-Z]:[\\/]", value):
         return "filesystem_path"
+    # The packaged client runs on Windows and intentionally rejects root-relative
+    # values such as /data/base.db there. Absolute POSIX paths are accepted only
+    # when the code is actually executing on a POSIX host (tests and tooling).
+    if os.name != "nt" and value.startswith("/"):
+        return "filesystem_path"
     if lowered.startswith(("http://", "https://")):
         return "server_url"
     raise AmbiguousSourceError(
@@ -146,7 +158,13 @@ def load_trust_policy() -> dict:
         raise ValueError("Некорректный сертификат издателя обновлений.")
     if not signer_sha256 and payload.get("allow_unsigned_updates") is not True:
         raise ValueError("В сборке не настроена политика подписи обновлений.")
-    return {"github_repository": repository, "signer_certificate_sha256": signer_sha256}
+    if not signer_sha256:
+        logging.warning("[Updater] %s", UNSIGNED_UPDATE_WARNING)
+    return {
+        "github_repository": repository,
+        "signer_certificate_sha256": signer_sha256,
+        "authentication": "authenticode" if signer_sha256 else "checksum-only",
+    }
 
 
 
@@ -361,6 +379,7 @@ def load_config() -> dict:
                     stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(restore_tmp, path)
+                restrict_private_file(path)
                 logging.warning("Desktop config restored from %s", backup)
                 return payload
         except (OSError, json.JSONDecodeError):
@@ -386,6 +405,7 @@ def save_config(config: dict) -> None:
                 destination.flush()
                 os.fsync(destination.fileno())
             os.replace(backup_tmp, backup)
+            restrict_private_file(backup)
         finally:
             try:
                 backup_tmp.unlink()
@@ -393,6 +413,7 @@ def save_config(config: dict) -> None:
                 pass
     try:
         os.replace(temporary_path, path)
+        restrict_private_file(path)
     finally:
         try:
             temporary_path.unlink()
@@ -545,6 +566,11 @@ def archive_dirty_fallback(config: dict) -> dict:
     archive_directory = application_data_directory() / "fallback-backups" / primary_key
     archive_path = archive_directory / f"fallback-{timestamp_token()}-{session_id}.db"
     sqlite_backup(fallback_path, archive_path)
+    try:
+        retention_days = max(1, int(os.environ.get("BACKUP_RETENTION_DAYS", DEFAULT_BACKUP_RETENTION_DAYS)))
+    except (TypeError, ValueError):
+        retention_days = DEFAULT_BACKUP_RETENTION_DAYS
+    prune_backups_by_age(archive_directory, "fallback-*.db", retention_days)
     connection = sqlite3.connect(str(fallback_path), timeout=5.0, isolation_level=None)
     try:
         connection.execute("BEGIN IMMEDIATE")
@@ -1453,6 +1479,18 @@ def verify_authenticode_signature(installer_path: Path, expected_signer_sha256: 
         )
 
 
+def verify_update_authenticity(installer_path: Path, manifest: dict) -> None:
+    """Enforce Authenticode when configured and isolate the unsigned fallback."""
+    signer_sha256 = str(manifest.get("signer_certificate_sha256") or "").strip()
+    if signer_sha256:
+        verify_authenticode_signature(installer_path, signer_sha256)
+        return
+    # Extension point for a future detached-signature verifier. Until a public
+    # key and signed manifest are shipped, this branch is explicitly checksum-
+    # only and must never be described as publisher authentication.
+    logging.warning("[Updater] %s", UNSIGNED_UPDATE_WARNING)
+
+
 class DesktopUpdater:
     """Single serialized updater; renderer receives status, never executable paths."""
 
@@ -1512,8 +1550,7 @@ class DesktopUpdater:
             digest = hashlib.file_digest(source, "sha256").hexdigest()
         if path.stat().st_size != manifest["size"] or not hmac.compare_digest(digest, manifest["sha256"]):
             raise ValueError("Проверка целостности установщика не пройдена. Повторите проверку и скачивание.")
-        if manifest["signer_certificate_sha256"]:
-            verify_authenticode_signature(path, manifest["signer_certificate_sha256"])
+        verify_update_authenticity(path, manifest)
 
     def _download(self):
         path = None

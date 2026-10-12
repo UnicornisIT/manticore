@@ -25,11 +25,18 @@ uploads/*
 !uploads/
 !uploads/.gitkeep
 *.db
-*.sqlite
-*.sqlite3
+*.sqlite*
 *.bak
 *.backup
 *.tmp
+desktop-config.json*
+fallback*
+!templates/fallback_changes.html
+baze_backup_*
+
+# Runtime data is private; keep only the versioned provider registry.
+data/*
+!data/email_providers.json
 
 # Generated office/data files
 *.xlsx
@@ -45,14 +52,19 @@ logs/
 *.pid
 *.lock
 !requirements-desktop.lock
+!requirements-prod.lock
 
 # Local copies and temporary packaging output
 _clean_copy/
 dist/
 build/
+*.egg-info/
 *.zip
 *.7z
 *.rar
+*.pfx
+*.pem
+*.key
 
 # IDE/editor files
 .vscode/

@@ -21,38 +21,38 @@
     'enrollment_order_student_roster', 'add_group', 'campaigns', 'audit_logs',
     'backups', 'admin_panel', 'administration_tools', 'approve_users', 'search'
 ] %}
-<body class="{% if session.get('user') %}app-authenticated {% endif %}{% if request.endpoint in data_page_endpoints or reconciliation_page %}data-page {% endif %}{% if request.endpoint in ['login', 'register'] %}auth-page {% endif %}{% if request.endpoint == 'index' %}home-page{% elif request.endpoint == 'login' %}login-page-body{% endif %}">
+<body class="{% if session.get('user') %}app-authenticated {% endif %}{% if current_endpoint in data_page_endpoints or reconciliation_page %}data-page {% endif %}{% if current_endpoint in ['login', 'register'] %}auth-page {% endif %}{% if current_endpoint == 'index' %}home-page{% elif current_endpoint == 'login' %}login-page-body{% endif %}">
     <div class="container">
         {% if session.get('user') %}
         {% set migration_nav_endpoints = ['migration_wizard', 'abiturients_to_students', 'duplicates', 'students_duplicates', 'duplicates_abiturients'] %}
         {% set contingent_nav_endpoints = ['abiturients', 'students', 'students_list', 'expelled_students'] %}
-        {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints + ([request.endpoint] if reconciliation_page else []) %}
+        {% set operations_nav_endpoints = ['file_work', 'manual_create', 'data_checks'] + migration_nav_endpoints + ([current_endpoint] if reconciliation_page else []) %}
         {% set file_work_nav_section = request.view_args.get('section') if request.view_args else None %}
         <ul class="main-nav">
             <li>
-                <a href="{{ url_for('index') }}" class="nav-brand{% if request.endpoint == 'index' %} active{% endif %}" aria-label="Manticore, главная страница">
+                <a href="{{ url_for('index') }}" class="nav-brand{% if current_endpoint == 'index' %} active{% endif %}" aria-label="Manticore, главная страница">
                     <img src="{{ url_for('static', filename='images/manticore-logo-dark.png') }}" alt="" class="nav-brand-logo">
                 </a>
             </li>
-            <li><a href="{{ url_for('index') }}" class="sidebar-link{% if request.endpoint == 'index' %} active{% endif %}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"></path></svg><span>Главная</span></a></li>
+            <li><a href="{{ url_for('index') }}" class="sidebar-link{% if current_endpoint == 'index' %} active{% endif %}"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"></path></svg><span>Главная</span></a></li>
             <li>
                 <details class="nav-dropdown">
-                    <summary class="nav-dropdown-summary{% if request.endpoint in contingent_nav_endpoints %} active{% endif %}">
+                    <summary class="nav-dropdown-summary{% if current_endpoint in contingent_nav_endpoints %} active{% endif %}">
                         Контингент
                         <svg class="nav-dropdown-caret" viewBox="0 0 24 24" aria-hidden="true">
                             <path d="m6 9 6 6 6-6"></path>
                         </svg>
                     </summary>
                     <div class="nav-dropdown-panel">
-                        <a href="{{ url_for('abiturients') }}" {% if request.endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a>
-                        <a href="{{ url_for('students_list') }}" {% if request.endpoint in ['students', 'students_list'] %}class="active"{% endif %}>Список студентов</a>
-                        <a href="{{ url_for('expelled_students') }}" {% if request.endpoint == 'expelled_students' %}class="active"{% endif %}>Отчисленные студенты</a>
+                        <a href="{{ url_for('abiturients') }}" {% if current_endpoint == 'abiturients' %}class="active"{% endif %}>Список абитуриентов</a>
+                        <a href="{{ url_for('students_list') }}" {% if current_endpoint in ['students', 'students_list'] %}class="active"{% endif %}>Список студентов</a>
+                        <a href="{{ url_for('expelled_students') }}" {% if current_endpoint == 'expelled_students' %}class="active"{% endif %}>Отчисленные студенты</a>
                     </div>
                 </details>
             </li>
             <li>
                 <details class="nav-dropdown">
-                    <summary class="nav-dropdown-summary{% if request.endpoint in operations_nav_endpoints %} active{% endif %}">
+                    <summary class="nav-dropdown-summary{% if current_endpoint in operations_nav_endpoints %} active{% endif %}">
                         Операции
                         <svg class="nav-dropdown-caret" viewBox="0 0 24 24" aria-hidden="true">
                             <path d="m6 9 6 6 6-6"></path>
@@ -60,23 +60,23 @@
                     </summary>
                     <div class="nav-dropdown-panel">
                         <div class="nav-submenu">
-                            <a href="{{ url_for('file_work') }}" class="nav-submenu-main{% if request.endpoint == 'file_work' or reconciliation_page %} active{% endif %}">
+                            <a href="{{ url_for('file_work') }}" class="nav-submenu-main{% if current_endpoint == 'file_work' or reconciliation_page %} active{% endif %}">
                                 <span>Работа с файлами</span>
                                 <svg class="nav-submenu-caret" viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="m6 9 6 6 6-6"></path>
                                 </svg>
                             </a>
                             <div class="nav-submenu-panel" aria-label="Разделы работы с файлами">
-                                <a href="{{ url_for('file_work', section='abiturients') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'abiturients' %}class="active"{% endif %}>Загрузка абитуриентов</a>
-                                <a href="{{ url_for('file_work', section='updates') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'updates' %}class="active"{% endif %}>Обновление почты и оплаты</a>
-                                <a href="{{ url_for('file_work', section='orders') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'orders' %}class="active"{% endif %}>Приказ о зачислении</a>
-                                <a href="{{ url_for('file_work', section='students') }}" {% if request.endpoint == 'file_work' and file_work_nav_section == 'students' %}class="active"{% endif %}>Загрузка студентов</a>
-                                <a href="{{ url_for('file_work', section='contingent') }}" {% if reconciliation_page or (request.endpoint == 'file_work' and file_work_nav_section == 'contingent') %}class="active"{% endif %}>Сверка контингента</a>
+                                <a href="{{ url_for('file_work', section='abiturients') }}" {% if current_endpoint == 'file_work' and file_work_nav_section == 'abiturients' %}class="active"{% endif %}>Загрузка абитуриентов</a>
+                                <a href="{{ url_for('file_work', section='updates') }}" {% if current_endpoint == 'file_work' and file_work_nav_section == 'updates' %}class="active"{% endif %}>Обновление почты и оплаты</a>
+                                <a href="{{ url_for('file_work', section='orders') }}" {% if current_endpoint == 'file_work' and file_work_nav_section == 'orders' %}class="active"{% endif %}>Приказ о зачислении</a>
+                                <a href="{{ url_for('file_work', section='students') }}" {% if current_endpoint == 'file_work' and file_work_nav_section == 'students' %}class="active"{% endif %}>Загрузка студентов</a>
+                                <a href="{{ url_for('file_work', section='contingent') }}" {% if reconciliation_page or (current_endpoint == 'file_work' and file_work_nav_section == 'contingent') %}class="active"{% endif %}>Сверка контингента</a>
                             </div>
                         </div>
-                        <a href="{{ url_for('data_checks') }}" {% if request.endpoint == 'data_checks' %}class="active"{% endif %}>Проверка данных</a>
-                        <a href="{{ url_for('manual_create') }}" {% if request.endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a>
-                        <a href="{{ url_for('migration_wizard') }}" {% if request.endpoint in migration_nav_endpoints %}class="active"{% endif %}>Мастер миграции</a>
+                        <a href="{{ url_for('data_checks') }}" {% if current_endpoint == 'data_checks' %}class="active"{% endif %}>Проверка данных</a>
+                        <a href="{{ url_for('manual_create') }}" {% if current_endpoint == 'manual_create' %}class="active"{% endif %}>Ручное создание логина</a>
+                        <a href="{{ url_for('migration_wizard') }}" {% if current_endpoint in migration_nav_endpoints %}class="active"{% endif %}>Мастер миграции</a>
                     </div>
                 </details>
             </li>
@@ -85,23 +85,23 @@
                 <form
                     action="{{ url_for('search') }}"
                     method="get"
-                    class="nav-search{% if request.endpoint == 'search' %} is-open{% endif %}"
+                    class="nav-search{% if current_endpoint == 'search' %} is-open{% endif %}"
                     role="search"
                     data-search-overlay-url="{{ url_for('search_overlay') }}"
                     data-person-url-template="{{ url_for('person_card', kind='__kind__', record_id='__record__') }}"
                 >
-                    <button type="button" class="nav-icon-link{% if request.endpoint in ['search', 'person_card'] %} active{% endif %} nav-search-toggle" aria-label="Поиск" title="Поиск" aria-expanded="{% if request.endpoint == 'search' %}true{% else %}false{% endif %}" aria-controls="global-search-input">
+                    <button type="button" class="nav-icon-link{% if current_endpoint in ['search', 'person_card'] %} active{% endif %} nav-search-toggle" aria-label="Поиск" title="Поиск" aria-expanded="{% if current_endpoint == 'search' %}true{% else %}false{% endif %}" aria-controls="global-search-input">
                         <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
                             <circle cx="11" cy="11" r="7"></circle>
                             <path d="m20 20-3.5-3.5"></path>
                         </svg>
                         <span class="sr-only">Поиск</span>
                     </button>
-                    <input id="global-search-input" class="nav-search-input" type="search" name="q" value="{{ request.args.get('q', '') if request.endpoint == 'search' else '' }}" placeholder="ФИО, договор, логин, email" autocomplete="off">
+                    <input id="global-search-input" class="nav-search-input" type="search" name="q" value="{{ request.args.get('q', '') if current_endpoint == 'search' else '' }}" placeholder="ФИО, договор, логин, email" autocomplete="off">
                 </form>
             </li>
             <li>
-                <a href="{{ url_for('documentation') }}" class="nav-icon-link{% if request.endpoint == 'documentation' %} active{% endif %}" aria-label="Документация" title="Документация">
+                <a href="{{ url_for('documentation') }}" class="nav-icon-link{% if current_endpoint == 'documentation' %} active{% endif %}" aria-label="Документация" title="Документация">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
                         <circle cx="12" cy="12" r="9"></circle>
                         <path d="M9.7 9a2.5 2.5 0 1 1 3.4 2.33c-.76.33-1.1.82-1.1 1.67"></path>
@@ -111,7 +111,7 @@
                 </a>
             </li>
             <li>
-                <a href="{{ url_for('management') }}" class="nav-icon-link{% if request.endpoint in ['management', 'administration_tools', 'approve_users', 'add_user', 'edit_user', 'campaigns', 'login_generation_setup', 'backups', 'audit_logs'] %} active{% endif %}" aria-label="Управление" title="Управление">
+                <a href="{{ url_for('management') }}" class="nav-icon-link{% if current_endpoint in ['management', 'administration_tools', 'approve_users', 'add_user', 'edit_user', 'campaigns', 'login_generation_setup', 'backups', 'audit_logs'] %} active{% endif %}" aria-label="Управление" title="Управление">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 14.8 6L14.5 3h-5L9.2 6a7 7 0 0 0-1.7 1.1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 9.2 18l.3 3h5l.3-3a7 7 0 0 0 1.7-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"></path></svg>
                     <span class="nav-label">Управление</span>
                 </a>
@@ -131,7 +131,7 @@
             <button type="button" class="topbar-icon sidebar-toggle" aria-label="Свернуть боковую панель" title="Свернуть боковую панель" aria-expanded="true" data-sidebar-toggle>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
-            <div class="topbar-title">{{ 'Сверка контингента' if reconciliation_page else page_titles.get(request.endpoint, 'Manticore') }}</div>
+            <div class="topbar-title">{{ 'Сверка контингента' if reconciliation_page else page_titles.get(current_endpoint, 'Manticore') }}</div>
             <div class="topbar-search-slot">
                 <button type="button" class="topbar-icon topbar-search nav-search-toggle-proxy" title="Глобальный поиск (Ctrl+K)" aria-label="Открыть глобальный поиск" aria-haspopup="dialog" aria-controls="global-search-modal" data-global-search-open>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -180,7 +180,7 @@
         </div>
         {% endif %}
         <main class="app-content" id="main-content">
-        {% if request.endpoint != 'login' %}
+        {% if current_endpoint != 'login' %}
             {% with messages = get_flashed_messages(with_categories=true) %}
               {% if messages %}
                 <div class="flash-messages">
@@ -199,7 +199,7 @@
     <script src="{{ url_for('static', filename='js/row-actions.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/modern-ui.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/user-menu.js') }}" defer></script>
-    {% if request.endpoint == 'login' %}
+    {% if current_endpoint == 'login' %}
     {% from '_developer_links.html' import developer_links %}
     <footer id="main-footer">
         <div class="footer-inner">

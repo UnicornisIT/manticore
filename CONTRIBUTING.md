@@ -1,48 +1,53 @@
-# Contributing to manticore
+# Участие в разработке
 
-Thank you for your interest in contributing! Here are some guidelines to help you get started.
+## Окружение
 
-## Getting Started
+Проект поддерживает CPython 3.11. Создайте отдельное окружение и установите
+development extras:
 
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/manticore.git`
-3. Create a virtual environment: `python -m venv .venv`
-4. Activate it: `.\.venv\Scripts\Activate.ps1` (Windows) or `source .venv/bin/activate` (Linux)
-5. Install dependencies: `pip install -r requirements.txt`
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+pre-commit install
+```
 
-## Development Workflow
+На Linux используйте `.venv/bin/python` и `.venv/bin/pre-commit`.
 
-1. Create a new branch: `git checkout -b feature/your-feature-name`
-2. Make your changes
-3. Test your changes locally
-4. Commit your changes: `git commit -am 'Add feature description'`
-5. Push to your fork: `git push origin feature/your-feature-name`
-6. Open a Pull Request
+## Данные и миграции
 
-## Code Style
+В тестах, документации и fixtures допустимы только синтетические данные. Не
+коммитьте `.env`, SQLite/WAL/SHM, пользовательские загрузки, выгрузки, логи,
+бэкапы, пароли, токены или реальные ФИО/email.
 
-- Follow PEP 8 guidelines
-- Write clear, descriptive commit messages
-- Add comments for complex logic
-- Keep functions focused and small
+Изменение схемы оформляйте новой упорядоченной миграцией в `db/`; не изменяйте
+смысл уже выпущенной миграции. Миграция должна быть идемпотентной, обновлять
+schema version только после успеха и иметь тест обновления старой и чистой базы.
 
-## Reporting Issues
+Поле `students.password` называется так ради совместимости с Moodle. Оно не
+является хранилищем пароля: единственное допустимое значение — `cron`.
 
-- Use the bug report template for bug reports
-- Use the feature request template for feature requests
-- Include as much detail as possible (steps to reproduce, expected vs actual behavior, environment info)
-- Check if the issue already exists before reporting
+## Проверки
 
-## Pull Request Process
+Перед pull request выполните:
 
-1. Ensure your code doesn't break existing functionality
-2. Add tests if applicable
-3. Update documentation if needed
-4. Follow the PR template
-5. Respond to review comments promptly
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\mypy.exe
+.\.venv\Scripts\python.exe sync_app_metadata.py --check
+.\.venv\Scripts\pre-commit.exe run --all-files
+```
 
-## Questions?
+`ruff format` можно применять к изменённым Python-файлам. Не смешивайте
+массовое форматирование с функциональным исправлением без необходимости.
 
-Feel free to open an issue with the `question` label if you have questions.
+## Pull request
 
-Thank you for contributing!
+1. Создайте узкую ветку и один логический набор изменений.
+2. Добавьте или обновите тесты и документацию.
+3. Опишите риск для миграций, персональных данных, updater и совместимости.
+4. Приложите результаты проверок; для UI — снимок до/после без реальных данных.
+5. Убедитесь, что `git diff --check` чист и секреты отсутствуют.
+
+Изменение публичных контактов делается в `app_metadata.py`, после чего запускается
+`python sync_app_metadata.py`; сгенерированный блок README вручную не правится.
