@@ -21,6 +21,8 @@
 | `static/`, `templates/` | Веб-интерфейс и шаблоны выгрузок. |
 | `tests/` | Python unit/integration и frontend regression tests. |
 | `docs/` | Пользовательские, эксплуатационные и архивные документы. |
+| `docs/releases/` | Заметки к опубликованным выпускам. |
+| `.github/` | CI (`ci.yml`), проверки безопасности (`security.yml`), выпуск Windows-клиента, шаблоны issue и PR. |
 | `VERSION` | Единая версия приложения и пакета. |
 | `RELEASE_CHECKLIST.md` | Обязательные проверки перед выпуском. |
 | `pyproject.toml` | Метаданные пакета, extras, Ruff и mypy. |
