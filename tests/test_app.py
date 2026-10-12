@@ -1,7 +1,6 @@
 import os
 import io
 import re
-import shutil
 import sqlite3
 import sys
 import tempfile
@@ -14,22 +13,10 @@ import pandas as pd
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-TEST_UPLOAD_DIR = tempfile.mkdtemp(prefix='manticore_tests_')
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-os.environ['SECRET_KEY'] = 'test-secret-key'
-os.environ['ADMIN_DEFAULT_PASSWORD'] = 'test-admin-password'
-os.environ['UPLOAD_FOLDER'] = TEST_UPLOAD_DIR
-os.environ['DB_FILENAME'] = 'test.db'
-os.environ['DEFAULT_CAMPAIGN_YEAR'] = '2026'
-os.environ['LEGACY_CAMPAIGN_YEAR'] = '2025'
-os.environ['APP_DEBUG'] = 'false'
-os.environ['EMAIL_DNS_DISABLE'] = '1'
-
-sys.path.insert(0, PROJECT_ROOT)
-import app as manticore
-
-
-manticore.app.config['TESTING'] = True
+from tests.app_fixture import TEST_UPLOAD_DIR, manticore
 
 
 def reset_database():
@@ -54,10 +41,6 @@ def reset_database():
 
 
 class ManticoreAppTests(unittest.TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(TEST_UPLOAD_DIR, ignore_errors=True)
-
     def setUp(self):
         reset_database()
         manticore.save_login_generation_settings(

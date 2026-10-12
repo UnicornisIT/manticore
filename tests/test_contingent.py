@@ -159,9 +159,10 @@ class ContingentEngineTests(unittest.TestCase):
 
 class ContingentWorkflowTests(unittest.TestCase):
     def setUp(self):
-        # Reuse existing initialized test DB, but never the production database.
-        import test_app
-        self.m = test_app.manticore
+        # Reuse the process-scoped test DB, never the production database.
+        from tests.app_fixture import manticore
+
+        self.m = manticore
         self.tmp = tempfile.TemporaryDirectory()
         self.patch = mock.patch.dict(self.m.app.config, UPLOAD_FOLDER=self.tmp.name, TESTING=True)
         self.patch.start()

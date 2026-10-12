@@ -1,0 +1,5 @@
+# Historical documentation placeholders. These fingerprints contain the literal
+# value "replace-with-strong-secret-key-min-32-chars", not a deployable secret.
+34516cee5bfa323094b873148b7007abcbb33fd1:README.md:generic-api-key:268
+525296f813ab293355160f27ab7f5a4a0b44a606:README.md:generic-api-key:268
+4d5d683f0f47f6de0efa11fdcc308fdf3ce03bd7:.env.example:generic-api-key:4

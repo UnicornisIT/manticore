@@ -19,7 +19,13 @@ class RepositoryQualityTests(unittest.TestCase):
         self.assertIn("python -m unittest discover -s tests", workflow)
         self.assertIn("ruff check .", workflow)
         self.assertIn("run: mypy", workflow)
-        self.assertIn("gitleaks/gitleaks-action", workflow)
+        self.assertIn("gitleaks/gitleaks-action@v3", workflow)
+        self.assertIn("GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}", workflow)
+        self.assertIn('GITLEAKS_ENABLE_COMMENTS: "false"', workflow)
+        self.assertIn("pull-requests: read", workflow)
+        self.assertNotIn("continue-on-error", workflow)
+        self.assertIn("ubuntu-latest", workflow)
+        self.assertIn("windows-latest", workflow)
 
     def test_changelog_codeowners_and_repository_metadata_exist(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

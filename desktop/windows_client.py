@@ -112,6 +112,11 @@ def classify_source_value(value: str) -> str:
     lowered = value.casefold()
     if value.startswith(("\\\\", "//")) or re.match(r"^[a-zA-Z]:[\\/]", value):
         return "filesystem_path"
+    # The packaged client runs on Windows and intentionally rejects root-relative
+    # values such as /data/base.db there. Absolute POSIX paths are accepted only
+    # when the code is actually executing on a POSIX host (tests and tooling).
+    if os.name != "nt" and value.startswith("/"):
+        return "filesystem_path"
     if lowered.startswith(("http://", "https://")):
         return "server_url"
     raise AmbiguousSourceError(

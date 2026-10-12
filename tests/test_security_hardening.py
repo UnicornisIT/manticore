@@ -2,7 +2,6 @@ import os
 import re
 import sqlite3
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -11,15 +10,10 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SECURITY_UPLOAD_DIR = tempfile.mkdtemp(prefix="manticore_security_tests_")
-os.environ.setdefault("SECRET_KEY", "security-test-secret")
-os.environ.setdefault("ADMIN_DEFAULT_PASSWORD", "security-test-admin-password")
-os.environ.setdefault("UPLOAD_FOLDER", SECURITY_UPLOAD_DIR)
-os.environ.setdefault("DB_FILENAME", "security-test.db")
-os.environ.setdefault("EMAIL_DNS_DISABLE", "1")
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-import app as manticore
+from tests.app_fixture import manticore
 from config import MOODLE_PASSWORD_PLACEHOLDER
 
 

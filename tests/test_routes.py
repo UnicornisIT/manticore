@@ -1,10 +1,7 @@
 import unittest
 
-from tests import test_app as app_tests
+from tests.app_fixture import manticore
 from routes import ROUTE_MODULES
-
-
-manticore = app_tests.manticore
 
 
 class BlueprintRouteTests(unittest.TestCase):
