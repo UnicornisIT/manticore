@@ -13,6 +13,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/UnicornisIT/manticore" alt="License: MIT"></a>
 </p>
 
+<p align="center">
+  <b>Русский</b> · <a href="README.en.md">English</a>
+</p>
+
 # Manticore
 
 Manticore — Flask/SQLite-приложение и Windows-клиент для приёмной комиссии:
