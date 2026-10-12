@@ -167,7 +167,10 @@ class DatabaseSafetyTests(unittest.TestCase):
             os.utime(old, (now - 31 * 86400, now - 31 * 86400))
             os.utime(recent, (now - 2 * 86400, now - 2 * 86400))
             removed = db_safety.prune_backups_by_age(root, 'baze_backup_*.db', 30, now=now)
-            self.assertEqual(removed, [old])
+            # Windows runners may canonicalize the same temporary directory to
+            # its DOS short path (RUNNER~1) while tempfile returns the long path.
+            self.assertEqual([path.name for path in removed], [old.name])
+            self.assertTrue(os.path.samefile(removed[0].parent, old.parent))
             self.assertFalse(old.exists())
             self.assertTrue(recent.exists())
             self.assertTrue(unrelated.exists())
