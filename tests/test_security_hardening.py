@@ -231,9 +231,18 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertNotIn('show_admin_password_notice "$ADMIN_PASSWORD"', deploy)
 
     def test_ci_audits_server_and_desktop_dependency_sets(self):
-        workflow = (PROJECT_ROOT / ".github" / "workflows" / "pip-audit.yml").read_text(encoding="utf-8")
-        self.assertIn("pip-audit -r requirements-prod.lock", workflow)
-        self.assertIn("pip-audit -r requirements-desktop.lock", workflow)
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+        self.assertIn("pip-audit -r requirements-prod.lock --no-deps --disable-pip", workflow)
+        self.assertIn("pip-audit -r requirements-desktop.lock --no-deps --disable-pip", workflow)
+        self.assertFalse((PROJECT_ROOT / ".github" / "workflows" / "pip-audit.yml").exists())
+
+    def test_audited_lock_files_pin_every_requirement(self):
+        # pip-audit --no-deps --disable-pip is only sound for fully pinned files.
+        for name in ("requirements-prod.lock", "requirements-desktop.lock"):
+            for line in (PROJECT_ROOT / name).read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.assertRegex(line, r"^[A-Za-z0-9._-]+==[^\s;]+$", f"{name}: {line}")
 
 
 if __name__ == "__main__":
