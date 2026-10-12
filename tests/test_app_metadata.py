@@ -199,10 +199,12 @@ class AppMetadataTests(unittest.TestCase):
     def test_readme_contacts_are_generated_from_runtime_metadata(self):
         import sync_app_metadata
 
-        source = (PROJECT_ROOT / 'README.md').read_text(encoding='utf-8')
-        self.assertEqual(source.count(sync_app_metadata.START), 1)
-        self.assertEqual(source.count(sync_app_metadata.END), 1)
-        self.assertIn(sync_app_metadata.render_contacts(), source)
+        for name in sync_app_metadata.READMES:
+            with self.subTest(readme=name):
+                source = (PROJECT_ROOT / name).read_text(encoding='utf-8')
+                self.assertEqual(source.count(sync_app_metadata.START), 1)
+                self.assertEqual(source.count(sync_app_metadata.END), 1)
+                self.assertIn(sync_app_metadata.render_contacts(name), source)
         self.assertTrue(sync_app_metadata.sync_readme(check=True))
 
 
