@@ -1568,7 +1568,10 @@ def current_endpoint_name():
 @app.context_processor
 def inject_template_globals():
     def url_for_with_query(endpoint, **updates):
-        args = request.args.to_dict(flat=True) if has_request_context() else {}
+        args = {
+            key: values if len(values) > 1 else values[0]
+            for key, values in request.args.lists()
+        } if has_request_context() else {}
         for key, value in updates.items():
             if value is None:
                 args.pop(key, None)
@@ -8941,8 +8944,11 @@ def get_all_students(
         query += " AND COALESCE(NULLIF(s.current_campaign_year, ''), s.source_campaign_year)=?"
         params.append(normalize_campaign_year(campaign_year, get_active_campaign_year()))
     if cohort:
-        query += " AND s.cohort1 = ?"
-        params.append(cohort)
+        selected_cohorts = [cohort] if isinstance(cohort, str) else cohort
+        selected_cohorts = list(dict.fromkeys(value.strip() for value in selected_cohorts if value and value.strip()))
+        if selected_cohorts:
+            query += f" AND s.cohort1 IN ({','.join('?' for _ in selected_cohorts)})"
+            params.extend(selected_cohorts)
     parsed_order_filter = parse_enrollment_order_filter_value(enrollment_order)
     if parsed_order_filter:
         order_number, order_date = parsed_order_filter
@@ -10478,7 +10484,7 @@ def students_duplicates():
 def students_list():
     order_by = request.args.get('order_by', 'username')
     order_dir = request.args.get('order_dir', 'asc')
-    cohort = request.args.get('cohort')
+    cohort = request.args.getlist('cohort')
     enrollment_order = request.args.get('enrollment_order')
     lastname = request.args.get('lastname')
     firstname = request.args.get('firstname')
@@ -10543,7 +10549,7 @@ def students_migration_calendar():
 def download_students():
     order_by = request.args.get('order_by', 'username')
     order_dir = request.args.get('order_dir', 'asc')
-    cohort = request.args.get('cohort')
+    cohort = request.args.getlist('cohort')
     enrollment_order = request.args.get('enrollment_order')
     lastname = request.args.get('lastname')
     firstname = request.args.get('firstname')

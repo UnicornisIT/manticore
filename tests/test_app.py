@@ -1021,6 +1021,48 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertNotIn('Иванов', body)
         self.assertRegex(body, r'href="/students_list\?[^"]*cohort=26ФМ-11-1[^"]*lastname=П[^"]*order_by=lastname')
 
+    def test_students_multiple_groups_survive_sort_and_excel_export(self):
+        from html import unescape
+        from urllib.parse import parse_qs, urlsplit
+
+        with sqlite3.connect(manticore.DB_PATH) as conn:
+            for username, group, status in (
+                ('ld_one', '26ЛД-11-1', 'active'),
+                ('ld_two', '26ЛД-9-1', 'active'),
+                ('sd_one', '26СД-11-1', 'active'),
+                ('ld_expelled', '26ЛД-9-1', 'expelled'),
+            ):
+                conn.execute(
+                    '''INSERT INTO students (username, password, firstname, lastname, cohort1, status)
+                       VALUES (?, 'cron', 'Имя', 'Фамилия', ?, ?)''',
+                    (username, group, status),
+                )
+        client = manticore.app.test_client()
+        self.login_session(client)
+        groups = ['26ЛД-11-1', '26ЛД-9-1']
+        response = client.get('/students_list', query_string={'cohort': groups, 'order_dir': 'desc'})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('ld_one', body)
+        self.assertIn('ld_two', body)
+        self.assertNotIn('sd_one', body)
+        self.assertNotIn('ld_expelled', body)
+        self.assertEqual(body.count(' checked'), 2)
+        links = [unescape(link) for link in re.findall(r'href="([^"]+)"', body)]
+        export_url = next(link for link in links if urlsplit(link).path == '/students/download')
+        sort_url = next(link for link in links if urlsplit(link).path == '/students_list'
+                        and parse_qs(urlsplit(link).query).get('order_by') == ['lastname'])
+        for link in (export_url, sort_url):
+            self.assertEqual(parse_qs(urlsplit(link).query)['cohort'], groups)
+            self.assertEqual(client.get(link).status_code, 200)
+        exported = pd.read_excel(io.BytesIO(client.get(export_url).data))
+        self.assertEqual(exported['username'].tolist(), ['ld_two', 'ld_one'])
+        self.assertEqual(set(exported['cohort1']), set(groups))
+        self.assertEqual(len(manticore.get_all_students(cohort=groups + [groups[0], ''])), 2)
+        self.assertEqual(len(manticore.get_all_students(cohort=groups[0])), 1)
+        self.assertEqual(len(manticore.get_all_students(cohort=[])), 3)
+        self.assertEqual(manticore.get_all_students(cohort=["' OR 1=1 --"]), [])
+
     def test_students_can_filter_sort_and_export_by_enrollment_order(self):
         with sqlite3.connect(manticore.DB_PATH) as conn:
             students = [

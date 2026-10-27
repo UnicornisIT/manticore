@@ -4,6 +4,7 @@
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/students_list.css') }}">
 <script src="{{ url_for('static', filename='js/students-migration-datepicker.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/students-group-filter.js') }}" defer></script>
 {% endblock %}
 {% block content %}
 {% macro sort_link(column, label) -%}
@@ -23,12 +24,23 @@
         <input data-live-search-input type="text" name="lastname" placeholder="Поиск по фамилии" value="{{ request.args.get('lastname', '') }}">
         <input data-live-search-input type="text" name="username" placeholder="Поиск по логину" value="{{ request.args.get('username', '') }}">
         {% if cohorts %}
-        <select name="cohort">
-            <option value="">Все группы</option>
-            {% for c in cohorts %}
-            <option value="{{ c }}" {% if request.args.get('cohort') == c %}selected{% endif %}>{{ c }}</option>
-            {% endfor %}
-        </select>
+        {% set selected_cohorts = request.args.getlist('cohort')|reject('equalto', '')|list %}
+        <details class="students-group-filter" data-group-filter>
+            <summary><span data-group-summary>{% if selected_cohorts %}Группы: {{ selected_cohorts|length }}{% else %}Все группы{% endif %}</span><span aria-hidden="true">▾</span></summary>
+            <div class="students-group-popup">
+                <input type="search" placeholder="Найти группы, например ЛД" aria-label="Поиск групп" data-group-search>
+                <div class="students-group-actions">
+                    <button type="button" data-group-select>Выбрать найденные</button>
+                    <button type="button" data-group-clear>Снять выбор</button>
+                </div>
+                <div class="students-group-options">
+                    {% for c in cohorts if c %}
+                    <label data-group-option><input type="checkbox" name="cohort" value="{{ c }}" {% if c in selected_cohorts %}checked{% endif %}><span>{{ c }}</span></label>
+                    {% endfor %}
+                </div>
+                <p data-group-empty hidden>Группы не найдены</p>
+            </div>
+        </details>
         {% endif %}
         {% if enrollment_orders %}
         <select name="enrollment_order">
@@ -67,7 +79,7 @@
         </fieldset>
         <button type="submit" class="btn">Применить фильтры</button>
         <a href="{{ url_for('students_list') }}" class="btn btn-secondary">Очистить</a>
-        <a data-live-search-export href="{{ url_for('download_students', **request.args) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
+        <a data-live-search-export href="{{ url_for('download_students', **request.args.to_dict(flat=False)) }}" class="btn btn-secondary btn-download">Экспорт Excel</a>
     </div>
 </form>
 <div class="students-table-wrap">

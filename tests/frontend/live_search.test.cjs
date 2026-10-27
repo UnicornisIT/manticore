@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
-function fixture() {
+function fixture(cohorts = ['26ЛД-9И-1']) {
   const timers = new Set();
   const requests = [];
   const document = new EventTarget();
@@ -34,7 +34,7 @@ function fixture() {
     clearTimeout: callback => timers.delete(callback),
   };
   const context = vm.createContext({ window, document, URL, URLSearchParams, AbortController, Event,
-    FormData: class { *[Symbol.iterator]() { yield ['lastname', input.value]; yield ['cohort', '26ЛД-9И-1']; yield ['order_by', 'username']; yield ['order_dir', 'asc']; } },
+    FormData: class { *[Symbol.iterator]() { yield ['lastname', input.value]; for (const cohort of cohorts) yield ['cohort', cohort]; yield ['order_by', 'username']; yield ['order_dir', 'asc']; } },
     DOMParser: class { parseFromString(html) { return { querySelector: () => ({ childNodes: [html] }) }; } },
     fetch: (url, options) => new Promise(resolve => requests.push({ url: String(url), options,
       respond: html => resolve({ ok: true, text: async () => html }) })),
@@ -48,6 +48,18 @@ function fixture() {
   };
 }
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+test('group checkbox changes preserve every selected group in list, sorting and export', () => {
+  const groups = ['26ЛД-11-1', '26ЛД-9-1'];
+  const page = fixture(groups);
+  const change = new Event('change');
+  Object.defineProperty(change, 'target', { value: { tagName: 'INPUT', name: 'cohort' } });
+  page.form.dispatchEvent(change);
+  assert.equal(page.requests.length, 1);
+  for (const url of [page.requests[0].url, page.exportLink.href, page.sortLink.href]) {
+    assert.deepEqual(new URL(url).searchParams.getAll('cohort'), groups);
+  }
+});
 
 test('list replaces only results, preserving input, filters, sort and export', async () => {
   const page = fixture();

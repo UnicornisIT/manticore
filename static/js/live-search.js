@@ -92,7 +92,7 @@
         }
       }
       const schedules = Array.from(form.querySelectorAll('[data-live-search-input]'), input => bind(input, update, invalidate));
-      form.addEventListener('change', event => { if (event.target.tagName === 'SELECT') { schedules.forEach(run => run.cancel()); update(); } });
+      form.addEventListener('change', event => { if (event.target.tagName === 'SELECT' || event.target.name === 'cohort') { schedules.forEach(run => run.cancel()); update(); } });
       form.addEventListener('submit', event => { event.preventDefault(); schedules.forEach(run => run.cancel()); update(); });
     });
   }

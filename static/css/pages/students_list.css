@@ -1,5 +1,10 @@
 .students-filter {
         margin-bottom: 18px;
+        padding: 13px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-surface);
+        box-shadow: var(--shadow-sm);
     }
     .students-filter-row {
         display: flex;
@@ -101,6 +106,74 @@
         margin-top: 6px;
         font-family: Consolas, monospace;
     }
+.students-group-filter {
+    position: relative;
+    min-width: 160px;
+}
+.students-group-filter > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-sizing: border-box;
+    height: 38px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    cursor: pointer;
+    list-style: none;
+    font-size: 15px;
+}
+.students-group-filter > summary::-webkit-details-marker { display: none; }
+.students-group-filter > summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.students-group-popup {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 31;
+    box-sizing: border-box;
+    width: min(320px, calc(100vw - 60px));
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-md);
+}
+.students-group-popup input[type="search"] { width: 100%; min-width: 0; }
+.students-group-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.students-group-actions button {
+    padding: 6px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+.students-group-options { max-height: 260px; overflow-y: auto; }
+.students-group-options label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 4px;
+    margin: 0;
+    cursor: pointer;
+}
+.students-group-options label:hover { background: var(--bg-hover); }
+.students-group-options label[hidden] { display: none; }
+.students-group-options input[type="checkbox"] {
+    flex: 0 0 16px;
+    width: 16px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0;
+    accent-color: var(--accent);
+}
 .students-date-filter {
     display: flex;
     align-items: center;
