@@ -3672,6 +3672,31 @@ class ManticoreAppTests(unittest.TestCase):
         self.assertEqual(rows_by_login['26111027']['source'], 'Приказ')
         self.assertTrue(plan['summary']['can_confirm'])
 
+    def test_pdf_enrollment_order_extracts_text_with_pinned_reader(self):
+        from pypdf import PdfWriter
+        from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
+
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=300, height=200)
+        font = DictionaryObject({
+            NameObject('/Type'): NameObject('/Font'),
+            NameObject('/Subtype'): NameObject('/Type1'),
+            NameObject('/BaseFont'): NameObject('/Helvetica'),
+        })
+        page[NameObject('/Resources')] = DictionaryObject({
+            NameObject('/Font'): DictionaryObject({NameObject('/F1'): font}),
+        })
+        content = DecodedStreamObject()
+        content.set_data(b'BT /F1 12 Tf 20 100 Td (Synthetic enrollment order) Tj ET')
+        page[NameObject('/Contents')] = content
+        pdf_path = os.path.join(TEST_UPLOAD_DIR, 'synthetic-order.pdf')
+        writer.write(pdf_path)
+
+        with mock.patch.object(manticore, 'dataframe_from_order_text_lines', return_value=mock.sentinel.frame) as parse:
+            result = manticore.read_pdf_enrollment_order_dataframe(pdf_path)
+        self.assertIs(result, mock.sentinel.frame)
+        parse.assert_called_once_with(['Synthetic enrollment order'])
+
     def test_docx_enrollment_order_paragraph_blocks_use_official_specialty_names(self):
         from docx import Document
 

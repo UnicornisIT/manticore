@@ -16,9 +16,9 @@ class DependencyMetadataTests(unittest.TestCase):
         self.assertIn("gunicorn>=23.0,<24.0", project["optional-dependencies"]["prod"])
         self.assertIn("pywebview>=5.0,<7.0", project["optional-dependencies"]["desktop"])
         self.assertTrue(any(item.startswith("ruff") for item in project["optional-dependencies"]["dev"]))
-        self.assertIn("pypdf>=6.19.0,<7.0", project["dependencies"])
+        self.assertIn("pypdf>=6.21.2,<7.0", project["dependencies"])
         self.assertIn("Werkzeug>=3.1.9,<4.0", project["dependencies"])
-        self.assertIn("Pillow>=12.3.0,<13.0", project["optional-dependencies"]["desktop"])
+        self.assertIn("Pillow>=13.0.0,<14.0", project["optional-dependencies"]["desktop"])
 
     def test_production_lock_is_fully_pinned_and_used_by_linux_scripts(self):
         lock_lines = [
@@ -28,12 +28,13 @@ class DependencyMetadataTests(unittest.TestCase):
         ]
 
         self.assertIn("gunicorn==23.0.0", lock_lines)
-        self.assertIn("pypdf==6.19.0", lock_lines)
+        self.assertIn("pypdf==6.21.2", lock_lines)
         self.assertIn("Werkzeug==3.1.9", lock_lines)
         desktop_lock_lines = (ROOT / "requirements-desktop.lock").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Pillow==12.3.0", desktop_lock_lines)
+        self.assertIn("Pillow==13.0.0", desktop_lock_lines)
+        self.assertIn("pypdf==6.21.2", desktop_lock_lines)
         self.assertTrue(all("==" in line for line in lock_lines))
         self.assertIn("requirements-prod.lock", (ROOT / "deploy.sh").read_text(encoding="utf-8"))
         self.assertIn(

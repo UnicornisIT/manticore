@@ -27,7 +27,7 @@ dependencies = [
     "xlrd>=2.0",
     "python-dotenv>=1.0",
     "python-docx>=1.1",
-    "pypdf>=6.19.0,<7.0",
+    "pypdf>=6.21.2,<7.0",
     "dnspython>=2.6,<3.0",
 ]
 
@@ -44,7 +44,7 @@ prod = [
 desktop = [
     "pywebview>=5.0,<7.0",
     "pystray>=0.19.5,<0.20",
-    "Pillow>=12.3.0,<13.0",
+    "Pillow>=13.0.0,<14.0",
     "pyinstaller>=6.0,<7.0",
 ]
 dev = [
